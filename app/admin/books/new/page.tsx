@@ -339,10 +339,8 @@ export default function AddBookPage() {
           uploadFormData.append("image", imageFile);
 
           const uploadRes = await api.post("/uploads/image", uploadFormData, {
-            headers: { "Content-Type": undefined },
-          }).catch(() => api.post("/uploads/publishing-image", uploadFormData, {
-            headers: { "Content-Type": undefined },
-          }));
+            headers: { "Content-Type": "multipart/form-data" },
+          });
 
           coverImageUrl = uploadRes?.data?.data?.url || uploadRes?.data?.url;
         } catch (uploadErr) {

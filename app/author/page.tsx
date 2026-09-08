@@ -36,20 +36,10 @@ export default function AuthorDashboard() {
           resData = {};
         }
 
-        // Shared local royalties submitted by admin
-        let localEntries: any[] = [];
-        try {
-          localEntries = JSON.parse(localStorage.getItem("harglim_shared_royalties") || "[]");
-        } catch {
-          localEntries = [];
-        }
-
-        const localRoyaltySum = localEntries.reduce((sum: number, item: any) => sum + Number(item.royaltyAmount || 0), 0);
-
         setDashboardData({
           publishedBooks: resData.publishedBooks ?? (resData.books?.length || 0),
           manuscriptsCount: resData.manuscriptsCount ?? (resData.manuscripts?.length || 0),
-          totalEarnings: (resData.accruedKnown || resData.totalEarnings || 0) + localRoyaltySum,
+          totalEarnings: resData.accruedKnown ?? resData.totalEarnings ?? resData.totalRoyalty ?? 0,
           recentBooks: Array.isArray(resData.recentBooks) ? resData.recentBooks : (Array.isArray(resData.books) ? resData.books : []),
           manuscripts: Array.isArray(resData.manuscripts) ? resData.manuscripts : [],
         });

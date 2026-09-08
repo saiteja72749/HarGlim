@@ -149,7 +149,7 @@ export default function AdminUsersPage() {
         name: createForm.name.trim(),
         email: createForm.email.trim(),
         password: createForm.password,
-        role: createForm.role,
+        role: createForm.role === "user" ? "reader" : createForm.role,
         isActive: Boolean(createForm.isActive),
       };
 
@@ -259,35 +259,19 @@ export default function AdminUsersPage() {
     ) {
       return;
     }
-
     setDeletingId(id);
     try {
-      try {
-        await api.delete(`/admin/users/${id}`);
-      } catch (delErr: any) {
-        // If 404 from backend (e.g. Render backend build hasn't finished deploying DELETE route),
-        // fallback to soft-delete via status update
-        if (delErr.response?.status === 404) {
-          console.warn("DELETE /admin/users/:id returned 404; falling back to status update soft delete.");
-          await api.patch(`/admin/users/${id}/status`, { isActive: false, status: "suspended" }).catch(() =>
-            api.put(`/admin/users/${id}/status`, { isActive: false, status: "suspended" }).catch(() =>
-              api.put(`/admin/users/${id}`, { isActive: false, status: "Suspended" })
-            )
-          );
-        } else {
-          throw delErr;
-        }
-      }
+      await api.delete(`/admin/users/${id}`);
 
-      // Production-safe soft delete sets isActive=false, status="Suspended"
+      // Backend performs soft delete setting isActive=false
       setUsers((prev) =>
         prev.map((u: any) =>
           (u.id || u._id) === id
-            ? { ...u, isActive: false, status: "Suspended" }
+            ? { ...u, status: "Suspended", isActive: false }
             : u
         )
       );
-      toast.success(`User "${name}" has been deactivated successfully (soft-deleted).`);
+      toast.success(`User "${name}" deactivated (soft deleted) successfully.`);
     } catch (err: any) {
       console.error("Failed to delete user:", err);
       toast.error(err.response?.data?.message || "Failed to deactivate user.");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -46,6 +46,10 @@ export default function NewManuscriptPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+  const [packages, setPackages] = useState<any[]>([]);
+  const [selectedPackageId, setSelectedPackageId] = useState<string>("");
+  const [loadingPackages, setLoadingPackages] = useState(true);
+
   const [formData, setFormData] = useState({
     title: "",
     category: "",
@@ -55,6 +59,27 @@ export default function NewManuscriptPage() {
     previouslyPublished: false,
     agreeToTerms: false,
   });
+
+  // Step 1: Fetch live publish packages from GET /api/publish-packages
+  useEffect(() => {
+    const fetchPackages = async () => {
+      setLoadingPackages(true);
+      try {
+        const res = await api.get("/publish-packages");
+        const list = res.data?.data || res.data || [];
+        const arr = Array.isArray(list) ? list : [];
+        setPackages(arr);
+        if (arr.length > 0) {
+          setSelectedPackageId(arr[0]._id || arr[0].id);
+        }
+      } catch (err) {
+        console.warn("Failed to load publish packages:", err);
+      } finally {
+        setLoadingPackages(false);
+      }
+    };
+    fetchPackages();
+  }, []);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -84,8 +109,13 @@ export default function NewManuscriptPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.title || !formData.category || !formData.synopsis) {
+    if (!formData.title.trim() || !formData.category || !formData.synopsis.trim()) {
       toast.error("Please fill in all required fields");
+      return;
+    }
+
+    if (!selectedPackageId) {
+      toast.error("Please select a valid publishing package");
       return;
     }
 
@@ -102,47 +132,53 @@ export default function NewManuscriptPage() {
     setIsLoading(true);
 
     try {
-      // 1. Upload manuscript file
+      // 1. Upload manuscript file (Single file field named 'document')
       let fileUrl = "";
       try {
         const formDataUpload = new FormData();
         formDataUpload.append("document", file);
-        
-        const uploadRes = await api.post("/authors/me/uploads/document", formDataUpload, {
-          headers: { "Content-Type": undefined },
-        }).catch(() => api.post("/uploads/document", formDataUpload, {
-          headers: { "Content-Type": undefined },
-        })).catch(() => api.post("/uploads/publishing-document", formDataUpload, {
-          headers: { "Content-Type": undefined },
-        }));
 
-        fileUrl = uploadRes?.data?.data?.url || uploadRes?.data?.url || uploadRes?.data?.data?.fileUrl || "";
+        const uploadRes = await api
+          .post("/uploads/document", formDataUpload, {
+            headers: { "Content-Type": "multipart/form-data" },
+          })
+          .catch(() =>
+            api.post("/authors/me/uploads/document", formDataUpload, {
+              headers: { "Content-Type": "multipart/form-data" },
+            })
+          );
+
+        fileUrl =
+          uploadRes?.data?.data?.url ||
+          uploadRes?.data?.url ||
+          uploadRes?.data?.data?.fileUrl ||
+          uploadRes?.data?.fileUrl ||
+          "";
+
+        if (!fileUrl) {
+          throw new Error("Could not retrieve file URL from manuscript upload.");
+        }
       } catch (uploadErr: any) {
-        console.warn("Document file upload warning:", uploadErr);
-        throw new Error(uploadErr?.response?.data?.message || "Failed to upload manuscript document file.");
+        console.error("Document file upload error:", uploadErr);
+        throw new Error(
+          uploadErr?.response?.data?.message || "Failed to upload manuscript document file."
+        );
       }
 
-      // 2. Submit Publish Request (POST /api/publish-requests)
-      const numericWordCount = formData.estimatedWordCount ? Number(formData.estimatedWordCount) : 50000;
-      
-      const publishPayload: Record<string, any> = {
+      // 2. Submit Publish Request (POST /api/publish-requests with real package ObjectId)
+      const numericWordCount = formData.estimatedWordCount
+        ? Math.max(1, Number(formData.estimatedWordCount))
+        : 50000;
+
+      const publishPayload = {
         title: formData.title.trim(),
         genre: formData.category,
-        category: formData.category,
-        description: formData.synopsis.trim(),
-        synopsis: formData.synopsis.trim(),
         wordCount: numericWordCount,
-        estimatedWordCount: numericWordCount,
-        packageId: "basic", // Default publishing package
+        packageId: selectedPackageId,
         fileUrl,
-        manuscriptUrl: fileUrl,
-        targetAudience: formData.targetAudience.trim() || undefined,
-        previouslyPublished: Boolean(formData.previouslyPublished),
       };
-      
-      const publishRes = await api.post("/publish-requests", publishPayload)
-        .catch(() => api.post("/authors/me/manuscripts", publishPayload))
-        .catch(() => api.post("/publish/request", publishPayload));
+
+      const publishRes = await api.post("/publish-requests", publishPayload);
 
       if (publishRes.data?.success || publishRes.status === 201 || publishRes.status === 200) {
         toast.success("Manuscript submitted successfully for editorial review! 📚");
@@ -217,6 +253,33 @@ export default function NewManuscriptPage() {
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="publishPackage">
+                      Publishing Package <span className="text-destructive">*</span>
+                    </Label>
+                    <Select
+                      value={selectedPackageId}
+                      onValueChange={setSelectedPackageId}
+                      disabled={loadingPackages}
+                    >
+                      <SelectTrigger id="publishPackage">
+                        <SelectValue placeholder={loadingPackages ? "Loading packages..." : "Select a publishing package"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {packages.map((pkg) => (
+                          <SelectItem key={pkg._id || pkg.id} value={pkg._id || pkg.id}>
+                            {pkg.name} — ₹{(pkg.price || 0).toLocaleString()}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {packages.length > 0 && selectedPackageId && (
+                      <p className="text-xs text-muted-foreground">
+                        {packages.find((p) => (p._id || p.id) === selectedPackageId)?.description}
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-2">

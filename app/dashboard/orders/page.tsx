@@ -163,9 +163,7 @@ export default function OrdersPage() {
     setSubmittingUtrMap((prev) => ({ ...prev, [orderId]: true }));
 
     try {
-      await api.post(`/orders/${orderId}/verify-payment`, { utr }).catch(() =>
-        api.patch(`/orders/${orderId}`, { utr, paymentStatus: "VERIFICATION_PENDING" })
-      );
+      await api.put(`/orders/${orderId}/verify-payment`, { utr });
 
       toast.success("UTR submitted successfully! Waiting for admin verification.");
       setUtrInputMap((prev) => ({ ...prev, [orderId]: "" }));
@@ -191,8 +189,20 @@ export default function OrdersPage() {
 
       const invoiceId = matchingInvoice?._id || matchingInvoice?.id;
       if (invoiceId) {
-        window.open(`${api.defaults.baseURL}/users/${userId}/invoices/${invoiceId}/download`, "_blank");
         toast.success("Downloading invoice...");
+        const response = await api.get(
+          `/users/${userId}/invoices/${invoiceId}/download`,
+          { responseType: "blob" }
+        );
+
+        const url = window.URL.createObjectURL(response.data);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `invoice-${invoiceId}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
       } else {
         toast.error("Invoice document will be generated once payment verification completes.");
       }

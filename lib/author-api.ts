@@ -133,10 +133,10 @@ export async function uploadAuthorImage(file: File) {
   formData.append('image', file);
 
   const { data } = await api.post('/authors/me/uploads/image', formData, {
-    headers: { 'Content-Type': undefined },
+    headers: { 'Content-Type': 'multipart/form-data' },
   }).catch(() =>
     api.post('/uploads/image', formData, {
-      headers: { 'Content-Type': undefined },
+      headers: { 'Content-Type': 'multipart/form-data' },
     })
   );
 
@@ -152,10 +152,10 @@ export async function uploadAuthorDocument(file: File) {
   formData.append('document', file);
 
   const { data } = await api.post('/authors/me/uploads/document', formData, {
-    headers: { 'Content-Type': undefined },
+    headers: { 'Content-Type': 'multipart/form-data' },
   }).catch(() =>
     api.post('/uploads/document', formData, {
-      headers: { 'Content-Type': undefined },
+      headers: { 'Content-Type': 'multipart/form-data' },
     })
   );
 
