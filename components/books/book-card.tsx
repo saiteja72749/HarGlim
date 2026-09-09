@@ -6,12 +6,12 @@ import { motion, useMotionValue, useSpring, useTransform } from "framer-motion";
 import { Star, ShoppingCart, Heart, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import type { Book, Author } from "@/types";
+import type { Book } from "@/types";
 import { useCartStore } from "@/store/cart-store";
 import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-import { cn } from "@/lib/utils";
+import { cn, getBookAuthorInfo } from "@/lib/utils";
 
 import { useState, useEffect } from "react";
 
@@ -96,12 +96,8 @@ export function BookCard({
     }
   };
 
-  const authorName =
-    book.author && typeof book.author === "object"
-      ? (book.author as Author)?.name || "Unknown Author"
-      : typeof book.author === "string" && !/^[0-9a-fA-F]{24}$/.test(book.author)
-      ? book.author
-      : (book as any).authorName || "Unknown Author";
+  const authorInfo = getBookAuthorInfo(book);
+  const authorName = authorInfo.name;
   const price = book.discountPrice || book.price;
   const hasDiscount = false;
   const discountPercent = 0;

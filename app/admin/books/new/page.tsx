@@ -350,9 +350,17 @@ export default function AddBookPage() {
 
       // 3. CONSTRUCT STRICT JSON PAYLOAD FOR BACKEND SPECIFICATIONS
       const numericPrice = Number(formData.price) || 0;
+      const targetAuthorDisplayName = (
+        authorType === "new"
+          ? newAuthorName
+          : authorType === "external"
+          ? externalAuthorName
+          : (authorsList.find((a) => (a._id || a.id) === finalAuthorId)?.name || "")
+      ).trim();
 
       const jsonPayload: Record<string, any> = {
         title: formData.title.trim(),
+        authorName: targetAuthorDisplayName || undefined,
         description: formData.description.trim(),
         category: formData.category,
         author: finalAuthorId, // Selected author user ID (never falls back to admin)

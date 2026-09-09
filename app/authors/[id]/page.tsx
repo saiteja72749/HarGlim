@@ -31,6 +31,7 @@ import { ErrorState } from '@/components/ui/error-state';
 import type { Author, Book } from '@/types';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
+import { getBookAuthorInfo } from '@/lib/utils';
 
 const socialIcons: Record<string, React.ElementType> = {
   twitter: Twitter,
@@ -54,73 +55,97 @@ export default function AuthorDetailPage() {
     setLoading(true);
     setError(false);
     try {
-      // 1. Fetch Author Details
-      const authorRes = await api
-        .get(`/authors/${params.id}`)
-        .catch(() => api.get(`/users/${params.id}`))
-        .catch(async () => {
-          const listRes = await api.get('/authors');
-          const items =
-            listRes.data?.data?.authors || listRes.data?.data || listRes.data || [];
-          const found = Array.isArray(items)
-            ? items.find((a: any) => (a.id || a._id) === params.id)
-            : null;
-          if (found) return { data: { data: found } };
-          throw new Error('Author not found');
-        });
-
-      const authorData = authorRes.data?.data || authorRes.data;
-      if (authorData) {
-        setAuthor(authorData as Author);
-      } else {
-        setAuthor(null);
+      // 1. Attempt to Fetch Author Profile
+      let authorData: Author | null = null;
+      try {
+        const authorRes = await api
+          .get(`/authors/${params.id}`)
+          .catch(() => api.get(`/users/${params.id}`))
+          .catch(async () => {
+            const listRes = await api.get('/authors');
+            const items =
+              listRes.data?.data?.authors || listRes.data?.data || listRes.data || [];
+            const found = Array.isArray(items)
+              ? items.find((a: any) => (a.id || a._id) === params.id)
+              : null;
+            if (found) return { data: { data: found } };
+            return null;
+          });
+        const extracted = authorRes?.data?.data || authorRes?.data;
+        if (extracted && (extracted._id || extracted.id || extracted.name)) {
+          authorData = extracted as Author;
+        }
+      } catch (err) {
+        console.warn('Author profile fetch warning:', err);
       }
 
-      // 2. Fetch Author's Books with Fallbacks
+      // 2. Fetch Author's Books with multi-level fallbacks
+      let fetchedBooks: Book[] = [];
       try {
-        let fetchedBooks: Book[] = [];
-        const booksRes = await api
-          .get(`/authors/${params.id}/books`)
-          .catch(() => api.get('/books', { params: { author: params.id } }))
-          .catch(() => null);
+        const [authorBooksRes, allBooksRes] = await Promise.allSettled([
+          api.get(`/authors/${params.id}/books`).catch(() => null),
+          api.get('/books', { params: { limit: 100 } }).catch(() => null),
+        ]);
 
-        if (booksRes) {
-          const bData = booksRes.data?.data || booksRes.data;
+        if (authorBooksRes.status === 'fulfilled' && authorBooksRes.value?.data) {
+          const bData = authorBooksRes.value.data?.data || authorBooksRes.value.data;
           if (Array.isArray(bData)) {
             fetchedBooks = bData;
           }
         }
 
-        // If specific author books endpoint returned empty, fetch all books & filter client side
-        if (fetchedBooks.length === 0) {
-          const allBooksRes = await api.get('/books').catch(() => null);
-          if (allBooksRes) {
-            const allBData = allBooksRes.data?.data || allBooksRes.data;
-            const allList: Book[] = Array.isArray(allBData) ? allBData : [];
-            const authorNameLower = (authorData?.name || '').toLowerCase();
+        if (fetchedBooks.length === 0 && allBooksRes.status === 'fulfilled' && allBooksRes.value?.data) {
+          const allRaw =
+            allBooksRes.value.data?.data?.books ||
+            allBooksRes.value.data?.data ||
+            allBooksRes.value.data?.books ||
+            allBooksRes.value.data ||
+            [];
+          const allList: Book[] = Array.isArray(allRaw) ? allRaw : [];
+          const targetId = String(params.id || '').toLowerCase();
+          const authorNameLower = (authorData?.name || '').toLowerCase();
 
-            fetchedBooks = allList.filter((b) => {
-              const bAuthId =
-                typeof b.author === 'object' ? b.author?._id : b.author;
-              const bAuthName =
-                typeof b.author === 'object'
-                  ? (b.author?.name || '').toLowerCase()
-                  : (b.author || '').toLowerCase();
-              return (
-                bAuthId === params.id ||
-                (authorNameLower && bAuthName.includes(authorNameLower))
-              );
-            });
-          }
+          fetchedBooks = allList.filter((b) => {
+            const bAuthId = String(
+              typeof b.author === 'object' ? b.author?._id || b.author?.id : b.author || ''
+            ).toLowerCase();
+            const bAuthorInfo = getBookAuthorInfo(b);
+            const bAuthName = bAuthorInfo.name.toLowerCase();
+            return (
+              bAuthId === targetId ||
+              (authorNameLower && bAuthName.includes(authorNameLower))
+            );
+          });
         }
-
-        setBooks(fetchedBooks);
       } catch (bErr) {
         console.error('Failed to fetch author books:', bErr);
+      }
+
+      // 3. If authorData is missing but books were matched to this ID, synthesize author profile!
+      if (!authorData && fetchedBooks.length > 0) {
+        const primaryBook = fetchedBooks[0];
+        const resolved = getBookAuthorInfo(primaryBook);
+        authorData = {
+          _id: String(params.id),
+          name: resolved.name,
+          email: '',
+          role: 'author',
+          bio: `Author of "${primaryBook.title}" and published catalog works with Harglim Publishers.`,
+          profilePicture: primaryBook.coverImage || '',
+          bookCount: fetchedBooks.length,
+        };
+      }
+
+      if (authorData) {
+        setAuthor(authorData);
+        setBooks(fetchedBooks);
+      } else {
+        setError(true);
+        setAuthor(null);
         setBooks([]);
       }
     } catch (err) {
-      console.error('Failed to fetch author data:', err);
+      console.error('Failed to process author data:', err);
       setError(true);
       setAuthor(null);
     } finally {

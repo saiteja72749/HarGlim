@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import api from "@/lib/api";
+import { getBookAuthorInfo } from "@/lib/utils";
 import { ErrorState } from "@/components/ui/error-state";
 import { motion } from "framer-motion";
 import {
@@ -123,16 +124,7 @@ export default function AdminBooksPage() {
     typeof category === "object" && category !== null ? category.name : category;
 
   const getAuthorName = (book: any) => {
-    if (book.author && typeof book.author === "object") {
-      return book.author.name || book.author.fullName || "Unknown Author";
-    }
-    if (book.authorName && typeof book.authorName === "string" && book.authorName.trim()) {
-      return book.authorName;
-    }
-    if (typeof book.author === "string" && book.author.trim() && !/^[0-9a-fA-F]{24}$/.test(book.author)) {
-      return book.author;
-    }
-    return "Unknown Author";
+    return getBookAuthorInfo(book).name;
   };
 
   const categories = Array.from(new Set(books.map((b: any) => getCategoryName(b.category)))).filter(Boolean);
@@ -330,9 +322,17 @@ export default function AdminBooksPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge className={getStatusColor(book.status)}>
-                        {getStatusLabel(book.status)}
-                      </Badge>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge className={getStatusColor(book.status)}>
+                          {getStatusLabel(book.status)}
+                        </Badge>
+                        {book.isFeatured && (
+                          <Badge className="bg-amber-500/15 text-amber-700 border border-amber-500/30 text-[10px] gap-1">
+                            <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-500" />
+                            Featured
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>
@@ -353,6 +353,32 @@ export default function AdminBooksPage() {
                               <Edit className="mr-2 h-4 w-4" />
                               Edit
                             </Link>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={async () => {
+                              const bId = book.id || book._id;
+                              const targetFeatured = !book.isFeatured;
+                              try {
+                                await api
+                                  .put(`/admin/books/${bId}`, { isFeatured: targetFeatured })
+                                  .catch(() => api.put(`/books/${bId}`, { isFeatured: targetFeatured }));
+                                setBooks((prev) =>
+                                  prev.map((b) =>
+                                    (b.id || b._id) === bId ? { ...b, isFeatured: targetFeatured } : b
+                                  )
+                                );
+                                toast.success(
+                                  targetFeatured
+                                    ? "Book added to Featured Releases! ⭐"
+                                    : "Book removed from Featured Releases."
+                                );
+                              } catch {
+                                toast.error("Failed to update featured status.");
+                              }
+                            }}
+                          >
+                            <Star className="mr-2 h-4 w-4 text-amber-500" />
+                            {book.isFeatured ? "Unfeature from Home" : "Feature on Home"}
                           </DropdownMenuItem>
                           <AlertDialog>
                             <AlertDialogTrigger asChild>

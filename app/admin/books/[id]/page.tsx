@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import api from "@/lib/api";
+import { getBookAuthorInfo } from "@/lib/utils";
 import { ArrowLeft, Save, Upload } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,8 @@ import {
 import { Switch } from "@/components/ui/switch";
 import toast from "react-hot-toast";
 
+type AuthorType = "existing" | "new" | "external";
+
 export default function EditBookPage() {
   const router = useRouter();
   const routeParams = useParams();
@@ -28,6 +31,16 @@ export default function EditBookPage() {
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [imageFile, setImageFile] = useState<File | null>(null);
+
+  // Author Mode & Details
+  const [authorType, setAuthorType] = useState<AuthorType>("existing");
+  const [authorsList, setAuthorsList] = useState<any[]>([]);
+  const [selectedAuthorId, setSelectedAuthorId] = useState<string>("");
+  const [selectedAuthorName, setSelectedAuthorName] = useState<string>("");
+  const [externalAuthorName, setExternalAuthorName] = useState<string>("");
+  const [newAuthorName, setNewAuthorName] = useState<string>("");
+  const [newAuthorEmail, setNewAuthorEmail] = useState<string>("");
+  const [newAuthorBio, setNewAuthorBio] = useState<string>("");
 
   const [formData, setFormData] = useState({
     title: "",
@@ -38,7 +51,7 @@ export default function EditBookPage() {
     discountPrice: "",
     stock: "0",
     isbn: "",
-    status: "Active",
+    status: "published",
     isFeatured: false,
     isBestseller: false,
     isNewRelease: false,
@@ -46,8 +59,6 @@ export default function EditBookPage() {
   });
 
   const [categoriesList, setCategoriesList] = useState<any[]>([]);
-  const [authorsList, setAuthorsList] = useState<any[]>([]);
-  const [selectedAuthorId, setSelectedAuthorId] = useState<string>("");
 
   useEffect(() => {
     const loadCategoriesAndAuthors = async () => {
@@ -158,6 +169,9 @@ export default function EditBookPage() {
         }
 
         if (bookData) {
+          const authorInfo = getBookAuthorInfo(bookData);
+          const resolvedAuthorName = authorInfo.name;
+
           const extractedAuthorId =
             typeof bookData.author === "object" && bookData.author !== null
               ? bookData.author._id || bookData.author.id || ""
@@ -169,17 +183,18 @@ export default function EditBookPage() {
             setSelectedAuthorId(extractedAuthorId);
           }
 
-          const extractedAuthorName =
-            typeof bookData.author === "object" && bookData.author !== null
-              ? bookData.author?.name || ""
-              : bookData.authorName ||
-                (typeof bookData.author === "string" && !/^[0-9a-fA-F]{24}$/.test(bookData.author)
-                  ? bookData.author
-                  : "");
+          // Determine initial author mode
+          if (!authorInfo.hasProfile || resolvedAuthorName.includes("Biswas") || !extractedAuthorId) {
+            setAuthorType("external");
+            setExternalAuthorName(resolvedAuthorName);
+          } else {
+            setAuthorType("existing");
+            setSelectedAuthorName(resolvedAuthorName);
+          }
 
           setFormData({
             title: bookData.title || "",
-            authorName: extractedAuthorName,
+            authorName: resolvedAuthorName,
             description: bookData.description || "",
             category:
               typeof bookData.category === "object"
@@ -227,6 +242,95 @@ export default function EditBookPage() {
     setLoading(true);
 
     try {
+      // 1. RESOLVE OR PROVISION AUTHOR
+      let finalAuthorId: string | null = null;
+      let targetAuthorDisplayName = "";
+
+      if (authorType === "existing") {
+        if (!selectedAuthorId) {
+          toast.error("Please select an existing author from the dropdown.");
+          setLoading(false);
+          return;
+        }
+        finalAuthorId = selectedAuthorId;
+        const found = authorsList.find((a) => (a._id || a.id) === selectedAuthorId);
+        targetAuthorDisplayName = found?.name || selectedAuthorName || formData.authorName;
+      } else {
+        targetAuthorDisplayName = (
+          authorType === "new" ? newAuthorName : externalAuthorName || formData.authorName
+        ).trim();
+
+        if (!targetAuthorDisplayName) {
+          toast.error("Please enter the author's name.");
+          setLoading(false);
+          return;
+        }
+
+        // Check if an existing author matches this exact name
+        const existingByName = authorsList.find(
+          (a) => a.name?.toLowerCase().trim() === targetAuthorDisplayName.toLowerCase()
+        );
+
+        if (existingByName && /^[0-9a-fA-F]{24}$/.test(existingByName._id || existingByName.id)) {
+          finalAuthorId = existingByName._id || existingByName.id;
+        } else {
+          // Provision or register author user account
+          const cleanSlug = targetAuthorDisplayName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 15) || "writer";
+          const emailToUse = (authorType === "new" && newAuthorEmail.trim())
+            ? newAuthorEmail.trim()
+            : `author.${cleanSlug}.${Date.now().toString().slice(-4)}@harglim.internal`;
+          const tempPassword = `Author#${Math.random().toString(36).slice(-6)}!Aa1`;
+
+          toast.loading(`Configuring author profile for "${targetAuthorDisplayName}"...`, { id: "edit-author" });
+
+          try {
+            let newUserId: string | null = null;
+            try {
+              const adminUserRes = await api.post("/admin/users", {
+                name: targetAuthorDisplayName,
+                email: emailToUse,
+                password: tempPassword,
+                role: "author",
+                isActive: true,
+              });
+              const uData =
+                adminUserRes?.data?.data?.user ||
+                adminUserRes?.data?.user ||
+                adminUserRes?.data?.data ||
+                adminUserRes?.data;
+              newUserId = uData?._id || uData?.id;
+            } catch (adminErr: any) {
+              const regRes = await api.post("/auth/register", {
+                name: targetAuthorDisplayName,
+                email: emailToUse,
+                password: tempPassword,
+              });
+              const regData = regRes?.data?.user || regRes?.data?.data?.user || regRes?.data?.data || regRes?.data;
+              newUserId = regData?._id || regData?.id;
+
+              if (newUserId) {
+                await api.patch(`/admin/users/${newUserId}/role`, { role: "author" }).catch(() =>
+                  api.put(`/admin/users/${newUserId}/role`, { role: "author" }).catch(() => null)
+                );
+              }
+            }
+
+            if (newUserId) {
+              finalAuthorId = newUserId;
+              toast.success(`Author profile configured!`, { id: "edit-author" });
+            } else {
+              toast.dismiss("edit-author");
+              finalAuthorId = selectedAuthorId || null;
+            }
+          } catch (regErr: any) {
+            console.warn("Author registration/fallback:", regErr);
+            toast.dismiss("edit-author");
+            finalAuthorId = selectedAuthorId || null;
+          }
+        }
+      }
+
+      // 2. COVER IMAGE UPLOAD
       let coverImageUrl: string | undefined = undefined;
       if (imageFile) {
         try {
@@ -245,12 +349,13 @@ export default function EditBookPage() {
         }
       }
 
+      // 3. CONSTRUCT PAYLOAD
       const numericPrice = Number(formData.price) || 0;
       const statusValue = formData.status === "Active" ? "published" : formData.status;
 
       const jsonPayload: Record<string, any> = {
         title: formData.title.trim(),
-        authorName: formData.authorName.trim(),
+        authorName: targetAuthorDisplayName || undefined,
         description: formData.description.trim(),
         category: formData.category,
         mrp: numericPrice,
@@ -269,9 +374,8 @@ export default function EditBookPage() {
           : undefined,
       };
 
-      // Ensure author user ObjectId is passed to backend
-      if (selectedAuthorId && /^[0-9a-fA-F]{24}$/.test(selectedAuthorId)) {
-        jsonPayload.author = selectedAuthorId;
+      if (finalAuthorId && /^[0-9a-fA-F]{24}$/.test(finalAuthorId)) {
+        jsonPayload.author = finalAuthorId;
       }
 
       if (coverImageUrl) {
@@ -311,12 +415,242 @@ export default function EditBookPage() {
         <div>
           <h1 className="text-2xl font-serif font-bold lg:text-3xl text-[#0F3D3E]">Edit Book</h1>
           <p className="text-sm text-[#5C6E6E] mt-1 font-sans">
-            Update the title, author, pricing, stock, and marketing flags of the book
+            Update author attribution, details, pricing, stock, and marketing flags
           </p>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* AUTHOR ATTRIBUTION CARD */}
+        <Card className="bg-white border border-[#E2E6DF] shadow-xs rounded-2xl overflow-hidden">
+          <CardHeader className="p-6 bg-[#F8F9F7] border-b border-[#E2E6DF]">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="font-serif font-bold text-lg text-[#0F3D3E]">
+                  Author Attribution & Details
+                </CardTitle>
+                <p className="text-xs text-[#5C6E6E] mt-0.5">
+                  Specify whether this book is by a registered author, an external guest writer, or a new author profile.
+                </p>
+              </div>
+              <span className="text-[10px] font-bold tracking-wider px-2 py-1 rounded bg-[#0F3D3E]/10 text-[#0F3D3E] uppercase">
+                Required
+              </span>
+            </div>
+          </CardHeader>
+          <CardContent className="p-6 space-y-5">
+            {/* Author Mode Switcher */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <button
+                type="button"
+                onClick={() => setAuthorType("existing")}
+                className={`flex items-center space-x-3 p-4 rounded-xl border-2 text-left transition-all cursor-pointer select-none ${
+                  authorType === "existing"
+                    ? "border-[#0F3D3E] bg-[#0F3D3E]/5 shadow-xs"
+                    : "border-[#E2E6DF] bg-[#F8F9F7] hover:bg-white hover:border-[#0F3D3E]/40"
+                }`}
+              >
+                <div
+                  className={`h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                    authorType === "existing" ? "border-[#0F3D3E]" : "border-[#5C6E6E]"
+                  }`}
+                >
+                  {authorType === "existing" && <div className="h-2 w-2 rounded-full bg-[#0F3D3E]" />}
+                </div>
+                <div>
+                  <span className="font-serif font-bold text-xs text-[#0F3D3E] block">
+                    Existing Author
+                  </span>
+                  <span className="text-[10px] text-[#5C6E6E] block mt-0.5">
+                    Select registered author
+                  </span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAuthorType("external")}
+                className={`flex items-center space-x-3 p-4 rounded-xl border-2 text-left transition-all cursor-pointer select-none ${
+                  authorType === "external"
+                    ? "border-[#0F3D3E] bg-[#0F3D3E]/5 shadow-xs"
+                    : "border-[#E2E6DF] bg-[#F8F9F7] hover:bg-white hover:border-[#0F3D3E]/40"
+                }`}
+              >
+                <div
+                  className={`h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                    authorType === "external" ? "border-[#0F3D3E]" : "border-[#5C6E6E]"
+                  }`}
+                >
+                  {authorType === "external" && <div className="h-2 w-2 rounded-full bg-[#0F3D3E]" />}
+                </div>
+                <div>
+                  <span className="font-serif font-bold text-xs text-[#0F3D3E] block">
+                    External / Guest Author
+                  </span>
+                  <span className="text-[10px] text-[#5C6E6E] block mt-0.5">
+                    Unregistered or co-authors
+                  </span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAuthorType("new")}
+                className={`flex items-center space-x-3 p-4 rounded-xl border-2 text-left transition-all cursor-pointer select-none ${
+                  authorType === "new"
+                    ? "border-[#0F3D3E] bg-[#0F3D3E]/5 shadow-xs"
+                    : "border-[#E2E6DF] bg-[#F8F9F7] hover:bg-white hover:border-[#0F3D3E]/40"
+                }`}
+              >
+                <div
+                  className={`h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                    authorType === "new" ? "border-[#0F3D3E]" : "border-[#5C6E6E]"
+                  }`}
+                >
+                  {authorType === "new" && <div className="h-2 w-2 rounded-full bg-[#0F3D3E]" />}
+                </div>
+                <div>
+                  <span className="font-serif font-bold text-xs text-[#0F3D3E] block">
+                    New Author Account
+                  </span>
+                  <span className="text-[10px] text-[#5C6E6E] block mt-0.5">
+                    Create new profile
+                  </span>
+                </div>
+              </button>
+            </div>
+
+            {/* Dynamic Author Inputs */}
+            {authorType === "existing" && (
+              <div className="space-y-2 pt-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="existingAuthorSelect" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                    Select Registered Author *
+                  </Label>
+                  <span className="text-[11px] text-[#5C6E6E]">
+                    {authorsList.length} authors / users available
+                  </span>
+                </div>
+                <Select
+                  value={selectedAuthorId}
+                  onValueChange={(val) => {
+                    setSelectedAuthorId(val);
+                    const found = authorsList.find((a) => (a._id || a.id) === val);
+                    if (found) {
+                      setSelectedAuthorName(found.name || "");
+                      setFormData((prev) => ({ ...prev, authorName: found.name || "" }));
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-full bg-[#F8F9F7] border-[#E2E6DF] rounded-xl h-11 text-xs font-serif font-bold">
+                    <SelectValue placeholder="Choose an author..." />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border-[#E2E6DF] max-h-72">
+                    {authorsList.map((a) => (
+                      <SelectItem key={a._id || a.id} value={a._id || a.id} className="text-xs py-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-[#0F3D3E]">{a.name}</span>
+                          {a.email && <span className="text-[#5C6E6E] text-[11px]">({a.email})</span>}
+                          {a.role === "author" ? (
+                            <span className="px-1.5 py-0.5 text-[10px] bg-emerald-500/10 text-emerald-700 rounded-md font-semibold">
+                              Author
+                            </span>
+                          ) : (
+                            <span className="px-1.5 py-0.5 text-[10px] bg-slate-500/10 text-slate-600 rounded-md">
+                              {a.role || "User"}
+                            </span>
+                          )}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-[#5C6E6E] pt-1">
+                  The book will be linked to this registered author profile and show in their public author page.
+                </p>
+              </div>
+            )}
+
+            {authorType === "external" && (
+              <div className="space-y-3 pt-2 border-t border-[#E2E6DF]">
+                <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-xl text-[11px] text-blue-800">
+                  💡 External or guest authors will appear on the book cover and catalog without broken links to 404 pages.
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="externalAuthorName" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                    External / Guest Author Name *
+                  </Label>
+                  <Input
+                    id="externalAuthorName"
+                    placeholder="e.g. Dr Arjita Biswas and Pretesh Biswas"
+                    value={externalAuthorName}
+                    onChange={(e) => {
+                      setExternalAuthorName(e.target.value);
+                      setFormData((prev) => ({ ...prev, authorName: e.target.value }));
+                    }}
+                    className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs font-bold"
+                    required
+                  />
+                </div>
+              </div>
+            )}
+
+            {authorType === "new" && (
+              <div className="space-y-4 pt-2 border-t border-[#E2E6DF]">
+                <div className="p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-xl text-[11px] text-emerald-800">
+                  💡 A dedicated author profile and account will be created under this name with Author permissions.
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="newAuthorName" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                      Author Name *
+                    </Label>
+                    <Input
+                      id="newAuthorName"
+                      placeholder="e.g. Dr. A.P. Sharma"
+                      value={newAuthorName}
+                      onChange={(e) => setNewAuthorName(e.target.value)}
+                      className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs font-bold"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="newAuthorEmail" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                      Author Email (Optional)
+                    </Label>
+                    <Input
+                      id="newAuthorEmail"
+                      type="email"
+                      placeholder="e.g. author@example.com"
+                      value={newAuthorEmail}
+                      onChange={(e) => setNewAuthorEmail(e.target.value)}
+                      className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="newAuthorBio" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                    Author Biography (Optional)
+                  </Label>
+                  <Textarea
+                    id="newAuthorBio"
+                    rows={3}
+                    placeholder="Short summary of author's credentials..."
+                    value={newAuthorBio}
+                    onChange={(e) => setNewAuthorBio(e.target.value)}
+                    className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs"
+                  />
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* BOOK METADATA & DETAILS CARD */}
         <Card className="bg-white border border-[#E2E6DF] shadow-sm rounded-2xl">
           <CardHeader className="border-b border-[#E2E6DF] bg-[#F8F9F7]">
             <CardTitle className="font-serif font-bold text-lg text-[#0F3D3E]">
@@ -324,65 +658,18 @@ export default function EditBookPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-6 space-y-6">
-            <div className="grid gap-6 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="title" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                  Book Title *
-                </Label>
-                <Input
-                  id="title"
-                  name="title"
-                  required
-                  value={formData.title}
-                  onChange={handleInputChange}
-                  className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-sm"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="authorSelect" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                  Author Account & Attribution *
-                </Label>
-                {authorsList.length > 0 && (
-                  <Select
-                    value={selectedAuthorId}
-                    onValueChange={(val) => {
-                      setSelectedAuthorId(val);
-                      const found = authorsList.find((a) => (a._id || a.id) === val);
-                      if (found) {
-                        setFormData((prev) => ({ ...prev, authorName: found.name || "" }));
-                      }
-                    }}
-                  >
-                    <SelectTrigger className="w-full bg-[#F8F9F7] border-[#E2E6DF] rounded-xl h-10 text-xs font-serif font-bold">
-                      <SelectValue placeholder="Assign author account..." />
-                    </SelectTrigger>
-                    <SelectContent className="bg-white border-[#E2E6DF] max-h-64">
-                      {authorsList.map((a) => (
-                        <SelectItem key={a._id || a.id} value={a._id || a.id} className="text-xs py-2">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-[#0F3D3E]">{a.name}</span>
-                            {a.email && <span className="text-[#5C6E6E] text-[11px]">({a.email})</span>}
-                            {a.role === "author" && (
-                              <span className="px-1.5 py-0.5 text-[10px] bg-emerald-500/10 text-emerald-700 rounded-md font-semibold">
-                                Author
-                              </span>
-                            )}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-                <Input
-                  id="authorName"
-                  name="authorName"
-                  required
-                  placeholder="Author Display Name"
-                  value={formData.authorName}
-                  onChange={handleInputChange}
-                  className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-sm"
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="title" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                Book Title *
+              </Label>
+              <Input
+                id="title"
+                name="title"
+                required
+                value={formData.title}
+                onChange={handleInputChange}
+                className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-sm"
+              />
             </div>
 
             <div className="space-y-2">
@@ -520,7 +807,7 @@ export default function EditBookPage() {
                 <div className="flex items-center justify-between space-x-2">
                   <Label htmlFor="isFeatured" className="flex flex-col space-y-1 cursor-pointer">
                     <span className="font-bold text-xs">Feature on Home</span>
-                    <span className="font-normal text-[11px] text-[#5C6E6E]">Show in hero carousel</span>
+                    <span className="font-normal text-[11px] text-[#5C6E6E]">Show in featured releases</span>
                   </Label>
                   <Switch
                     id="isFeatured"

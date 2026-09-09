@@ -35,9 +35,9 @@ import { BookCard } from "@/components/books/book-card";
 import { ErrorState } from "@/components/ui/error-state";
 import { useCartStore } from "@/store/cart-store";
 import { useAuthStore } from "@/store/auth-store";
-import type { Book, Author } from "@/types";
+import type { Book } from "@/types";
 import toast from "react-hot-toast";
-import { cn } from "@/lib/utils";
+import { cn, getBookAuthorInfo } from "@/lib/utils";
 import api from "@/lib/api";
 
 export default function BookDetailPage() {
@@ -262,9 +262,12 @@ export default function BookDetailPage() {
     );
   }
 
-  const author = (book.author && typeof book.author === "object")
-    ? (book.author as Author)
-    : { _id: "", name: (typeof book.author === "string" && book.author && !/^[0-9a-fA-F]{24}$/.test(book.author)) ? book.author : ((book as any).authorName || "Harglim Author") };
+  const authorInfo = getBookAuthorInfo(book);
+  const author = {
+    _id: authorInfo.id || "",
+    name: authorInfo.name,
+    hasProfile: authorInfo.hasProfile,
+  };
   const category = (book.category && typeof book.category === "object") ? book.category : null;
   const price = book.discountPrice || book.price || 0;
   const hasDiscount = false;
@@ -442,7 +445,7 @@ export default function BookDetailPage() {
               {/* Author */}
               <div className="mt-2 flex items-center gap-2 text-sm font-sans">
                 <span className="text-[#5C6E6E]">By</span>
-                {author._id ? (
+                {author._id && author.hasProfile ? (
                   <Link
                     href={`/authors/${author._id}`}
                     className="font-bold text-[#0F3D3E] hover:text-[#D4AF37] underline decoration-[#D4AF37]/50 underline-offset-4 transition-colors"

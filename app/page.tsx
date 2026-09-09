@@ -21,11 +21,10 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BookCard } from "@/components/books/book-card";
-import { ErrorState } from "@/components/ui/error-state";
 import { Input } from "@/components/ui/input";
 import api from "@/lib/api";
 import type { Book } from "@/types";
-import { BookCardSkeleton } from "@/components/books/book-card-skeleton";
+import { getBookAuthorInfo } from "@/lib/utils";
 
 import { useSiteContent } from "@/context/site-content-context";
 
@@ -82,8 +81,8 @@ export default function Home() {
   const [categories, setCategories] = useState<any[]>([]);
   const [authors, setAuthors] = useState<any[]>([]);
   const [liveStats, setLiveStats] = useState({ booksCount: 0, authorsCount: 0 });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const [, setLoading] = useState(true);
+  const [, setError] = useState(false);
 
   // FAQ Accordion & Search State
   const [faqSearch, setFaqSearch] = useState("");
@@ -266,44 +265,48 @@ export default function Home() {
                 <div className="absolute -inset-4 bg-gradient-to-r from-[#D4AF37]/30 to-emerald-500/30 rounded-3xl blur-2xl opacity-60 group-hover:opacity-100 transition-opacity" />
 
                 {/* 3D Floating Book Cover Card */}
-                <motion.div
-                  animate={{ y: [0, -10, 0] }}
-                  transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
-                  className="relative w-full h-full rounded-2xl overflow-hidden shadow-2xl border-2 border-[#D4AF37]/40 bg-[#0C3233] flex flex-col justify-end"
-                >
-                  <Image
-                    src={
-                      featuredBooks[0]?.coverImage && (featuredBooks[0].coverImage.startsWith("http") || featuredBooks[0].coverImage.startsWith("/"))
-                        ? featuredBooks[0].coverImage
-                        : "/logo.webp"
-                    }
-                    onError={(e: any) => {
-                      if (e?.target) {
-                        e.target.src = "/logo.webp";
-                      }
-                    }}
-                    alt={featuredBooks[0]?.title || "Harglim Publishers"}
-                    fill
-                    className="object-cover"
-                    priority
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#0F3D3E] via-[#0F3D3E]/40 to-transparent opacity-90" />
-                  <div className="absolute bottom-6 left-6 right-6 space-y-1.5 text-white z-10">
-                    <span className="px-2.5 py-0.5 rounded bg-[#D4AF37] text-[#0F3D3E] text-[10px] font-bold uppercase tracking-wider shadow-sm">
-                      {featuredBooks.length > 0 ? "Featured Release" : "Harglim Publishers"}
-                    </span>
-                    <p className="font-serif font-bold text-xl line-clamp-2">
-                      {featuredBooks[0]?.title || "Discover Inspiring Books"}
-                    </p>
-                    <p className="text-xs text-white/80 font-medium">
-                      {featuredBooks[0]?.author
-                        ? (typeof featuredBooks[0].author === "object"
-                            ? (featuredBooks[0].author as any)?.name
-                            : featuredBooks[0].author)
-                        : "Harglim Publishers Catalog"}
-                    </p>
-                  </div>
-                </motion.div>
+                {(() => {
+                  const heroBook = featuredBooks[0] || bestsellers[0] || null;
+                  const heroAuthor = heroBook ? getBookAuthorInfo(heroBook).name : "Harglim Publishers Catalog";
+                  const heroCover = heroBook?.coverImage && (heroBook.coverImage.startsWith("http") || heroBook.coverImage.startsWith("/"))
+                    ? heroBook.coverImage
+                    : "/logo.webp";
+                  const heroTitle = heroBook?.title || "Discover Inspiring Books";
+                  const heroTag = featuredBooks.length > 0 ? "Featured Release" : bestsellers.length > 0 ? "Popular Release" : "Harglim Publishers";
+
+                  return (
+                    <motion.div
+                      animate={{ y: [0, -10, 0] }}
+                      transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
+                      className="relative w-full h-full rounded-2xl overflow-hidden shadow-2xl border-2 border-[#D4AF37]/40 bg-[#0C3233] flex flex-col justify-end"
+                    >
+                      <Image
+                        src={heroCover}
+                        onError={(e: any) => {
+                          if (e?.target) {
+                            e.target.src = "/logo.webp";
+                          }
+                        }}
+                        alt={heroTitle}
+                        fill
+                        className="object-cover"
+                        priority
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#0F3D3E] via-[#0F3D3E]/40 to-transparent opacity-90" />
+                      <div className="absolute bottom-6 left-6 right-6 space-y-1.5 text-white z-10">
+                        <span className="px-2.5 py-0.5 rounded bg-[#D4AF37] text-[#0F3D3E] text-[10px] font-bold uppercase tracking-wider shadow-sm">
+                          {heroTag}
+                        </span>
+                        <p className="font-serif font-bold text-xl line-clamp-2">
+                          {heroTitle}
+                        </p>
+                        <p className="text-xs text-white/80 font-medium">
+                          {heroAuthor}
+                        </p>
+                      </div>
+                    </motion.div>
+                  );
+                })()}
               </div>
             </motion.div>
 
@@ -312,45 +315,34 @@ export default function Home() {
       </section>
 
       {/* ------------------------------------------------------------------ */}
-      {/* 2. FEATURED BOOKS CAROUSEL (Netflix-style horizontal snap scroll) */}
+      {/* 2. FEATURED BOOKS CAROUSEL (Strictly conditional: Only renders if books are featured) */}
       {/* ------------------------------------------------------------------ */}
-      <section className="py-16 sm:py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-end justify-between mb-8">
-          <div>
-            <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#8A6D1E] mb-1">
-              <TrendingUp className="h-4 w-4" />
-              <span>Curated Selection</span>
+      {featuredBooks.length > 0 && (
+        <section className="py-16 sm:py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-end justify-between mb-8">
+            <div>
+              <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#8A6D1E] mb-1">
+                <TrendingUp className="h-4 w-4" />
+                <span>Curated Selection</span>
+              </div>
+              <h2 className="text-3xl sm:text-4xl font-serif font-bold text-[#0F3D3E]">
+                Featured Releases
+              </h2>
             </div>
-            <h2 className="text-3xl sm:text-4xl font-serif font-bold text-[#0F3D3E]">
-              Featured Releases
-            </h2>
+            <Link href="/books" className="hidden sm:flex items-center gap-1 text-sm font-serif font-bold text-[#0F3D3E] hover:text-[#D4AF37]">
+              <span>View All Books</span>
+              <ArrowRight className="h-4 w-4" />
+            </Link>
           </div>
-          <Link href="/books" className="hidden sm:flex items-center gap-1 text-sm font-serif font-bold text-[#0F3D3E] hover:text-[#D4AF37]">
-            <span>View All Books</span>
-            <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
 
-        {loading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
-            {[...Array(4)].map((_, i) => (
-              <BookCardSkeleton key={i} />
-            ))}
-          </div>
-        ) : error ? (
-          <ErrorState
-            title="Could not load books"
-            message="We had trouble fetching featured books. Please try again."
-            onRetry={fetchHomeData}
-          />
-        ) : (
           <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {featuredBooks.slice(0, 4).map((book) => (
               <BookCard key={book._id || (book as any).id} book={book} />
             ))}
           </div>
-        )}
-      </section>
+        </section>
+      )}
+
 
       {/* ------------------------------------------------------------------ */}
       {/* 3. WHY CHOOSE HARGILM (Glassmorphic Trust Blocks) */}
