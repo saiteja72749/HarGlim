@@ -66,7 +66,7 @@ export default async function BookLayout({ children, params }: Props) {
     isbn: book.isbn,
     offers: {
       '@type': 'Offer',
-      price: book.discountPrice || book.price,
+      price: book.price || 0,
       priceCurrency: 'INR',
       availability: book.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
       url: `${APP_URL}/books/${resolvedParams.slug}`,

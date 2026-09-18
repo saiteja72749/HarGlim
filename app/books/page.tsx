@@ -466,7 +466,7 @@ function BooksContent() {
                           />
                           <div>
                             <p className="font-serif font-bold text-xs text-[#0F3D3E] line-clamp-1">{b.title}</p>
-                            <p className="text-[11px] text-[#5C6E6E]">₹{(b.discountPrice || b.price).toLocaleString()}</p>
+                            <p className="text-[11px] text-[#5C6E6E]">₹{(b.price || 0).toLocaleString()}</p>
                           </div>
                         </Link>
                       ))}

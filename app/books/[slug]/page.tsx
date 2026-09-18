@@ -25,7 +25,6 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Tag,
   ArrowRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -269,23 +268,25 @@ export default function BookDetailPage() {
     hasProfile: authorInfo.hasProfile,
   };
   const category = (book.category && typeof book.category === "object") ? book.category : null;
-  const price = book.discountPrice || book.price || 0;
-  const hasDiscount = false;
-  const discountPercent = 0;
+  const price = book.price || 0;
 
-  const ratingAvg = Number(book.rating || 0).toFixed(1);
+  // 100% dynamic rating calculation derived from backend reviews with fallback to book document
   const reviewCount = reviews.length > 0 ? reviews.length : (book.totalReviews || 0);
+  const computedRating = reviews.length > 0
+    ? reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / reviews.length
+    : Number(book.rating || 0);
+  const ratingAvg = computedRating.toFixed(1);
 
-  // Review star distribution breakdown
+  // Dynamic review star distribution breakdown based on actual reviews
   const starCounts = [5, 4, 3, 2, 1].map((star) => {
-    const count = reviews.filter((r) => Math.round(r.rating || 5) === star).length;
-    const pct = reviewCount > 0 ? Math.round((count / reviewCount) * 100) : 0;
+    const count = reviews.filter((r) => Math.round(Number(r.rating) || 0) === star).length;
+    const pct = reviews.length > 0 ? Math.round((count / reviews.length) * 100) : 0;
     return { star, count, pct };
   });
 
   const sortedReviews = [...reviews].sort((a, b) => {
     if (sortReviewsBy === "highest") {
-      return (b.rating || 0) - (a.rating || 0);
+      return (Number(b.rating) || 0) - (Number(a.rating) || 0);
     }
     return new Date(b.createdAt || b.date || 0).getTime() - new Date(a.createdAt || a.date || 0).getTime();
   });
@@ -300,7 +301,9 @@ export default function BookDetailPage() {
     router.push("/checkout/cart");
   };
 
-  const availableFormats = ["Paperback", "Hardcover", "eBook"];
+  const availableFormats: string[] = Array.isArray((book as any).formats) && (book as any).formats.length > 0
+    ? (book as any).formats
+    : [book.format || "Paperback"];
 
   return (
     <div className="bg-[#F8F9F7] min-h-screen text-[#0F3D3E]">
@@ -399,11 +402,6 @@ export default function BookDetailPage() {
                 {book.isBestseller && (
                   <Badge className="absolute top-4 left-4 bg-[#D4AF37] text-[#0F3D3E] font-serif font-bold shadow-sm border border-[#D4AF37]">
                     ⭐ Bestseller
-                  </Badge>
-                )}
-                {hasDiscount && (
-                  <Badge variant="destructive" className="absolute top-4 right-4 font-bold">
-                    -{discountPercent}% OFF
                   </Badge>
                 )}
               </motion.div>
@@ -574,18 +572,7 @@ export default function BookDetailPage() {
                   <span className="text-3xl font-serif font-bold text-[#0F3D3E]">
                     ₹{price.toLocaleString()}
                   </span>
-                  {hasDiscount && (
-                    <span className="text-sm text-gray-400 line-through">
-                      ₹{book.price.toLocaleString()}
-                    </span>
-                  )}
                 </div>
-                {hasDiscount && (
-                  <p className="text-xs text-emerald-700 font-semibold flex items-center gap-1 mt-1">
-                    <Tag className="h-3 w-3" />
-                    Save ₹{(book.price - price).toLocaleString()} ({discountPercent}% OFF)
-                  </p>
-                )}
               </div>
 
               {/* Format Selection Pills */}
@@ -594,7 +581,7 @@ export default function BookDetailPage() {
                   Select Edition
                 </label>
                 <div className="grid grid-cols-3 gap-2">
-                  {availableFormats.map((fmt) => (
+                  {availableFormats.map((fmt: string) => (
                     <button
                       key={fmt}
                       type="button"
@@ -970,9 +957,11 @@ export default function BookDetailPage() {
                                 <span className="font-serif font-bold text-sm text-[#0F3D3E]">
                                   {reviewUser.name || review.userName || "Verified Reader"}
                                 </span>
-                                <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 text-[10px] font-semibold">
-                                  Verified Purchase
-                                </Badge>
+                                {(review.isVerified || review.verifiedPurchase || review.isBuyer || review.purchased) && (
+                                  <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 text-[10px] font-semibold">
+                                    Verified Purchase
+                                  </Badge>
+                                )}
                               </div>
                               <div className="flex items-center gap-1 mt-0.5">
                                 {[...Array(5)].map((_, i) => (

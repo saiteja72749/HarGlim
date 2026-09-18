@@ -9,10 +9,14 @@ import {
   CheckCircle,
   Clock,
   AlertCircle,
+  ExternalLink,
+  Copy,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import api from "@/lib/api";
+import toast from "react-hot-toast";
 
 function TrackOrderContent() {
   const searchParams = useSearchParams();
@@ -21,10 +25,18 @@ function TrackOrderContent() {
   const [orderNumber, setOrderNumber] = useState(initialOrderNumber);
   const [trackedOrder, setTrackedOrder] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [copiedAwb, setCopiedAwb] = useState(false);
 
   const fadeInUp = {
     hidden: { opacity: 0, y: 40 },
     visible: { opacity: 1, y: 0, transition: { duration: 0.6 } },
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedAwb(true);
+    toast.success("Consignment / Tracking ID copied to clipboard! 📋");
+    setTimeout(() => setCopiedAwb(false), 2000);
   };
 
   const executeTrack = async (targetOrderNo: string) => {
@@ -39,13 +51,16 @@ function TrackOrderContent() {
         orderDate: orderData.createdAt || orderData.date,
         status: orderData.orderStatus || orderData.status,
         expectedDelivery: orderData.expectedDelivery || null,
+        trackingNumber: orderData.trackingNumber || orderData.awbNumber || orderData.trackingId || null,
+        courier: orderData.courier || orderData.courierName || orderData.carrier || "India Post",
+        trackingUrl: orderData.trackingUrl || null,
         items: (orderData.items || []).map((item: any) => ({
           name: item.book?.title || item.title || "Book",
           quantity: item.quantity,
           price: `₹${item.price}`
         })),
         totalPrice: `₹${orderData.totalAmount || orderData.total}`,
-        shippingAddress: orderData.shippingAddress ? `${orderData.shippingAddress.name}, ${orderData.shippingAddress.addressLine1 || orderData.shippingAddress.address}, ${orderData.shippingAddress.city}` : "Address not available",
+        shippingAddress: orderData.shippingAddress ? `${orderData.shippingAddress.name || orderData.shippingAddress.fullName || ""}, ${orderData.shippingAddress.addressLine1 || orderData.shippingAddress.address || ""}, ${orderData.shippingAddress.city || ""}` : "Address not available",
         trackingUpdates: orderData.timeline || [
           { status: "Order Placed", date: orderData.createdAt, description: "Your order has been placed." },
           { status: orderData.orderStatus || orderData.status, date: new Date().toISOString(), description: `Order is currently ${orderData.orderStatus || orderData.status}` }
@@ -73,45 +88,58 @@ function TrackOrderContent() {
   };
 
   const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "Order Placed":
-        return <CheckCircle className="h-6 w-6 text-primary" />;
-      case "Processing":
-        return <Package className="h-6 w-6 text-primary" />;
-      case "Shipped":
-        return <Truck className="h-6 w-6 text-primary" />;
-      case "In Transit":
-        return <Truck className="h-6 w-6 text-secondary" />;
-      case "Delivered":
-        return <CheckCircle className="h-6 w-6 text-secondary" />;
+    const s = (status || "").toLowerCase();
+    switch (s) {
+      case "delivered":
+      case "completed":
+        return <CheckCircle className="h-6 w-6 text-emerald-600" />;
+      case "shipped":
+      case "in-transit":
+      case "in transit":
+        return <Truck className="h-6 w-6 text-blue-600" />;
+      case "processing":
+        return <Package className="h-6 w-6 text-amber-600" />;
       default:
         return <Clock className="h-6 w-6 text-muted-foreground" />;
     }
   };
 
   const getStatusColor = (status: string) => {
-    switch (status) {
+    const s = (status || "").toLowerCase();
+    switch (s) {
       case "delivered":
-        return "bg-secondary/10 border-secondary/30";
+      case "completed":
+        return "bg-emerald-500/10 border-emerald-500/30 text-emerald-950";
       case "in-transit":
-        return "bg-primary/10 border-primary/30";
+      case "shipped":
+      case "in transit":
+        return "bg-blue-500/10 border-blue-500/30 text-blue-950";
       case "processing":
-        return "bg-yellow-100/10 border-yellow-400/30";
+        return "bg-amber-500/10 border-amber-500/30 text-amber-950";
       default:
-        return "bg-muted/30 border-border";
+        return "bg-muted/30 border-border text-foreground";
     }
   };
 
   const getStatusText = (status: string) => {
-    switch (status) {
+    const s = (status || "").toLowerCase();
+    switch (s) {
       case "delivered":
+      case "completed":
         return "Delivered";
       case "in-transit":
-        return "In Transit";
+      case "shipped":
+      case "in transit":
+        return "Shipped / In Transit";
       case "processing":
-        return "Processing";
+        return "Processing / Printed";
+      case "order placed":
+      case "pending":
+        return "Order Placed";
+      case "cancelled":
+        return "Cancelled";
       default:
-        return "Unknown";
+        return status || "Order Placed";
     }
   };
 
@@ -211,6 +239,114 @@ function TrackOrderContent() {
                 </div>
               </div>
 
+              {/* Courier Shipment Tracking Card */}
+              <div className="bg-card rounded-2xl border-2 border-primary/20 p-6 md:p-8 space-y-6 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="h-12 w-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                      <Truck className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold font-serif text-foreground">
+                        Courier Shipment & Tracking
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Courier: <strong className="text-foreground">{trackedOrder.courier || "India Post"}</strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  {trackedOrder.trackingNumber && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => copyToClipboard(trackedOrder.trackingNumber)}
+                      className="gap-1.5 text-xs font-mono font-bold"
+                    >
+                      {copiedAwb ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                      <span>{copiedAwb ? "Copied" : "Copy Consignment ID"}</span>
+                    </Button>
+                  )}
+                </div>
+
+                {trackedOrder.trackingNumber ? (
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-xl bg-muted/40 border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
+                          Consignment / AWB Tracking Number
+                        </span>
+                        <span className="font-mono text-xl sm:text-2xl font-bold text-foreground tracking-wider select-all">
+                          {trackedOrder.trackingNumber}
+                        </span>
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={() => copyToClipboard(trackedOrder.trackingNumber)}
+                        className="bg-primary text-primary-foreground gap-1.5 shrink-0 font-medium"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        <span>Copy Code</span>
+                      </Button>
+                    </div>
+
+                    {/* Direct Tracking Portal Actions */}
+                    <div className="space-y-3 pt-2">
+                      <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                        Track with Carrier Portal:
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <a
+                          href={trackedOrder.trackingUrl || `https://www.indiapost.gov.in/_layouts/15/dpt.cept.tracking/trackconsignment.aspx`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center justify-between p-3.5 rounded-xl border border-primary/30 bg-primary/5 hover:bg-primary/10 transition-all font-semibold text-xs text-primary"
+                        >
+                          <span className="flex items-center gap-2">
+                            <Truck className="h-4 w-4" />
+                            <span>Track on India Post (Consignment)</span>
+                          </span>
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+
+                        <a
+                          href={`https://www.delhivery.com/tracking`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center justify-between p-3.5 rounded-xl border border-border bg-card hover:bg-muted/50 transition-all font-semibold text-xs text-foreground"
+                        >
+                          <span className="flex items-center gap-2">
+                            <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                            <span>Track on Delhivery</span>
+                          </span>
+                          <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
+                        </a>
+                      </div>
+
+                      <div className="pt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <span className="font-medium">Other Courier Websites:</span>
+                        <a href="https://www.bluedart.com/tracking" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Blue Dart</a>
+                        <span>•</span>
+                        <a href="https://www.dtdc.in/tracking.asp" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">DTDC</a>
+                        <span>•</span>
+                        <a href="https://www.shiprocket.in/shipment-tracking/" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Shiprocket</a>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-900 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-amber-600" />
+                      <h4 className="font-bold text-sm font-serif">Order In Preparation</h4>
+                    </div>
+                    <p className="text-xs text-amber-800 leading-relaxed font-sans">
+                      Your order is registered and being printed/prepared by our publishing team. Your India Post / Courier consignment tracking code will be generated and shown here as soon as the package is dispatched.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               {/* Order Items */}
               <div className="bg-card rounded-xl border border-border p-6">
                 <h3 className="text-xl font-bold text-foreground mb-4">
@@ -255,40 +391,6 @@ function TrackOrderContent() {
                 <p className="text-muted-foreground">
                   {trackedOrder.shippingAddress}
                 </p>
-              </div>
-
-              {/* Tracking Timeline */}
-              <div className="bg-card rounded-xl border border-border p-6">
-                <h3 className="text-xl font-bold text-foreground mb-6">
-                  Tracking History
-                </h3>
-                <div className="space-y-4">
-                  {trackedOrder.trackingUpdates.map(
-                    (update: any, idx: number) => (
-                      <div key={idx} className="flex gap-4">
-                        <div className="flex flex-col items-center">
-                          {getStatusIcon(update.status)}
-                          {idx < trackedOrder.trackingUpdates.length - 1 && (
-                            <div className="w-1 h-12 bg-border my-2" />
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between">
-                            <h4 className="font-semibold text-foreground">
-                              {update.status}
-                            </h4>
-                            <span className="text-sm text-muted-foreground">
-                              {new Date(update.date).toLocaleDateString()}
-                            </span>
-                          </div>
-                          <p className="text-sm text-muted-foreground mt-1">
-                            {update.description}
-                          </p>
-                        </div>
-                      </div>
-                    ),
-                  )}
-                </div>
               </div>
             </motion.div>
           )}

@@ -98,9 +98,7 @@ export function BookCard({
 
   const authorInfo = getBookAuthorInfo(book);
   const authorName = authorInfo.name;
-  const price = book.discountPrice || book.price;
-  const hasDiscount = false;
-  const discountPercent = 0;
+  const price = book.price || 0;
 
   if (variant === "horizontal") {
     return (
@@ -140,18 +138,13 @@ export function BookCard({
                 />
               ))}
               <span className="text-xs text-muted-foreground ml-1">
-                ({book.totalReviews})
+                ({book.totalReviews ?? 0})
               </span>
             </div>
             <div className="flex items-center gap-2">
               <span className="font-bold text-primary">
                 ₹{price.toLocaleString()}
               </span>
-              {hasDiscount && (
-                <span className="text-sm text-muted-foreground line-through">
-                  ₹{book.price.toLocaleString()}
-                </span>
-              )}
             </div>
           </div>
         </motion.div>
@@ -246,11 +239,6 @@ export function BookCard({
                 ✨ New
               </Badge>
             )}
-            {hasDiscount && (
-              <Badge variant="destructive" className="font-semibold shadow-lg">
-                -{discountPercent}%
-              </Badge>
-            )}
           </div>
 
           {/* Quick Actions */}
@@ -307,7 +295,7 @@ export function BookCard({
               />
             ))}
             <span className="text-xs text-muted-foreground ml-1 font-medium">
-              ({book.totalReviews})
+              ({book.totalReviews ?? 0})
             </span>
           </div>
 
@@ -317,14 +305,9 @@ export function BookCard({
               <span className="text-2xl font-bold text-primary">
                 ₹{price.toLocaleString()}
               </span>
-              {hasDiscount && (
-                <span className="text-sm text-muted-foreground line-through">
-                  ₹{book.price.toLocaleString()}
-                </span>
-              )}
             </div>
             <Badge variant="outline" className="text-xs font-semibold">
-              {book.format}
+              {book.format || "Paperback"}
             </Badge>
           </div>
         </div>

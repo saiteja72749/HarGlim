@@ -48,7 +48,6 @@ export default function EditBookPage() {
     description: "",
     category: "",
     price: "",
-    discountPrice: "",
     stock: "0",
     isbn: "",
     status: "published",
@@ -201,7 +200,6 @@ export default function EditBookPage() {
                 ? bookData.category?._id || bookData.category?.id || ""
                 : bookData.category || "",
             price: (bookData.mrp || bookData.price)?.toString() || "",
-            discountPrice: bookData.discountPrice?.toString() || "",
             stock: bookData.stock?.toString() || "0",
             isbn: bookData.isbn || "",
             status: bookData.status === "Active" ? "published" : (bookData.status || "published"),
@@ -360,9 +358,6 @@ export default function EditBookPage() {
         category: formData.category,
         mrp: numericPrice,
         price: numericPrice,
-        discountPrice: formData.discountPrice
-          ? Number(formData.discountPrice)
-          : undefined,
         stock: Number(formData.stock) || 0,
         isbn: formData.isbn.trim() || undefined,
         status: statusValue,
@@ -764,21 +759,6 @@ export default function EditBookPage() {
                   value={formData.price}
                   onChange={handleInputChange}
                   className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-sm font-bold font-mono"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="discountPrice" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                  Discount Price (₹)
-                </Label>
-                <Input
-                  id="discountPrice"
-                  name="discountPrice"
-                  type="number"
-                  min="0"
-                  value={formData.discountPrice}
-                  onChange={handleInputChange}
-                  className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-sm font-bold font-mono text-[#D4AF37]"
                 />
               </div>
 

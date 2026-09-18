@@ -24,6 +24,8 @@ import {
   RotateCcw,
   Send,
   ShieldCheck,
+  Copy,
+  Check,
 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -129,6 +131,14 @@ export default function OrdersPage() {
   const [utrInputMap, setUtrInputMap] = useState<Record<string, string>>({});
   const [submittingUtrMap, setSubmittingUtrMap] = useState<Record<string, boolean>>({});
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
+  const [copiedAwbMap, setCopiedAwbMap] = useState<Record<string, boolean>>({});
+
+  const copyAwbToClipboard = (orderId: string, awbText: string) => {
+    navigator.clipboard.writeText(awbText);
+    setCopiedAwbMap((prev) => ({ ...prev, [orderId]: true }));
+    toast.success("Consignment / AWB tracking ID copied! 📋");
+    setTimeout(() => setCopiedAwbMap((prev) => ({ ...prev, [orderId]: false })), 2000);
+  };
 
   const fetchOrders = async () => {
     if (!user?._id && !user?.id) return;
@@ -310,6 +320,9 @@ export default function OrdersPage() {
             const subtotal = order.subtotal ?? (order.totalPrice ? order.totalPrice - (order.shippingPrice || 0) : order.items?.reduce((acc: number, item: any) => acc + (item.price || item.book?.price || 0) * (item.quantity || 1), 0) || 0);
             const shippingPrice = order.shippingPrice ?? order.shippingFee ?? 0;
             const totalPrice = order.totalPrice ?? order.totalAmount ?? order.amount ?? (subtotal + shippingPrice);
+            const trackingNumber = order.trackingNumber || order.awbNumber || order.trackingId || null;
+            const courierName = order.courier || order.courierName || order.carrier || "India Post";
+            const trackingUrl = order.trackingUrl || null;
 
             return (
               <motion.div
@@ -330,6 +343,12 @@ export default function OrdersPage() {
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-mono font-bold text-base text-[#0F3D3E]">{id}</span>
                             {getOrderStatusBadge(status)}
+                            {trackingNumber && (
+                              <Badge variant="outline" className="bg-blue-50 text-blue-800 border-blue-200 text-[11px] font-mono font-semibold flex items-center gap-1">
+                                <Truck className="h-3 w-3" />
+                                <span>AWB: {trackingNumber}</span>
+                              </Badge>
+                            )}
                           </div>
                           <p className="text-xs text-[#5C6E6E] flex items-center gap-1.5 mt-1 font-sans">
                             <Calendar className="h-3.5 w-3.5" />
@@ -654,6 +673,114 @@ export default function OrdersPage() {
                             </div>
                           </div>
 
+                          {/* Courier Shipment & External Carrier Tracking */}
+                          <div className="rounded-2xl border border-[#0F3D3E]/20 bg-[#F8F9F7] p-5 space-y-4">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#E2E6DF] pb-3">
+                              <div className="flex items-center gap-3">
+                                <div className="h-10 w-10 rounded-xl bg-[#0F3D3E]/10 text-[#0F3D3E] flex items-center justify-center shrink-0">
+                                  <Truck className="h-5 w-5" />
+                                </div>
+                                <div>
+                                  <h4 className="font-serif font-bold text-sm text-[#0F3D3E]">
+                                    Courier Shipment & Tracking
+                                  </h4>
+                                  <p className="text-xs text-[#5C6E6E]">
+                                    Carrier: <strong className="text-[#0F3D3E]">{courierName}</strong>
+                                  </p>
+                                </div>
+                              </div>
+
+                              {trackingNumber && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => copyAwbToClipboard(id, trackingNumber)}
+                                  className="gap-1.5 text-xs font-mono font-bold border-[#E2E6DF]"
+                                >
+                                  {copiedAwbMap[id] ? (
+                                    <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="h-3.5 w-3.5 text-[#0F3D3E]" />
+                                  )}
+                                  <span>{copiedAwbMap[id] ? "Copied" : "Copy Consignment ID"}</span>
+                                </Button>
+                              )}
+                            </div>
+
+                            {trackingNumber ? (
+                              <div className="space-y-3">
+                                <div className="p-3.5 rounded-xl bg-white border border-[#E2E6DF] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                  <div>
+                                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#5C6E6E] block">
+                                      Consignment / AWB Tracking Number
+                                    </span>
+                                    <span className="font-mono text-lg font-bold text-[#0F3D3E] tracking-wider select-all">
+                                      {trackingNumber}
+                                    </span>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => copyAwbToClipboard(id, trackingNumber)}
+                                    className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white text-xs gap-1.5 shrink-0"
+                                  >
+                                    <Copy className="h-3.5 w-3.5" />
+                                    <span>Copy Tracking Code</span>
+                                  </Button>
+                                </div>
+
+                                <div className="space-y-2 pt-1">
+                                  <p className="text-xs font-bold uppercase tracking-wider text-[#5C6E6E]">
+                                    Direct Courier Tracking Links:
+                                  </p>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                    <a
+                                      href={trackingUrl || "https://www.indiapost.gov.in/_layouts/15/dpt.cept.tracking/trackconsignment.aspx"}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="flex items-center justify-between p-3 rounded-xl border border-[#0F3D3E]/30 bg-emerald-50 hover:bg-emerald-100/60 transition-all font-semibold text-xs text-[#0F3D3E]"
+                                    >
+                                      <span className="flex items-center gap-2">
+                                        <Truck className="h-4 w-4" />
+                                        <span>Track on India Post (Consignment)</span>
+                                      </span>
+                                      <ExternalLink className="h-3.5 w-3.5" />
+                                    </a>
+
+                                    <a
+                                      href="https://www.delhivery.com/tracking"
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="flex items-center justify-between p-3 rounded-xl border border-[#E2E6DF] bg-white hover:bg-muted/50 transition-all font-semibold text-xs text-[#0F3D3E]"
+                                    >
+                                      <span className="flex items-center gap-2">
+                                        <ExternalLink className="h-4 w-4 text-[#5C6E6E]" />
+                                        <span>Track on Delhivery</span>
+                                      </span>
+                                      <ExternalLink className="h-3.5 w-3.5 text-[#5C6E6E]" />
+                                    </a>
+                                  </div>
+
+                                  <div className="pt-1 flex flex-wrap items-center gap-2 text-xs text-[#5C6E6E]">
+                                    <span className="font-medium">Other Courier Websites:</span>
+                                    <a href="https://www.bluedart.com/tracking" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#0F3D3E]">Blue Dart</a>
+                                    <span>•</span>
+                                    <a href="https://www.dtdc.in/tracking.asp" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#0F3D3E]">DTDC</a>
+                                    <span>•</span>
+                                    <a href="https://www.shiprocket.in/shipment-tracking/" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#0F3D3E]">Shiprocket</a>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="p-3.5 rounded-xl bg-white border border-[#E2E6DF] flex items-center gap-3">
+                                <Clock className="h-4 w-4 text-[#5C6E6E] shrink-0" />
+                                <p className="text-xs text-[#5C6E6E]">
+                                  Consignment / AWB tracking number will be provided once your package is dispatched via India Post Speed Post or courier partner.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+
                           {/* Tracking Timeline */}
                           {order.trackingUpdates && order.trackingUpdates.length > 0 && (
                             <div>
@@ -683,7 +810,7 @@ export default function OrdersPage() {
 
                           {/* Action Footer */}
                           <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                            <div className="flex gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -694,6 +821,20 @@ export default function OrdersPage() {
                                 <Download className="h-3.5 w-3.5 text-[#0F3D3E]" />
                                 <span>{downloadingInvoiceId === id ? "Downloading..." : "Download Invoice"}</span>
                               </Button>
+
+                              {trackingNumber && (
+                                <a
+                                  href={trackingUrl || "https://www.indiapost.gov.in/_layouts/15/dpt.cept.tracking/trackconsignment.aspx"}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  <Button size="sm" className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white gap-1.5 text-xs">
+                                    <Truck className="h-3.5 w-3.5" />
+                                    <span>Track with Courier Link</span>
+                                    <ExternalLink className="h-3 w-3" />
+                                  </Button>
+                                </a>
+                              )}
 
                               <Link href={`/track-order?orderNumber=${encodeURIComponent(id)}`}>
                                 <Button variant="ghost" size="sm" className="gap-1.5 text-xs text-[#0F3D3E]">

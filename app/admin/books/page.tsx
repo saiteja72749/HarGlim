@@ -56,7 +56,9 @@ import {
 import toast from "react-hot-toast";
 
 
-const getStatusColor = (status: string) => {
+const getStatusColor = (status: string, stock?: number) => {
+  if (stock !== undefined && Number(stock) === 0) return "bg-red-500/10 text-red-600";
+  if (stock !== undefined && Number(stock) > 0 && Number(stock) <= 5) return "bg-amber-500/10 text-amber-600";
   switch (status?.toLowerCase()) {
     case "published":
     case "active":
@@ -73,7 +75,9 @@ const getStatusColor = (status: string) => {
   }
 };
 
-const getStatusLabel = (status: string) => {
+const getStatusLabel = (status: string, stock?: number) => {
+  if (stock !== undefined && Number(stock) === 0) return "Out of Stock";
+  if (stock !== undefined && Number(stock) > 0 && Number(stock) <= 5) return "Low Stock";
   if (!status) return "Active";
   if (status.toLowerCase() === "published") return "Active";
   if (status.toLowerCase() === "draft") return "Draft";
@@ -137,7 +141,18 @@ export default function AdminBooksPage() {
       author.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory =
       categoryFilter === "all" || getCategoryName(book.category) === categoryFilter;
-    const matchesStatus = statusFilter === "all" || (book.status || "").toLowerCase() === statusFilter.toLowerCase();
+    
+    let matchesStatus = true;
+    if (statusFilter === "Active") {
+      matchesStatus = ((book.status || "").toLowerCase() === "active" || (book.status || "").toLowerCase() === "published") && (book.stock === undefined || Number(book.stock) > 0);
+    } else if (statusFilter === "Out of Stock") {
+      matchesStatus = (book.stock !== undefined && Number(book.stock) <= 0) || (book.status || "").toLowerCase() === "out of stock";
+    } else if (statusFilter === "Low Stock") {
+      matchesStatus = (book.stock !== undefined && Number(book.stock) > 0 && Number(book.stock) <= 5) || (book.status || "").toLowerCase() === "low stock";
+    } else if (statusFilter !== "all") {
+      matchesStatus = (book.status || "").toLowerCase() === statusFilter.toLowerCase();
+    }
+
     return matchesSearch && matchesCategory && matchesStatus;
   });
 
@@ -198,15 +213,15 @@ export default function AdminBooksPage() {
         <Card>
           <CardContent className="p-4">
             <p className="text-2xl font-bold">
-              {books.filter((b) => b.status === "Active").length}
+              {books.filter((b) => ((b.status || "").toLowerCase() === "active" || (b.status || "").toLowerCase() === "published") && (b.stock === undefined || Number(b.stock) > 0)).length}
             </p>
-            <p className="text-sm text-muted-foreground">Active</p>
+            <p className="text-sm text-muted-foreground">Active Books</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <p className="text-2xl font-bold">
-              {books.filter((b) => b.status === "Out of Stock").length}
+              {books.filter((b) => (b.stock !== undefined && Number(b.stock) <= 0) || (b.status || "").toLowerCase() === "out of stock").length}
             </p>
             <p className="text-sm text-muted-foreground">Out of Stock</p>
           </CardContent>
@@ -214,7 +229,7 @@ export default function AdminBooksPage() {
         <Card>
           <CardContent className="p-4">
             <p className="text-2xl font-bold">
-              {books.filter((b) => b.status === "Low Stock").length}
+              {books.filter((b) => (b.stock !== undefined && Number(b.stock) > 0 && Number(b.stock) <= 5) || (b.status || "").toLowerCase() === "low stock").length}
             </p>
             <p className="text-sm text-muted-foreground">Low Stock</p>
           </CardContent>
@@ -323,8 +338,8 @@ export default function AdminBooksPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge className={getStatusColor(book.status)}>
-                          {getStatusLabel(book.status)}
+                        <Badge className={getStatusColor(book.status, book.stock)}>
+                          {getStatusLabel(book.status, book.stock)}
                         </Badge>
                         {book.isFeatured && (
                           <Badge className="bg-amber-500/15 text-amber-700 border border-amber-500/30 text-[10px] gap-1">

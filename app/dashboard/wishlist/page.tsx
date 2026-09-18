@@ -57,17 +57,17 @@ export default function WishlistPage() {
   };
 
   const handleAddToCart = (item: any) => {
-    if (!item.inStock) {
+    if (!item.inStock && item.stock !== undefined && item.stock <= 0) {
       toast.error("Item is out of stock");
       return;
     }
     const bookToAdd = {
-      _id: item.id.toString(),
+      _id: (item._id || item.id).toString(),
       title: item.title,
-      author: { name: item.author },
+      author: typeof item.author === 'object' ? item.author : { name: item.author },
       price: item.price,
-      coverImage: item.cover,
-      format: "Paperback",
+      coverImage: item.coverImage || item.cover,
+      format: item.format || (item.formats && item.formats[0]) || "Paperback",
     } as unknown as Book;
     addItem(bookToAdd, 1);
     toast.success("Added to cart");
@@ -162,13 +162,13 @@ export default function WishlistPage() {
                     <p className="text-sm text-muted-foreground">{typeof item.author === 'object' ? item.author?.name : item.author}</p>
                     <div className="flex items-center gap-1 mt-2">
                       <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
-                      <span className="text-sm font-medium">{item.rating}</span>
+                      <span className="text-sm font-medium">{item.rating || 0}</span>
                       <span className="text-sm text-muted-foreground">
-                        ({item.reviews})
+                        ({item.totalReviews ?? item.reviews ?? 0})
                       </span>
                     </div>
                     <div className="flex items-center gap-2 mt-3">
-                      <span className="text-lg font-bold">₹{item.discountPrice || item.price}</span>
+                      <span className="text-lg font-bold">₹{item.price || 0}</span>
                     </div>
                     <Button
                       className="w-full mt-3 gap-2"
@@ -221,14 +221,14 @@ export default function WishlistPage() {
                       </div>
                       <div className="flex items-center gap-1 mt-2">
                         <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
-                        <span className="text-sm font-medium">{item.rating}</span>
+                        <span className="text-sm font-medium">{item.rating || 0}</span>
                         <span className="text-sm text-muted-foreground">
-                          ({item.reviews} reviews)
+                          ({item.totalReviews ?? item.reviews ?? 0} reviews)
                         </span>
                       </div>
                       <div className="flex items-center justify-between mt-3">
                         <div className="flex items-center gap-2">
-                          <span className="text-lg font-bold">₹{item.discountPrice || item.price}</span>
+                          <span className="text-lg font-bold">₹{item.price || 0}</span>
                         </div>
                         <Button
                           size="sm"

@@ -394,7 +394,7 @@ export default function DashboardPage() {
                       </p>
                     </div>
                     <p className="font-bold text-sm text-[#0F3D3E]">
-                      ₹{book.discountPrice || book.price}
+                      ₹{book.price || 0}
                     </p>
                   </Link>
                 ))}

@@ -93,7 +93,7 @@ export default function ManuscriptsPage() {
             id: m._id || m.id || idx + 1,
             title: m.title || "Untitled Manuscript",
             category: m.genre || m.category || "General",
-            wordCount: m.wordCount || m.estimatedWordCount || 50000,
+            wordCount: m.wordCount || m.estimatedWordCount || 0,
             submittedDate: m.createdAt ? new Date(m.createdAt).toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
             status: m.status === "pending" ? "Under Review" : m.status === "approved" ? "Approved" : m.status === "rejected" ? "Revision Required" : (m.status || "Submitted"),
             progress: m.status === "approved" ? 100 : m.status === "under_review" ? 75 : 30,
@@ -119,9 +119,19 @@ export default function ManuscriptsPage() {
     return matchesSearch && matchesStatus;
   });
 
-  const handleDelete = (id: number) => {
-    setItems(items.filter((m) => m.id !== id));
-    toast.success("Manuscript deleted");
+  const handleDelete = async (id: any) => {
+    try {
+      await api.delete(`/authors/me/manuscripts/${id}`).catch(() =>
+        api.delete(`/publish-requests/${id}`).catch(() =>
+          api.delete(`/authors/me/books/${id}`)
+        )
+      );
+      setItems((prev) => prev.filter((m) => m.id !== id));
+      toast.success("Manuscript deleted successfully! 🗑️");
+    } catch (err: any) {
+      console.error("Failed to delete manuscript:", err);
+      toast.error(err.response?.data?.message || "Failed to delete manuscript.");
+    }
   };
 
   return (

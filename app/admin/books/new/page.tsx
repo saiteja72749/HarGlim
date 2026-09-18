@@ -56,7 +56,6 @@ export default function AddBookPage() {
     description: "",
     category: "",
     price: "",
-    discountPrice: "",
     stock: "10",
     isbn: "",
     status: "published",
@@ -366,7 +365,6 @@ export default function AddBookPage() {
         author: finalAuthorId, // Selected author user ID (never falls back to admin)
         mrp: numericPrice,
         price: numericPrice, // Synchronized compatibility alias matching mrp
-        discountPrice: formData.discountPrice ? Number(formData.discountPrice) : undefined,
         stock: Number(formData.stock) || 0,
         isbn: formData.isbn.trim() || undefined,
         status: formData.status === "Active" ? "published" : formData.status,
@@ -754,22 +752,6 @@ export default function AddBookPage() {
                   value={formData.price}
                   onChange={handleInputChange}
                   className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs font-mono font-bold"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="discountPrice" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                  Discount Price (₹)
-                </Label>
-                <Input
-                  id="discountPrice"
-                  name="discountPrice"
-                  type="number"
-                  min="0"
-                  placeholder="e.g. 399"
-                  value={formData.discountPrice}
-                  onChange={handleInputChange}
-                  className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs font-mono font-bold text-[#D4AF37]"
                 />
               </div>
 

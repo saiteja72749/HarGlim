@@ -72,18 +72,27 @@ function SuccessContent() {
             </div>
           </div>
         </div>
-        <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:justify-center">
-          <Link href="/dashboard">
-            <Button size="lg" className="w-full sm:w-auto flex items-center gap-2">
+        <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3.5">
+          <Link href={`/track-order?orderNumber=${encodeURIComponent(orderId)}`}>
+            <Button size="lg" className="w-full sm:w-auto flex items-center gap-2 bg-[#0F3D3E] hover:bg-[#174C4D] text-white">
               <Package className="h-4 w-4" />
-              Track Order
+              Track Order & Courier
             </Button>
           </Link>
-          <Link href="/books">
+          <Link href="/dashboard/orders">
             <Button
               variant="outline"
               size="lg"
               className="w-full sm:w-auto flex items-center justify-center gap-2"
+            >
+              My Orders
+            </Button>
+          </Link>
+          <Link href="/books">
+            <Button
+              variant="ghost"
+              size="lg"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 text-[#5C6E6E]"
             >
               Continue Shopping
               <ArrowRight className="h-4 w-4" />
