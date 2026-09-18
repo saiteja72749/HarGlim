@@ -224,8 +224,9 @@ function TrackOrderContent() {
                     </p>
                   </div>
                   <div className="text-right">
-                    <div className="text-lg font-semibold text-foreground mb-1">
-                      {getStatusText(trackedOrder.status)}
+                    <div className="flex items-center justify-end gap-2 text-lg font-semibold text-foreground mb-1">
+                      {getStatusIcon(trackedOrder.status)}
+                      <span>{getStatusText(trackedOrder.status)}</span>
                     </div>
                     {trackedOrder.expectedDelivery && (
                       <p className="text-sm text-muted-foreground">
