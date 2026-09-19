@@ -1,5 +1,5 @@
-import { cn } from "@/lib/utils";
 "use client";
+import { cn } from "@/lib/utils";
 
 import { useState, useEffect } from "react";
 import api from "@/lib/api";
