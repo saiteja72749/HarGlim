@@ -88,13 +88,14 @@ const getOrderStatusBadge = (status: string) => {
 };
 
 const COURIER_SERVICES = [
+  "Speed Post (India Post)",
+  "India Post",
   "Blue Dart",
   "Ekart Logistics",
   "Delhivery",
   "DTDC",
-  "India Post",
   "Shiprocket",
-  "Other",
+  "Other Courier",
 ];
 
 const getCourierTrackingUrl = (courier: string, trackingNumber: string): string => {
@@ -102,6 +103,9 @@ const getCourierTrackingUrl = (courier: string, trackingNumber: string): string 
   const t = encodeURIComponent((trackingNumber || "").trim());
   if (!t) return "";
 
+  if (c.includes("speed post") || c.includes("speed") || c.includes("india post") || c.includes("post")) {
+    return `https://www.indiapost.gov.in/_layouts/15/dpt.cept.tracking/trackconsignment.aspx`;
+  }
   if (c.includes("blue") || c.includes("bluedart")) {
     return `https://www.bluedart.com/tracking?trackNumber=${t}`;
   }
@@ -134,7 +138,7 @@ export default function AdminOrdersPage() {
   const [trackingModalOpen, setTrackingModalOpen] = useState(false);
   const [selectedOrderForTracking, setSelectedOrderForTracking] = useState<any>(null);
   const [trackingNumberInput, setTrackingNumberInput] = useState("");
-  const [courierInput, setCourierInput] = useState("Blue Dart");
+  const [courierInput, setCourierInput] = useState("Speed Post (India Post)");
   const [trackingUrlInput, setTrackingUrlInput] = useState("");
   const [isSubmittingTracking, setIsSubmittingTracking] = useState(false);
 
@@ -574,7 +578,7 @@ export default function AdminOrdersPage() {
               Add Shipment Tracking ID
             </DialogTitle>
             <DialogDescription className="text-xs text-[#5C6E6E]">
-              Enter courier tracking reference code for order{" "}
+              Add physical parcel post tracking link and consignment ID for order{" "}
               <strong className="font-mono text-[#0F3D3E]">
                 {selectedOrderForTracking?.orderNumber || selectedOrderForTracking?._id}
               </strong>

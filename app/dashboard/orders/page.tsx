@@ -428,17 +428,37 @@ export default function OrdersPage() {
                       </div>
 
                       <div className="flex items-center gap-2 flex-wrap shrink-0">
-                        <Link href={`/track-order?orderNumber=${encodeURIComponent(order.orderNumber || id)}`}>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-8 px-3 border-[#E2E6DF] hover:border-[#0F3D3E] text-xs font-semibold text-[#0F3D3E] gap-1.5 rounded-xl cursor-pointer"
+                        {trackingUrl ? (
+                          <a
+                            href={trackingUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
                           >
-                            <Truck className="h-3.5 w-3.5 text-[#8A6D1E]" />
-                            <span>Track Package</span>
-                          </Button>
-                        </Link>
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="h-8 px-3.5 bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] text-xs font-serif font-bold gap-1.5 rounded-xl cursor-pointer shadow-2xs"
+                            >
+                              <Truck className="h-3.5 w-3.5" />
+                              <span>Track Package ↗</span>
+                            </Button>
+                          </a>
+                        ) : trackingNumber ? (
+                          <a
+                            href={`https://www.google.com/search?q=${encodeURIComponent((courierName || "courier") + " tracking " + trackingNumber)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="h-8 px-3.5 bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] text-xs font-serif font-bold gap-1.5 rounded-xl cursor-pointer shadow-2xs"
+                            >
+                              <Truck className="h-3.5 w-3.5" />
+                              <span>Track Package ↗</span>
+                            </Button>
+                          </a>
+                        ) : null}
                         <Button
                           variant="ghost"
                           size="sm"

@@ -4,9 +4,17 @@ import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import api from "@/lib/api";
 import { getBookAuthorInfo } from "@/lib/utils";
-import { ArrowLeft, Save, Upload } from "lucide-react";
+import { ArrowLeft, Save, Upload, Plus } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -120,6 +128,41 @@ export default function EditBookPage() {
   });
 
   const [categoriesList, setCategoriesList] = useState<any[]>([]);
+
+  // New Category Creation Modal State
+  const [addCategoryModalOpen, setAddCategoryModalOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryDescription, setNewCategoryDescription] = useState("");
+  const [isCreatingCategory, setIsCreatingCategory] = useState(false);
+
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCategoryName.trim()) {
+      toast.error("Please enter a category name.");
+      return;
+    }
+    setIsCreatingCategory(true);
+    try {
+      const { data } = await api.post("/admin/categories", {
+        name: newCategoryName.trim(),
+        description: newCategoryDescription.trim() || undefined,
+      });
+      const created = data?.data || data?.category || data;
+      const catName = created?.name || newCategoryName.trim();
+
+      setCategoriesList((prev) => [created, ...prev]);
+      setFormData((prev: any) => ({ ...prev, category: catName }));
+      setNewCategoryName("");
+      setNewCategoryDescription("");
+      setAddCategoryModalOpen(false);
+      toast.success(`Category "${catName}" created and saved to database! 🏷️`);
+    } catch (err: any) {
+      console.error("Failed to create category:", err);
+      toast.error(err.response?.data?.message || err.message || "Failed to create category.");
+    } finally {
+      setIsCreatingCategory(false);
+    }
+  };
 
   useEffect(() => {
     const loadCategoriesAndAuthors = async () => {
@@ -739,9 +782,19 @@ export default function EditBookPage() {
 
             <div className="grid gap-6 md:grid-cols-3">
               <div className="space-y-2">
-                <Label htmlFor="category" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                  Category *
-                </Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="category" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                    Category *
+                  </Label>
+                  <button
+                    type="button"
+                    onClick={() => setAddCategoryModalOpen(true)}
+                    className="text-[11px] font-bold text-[#8A6D1E] hover:text-[#0F3D3E] underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="h-3 w-3" />
+                    <span>+ New Category</span>
+                  </button>
+                </div>
                 <Select
                   value={formData.category}
                   onValueChange={(val) =>
@@ -978,6 +1031,65 @@ export default function EditBookPage() {
           </CardContent>
         </Card>
       </form>
+
+      {/* Create Category Modal */}
+      <Dialog open={addCategoryModalOpen} onOpenChange={setAddCategoryModalOpen}>
+        <DialogContent className="max-w-md bg-white border-[#E2E6DF] rounded-2xl shadow-xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-serif font-bold text-[#0F3D3E]">
+              Add New Category
+            </DialogTitle>
+            <DialogDescription className="text-xs text-[#5C6E6E]">
+              Create a new book category. It will be permanently stored in your backend database.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleCreateCategory} className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                Category Name *
+              </Label>
+              <Input
+                placeholder="e.g. Self-Help, Mythology, Science Fiction"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                className="border-[#E2E6DF] rounded-xl text-sm"
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                Description (Optional)
+              </Label>
+              <Input
+                placeholder="Short description of this category"
+                value={newCategoryDescription}
+                onChange={(e) => setNewCategoryDescription(e.target.value)}
+                className="border-[#E2E6DF] rounded-xl text-xs"
+              />
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setAddCategoryModalOpen(false)}
+                className="border-[#E2E6DF]"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={isCreatingCategory || !newCategoryName.trim()}
+                className="bg-[#0F3D3E] text-white hover:bg-[#174C4D]"
+              >
+                {isCreatingCategory ? "Creating..." : "Save Category"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
