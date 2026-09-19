@@ -32,6 +32,7 @@ export function BookCard({
     ? book.coverImage
     : "/logo.webp";
   const [imgSrc, setImgSrc] = useState<string>(initialImage);
+  const [imageLoaded, setImageLoaded] = useState<boolean>(false);
 
   useEffect(() => {
     const validSrc = book.coverImage && (book.coverImage.startsWith("http") || book.coverImage.startsWith("/"))
@@ -201,8 +202,12 @@ export function BookCard({
             onError={() => setImgSrc("/logo.webp")}
             alt={book.title}
             fill
-            className="object-cover group-hover:scale-110 transition-transform duration-500"
-            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+            className={cn(
+            "object-cover group-hover:scale-105 transition-all duration-500 ease-out",
+            imageLoaded ? "opacity-100" : "opacity-0"
+          )}
+          onLoad={() => setImageLoaded(true)}
+          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
           />
 
           {/* Dynamic Glare Overlay */}

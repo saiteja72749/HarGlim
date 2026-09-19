@@ -51,20 +51,40 @@ const getOrderStatusBadge = (status: string) => {
     case "COMPLETED":
       return (
         <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 font-medium px-2.5 py-0.5">
-          Completed
+          Delivered
         </Badge>
       );
     case "SHIPPED":
     case "IN TRANSIT":
+    case "IN-TRANSIT":
       return (
         <Badge className="bg-blue-500/10 text-blue-700 border-blue-500/20 font-medium px-2.5 py-0.5">
-          In Transit
+          In Transit / Shipped
         </Badge>
       );
     case "PROCESSING":
+    case "PRINTING":
+    case "IN_PRINTING":
       return (
         <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/20 font-medium px-2.5 py-0.5">
           Printing / Processing
+        </Badge>
+      );
+    case "CONFIRMED":
+    case "PAID":
+    case "PAYMENT_APPROVED":
+    case "APPROVED":
+      return (
+        <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 font-medium px-2.5 py-0.5">
+          Order Confirmed
+        </Badge>
+      );
+    case "ORDER PLACED":
+    case "ORDER_PLACED":
+    case "PLACED":
+      return (
+        <Badge className="bg-indigo-500/10 text-indigo-700 border-indigo-500/20 font-medium px-2.5 py-0.5">
+          Order Placed
         </Badge>
       );
     case "CANCELLED":
@@ -76,8 +96,8 @@ const getOrderStatusBadge = (status: string) => {
       );
     default:
       return (
-        <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/20 font-medium px-2.5 py-0.5">
-          Payment Pending
+        <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 font-medium px-2.5 py-0.5">
+          {status || "Active"}
         </Badge>
       );
   }
@@ -86,11 +106,15 @@ const getOrderStatusBadge = (status: string) => {
 // Payment Status Badge mapping
 const getPaymentStatusBadge = (isPaid: boolean, paymentStatus?: string) => {
   const ps = (paymentStatus || "").toUpperCase();
-  if (isPaid || ps === "VERIFIED" || ps === "SUCCESS") {
+  const isApprovedOrPaid =
+    isPaid === true ||
+    ["PAID", "VERIFIED", "SUCCESS", "COMPLETED", "APPROVED", "CONFIRMED", "PAYMENT_APPROVED"].includes(ps);
+
+  if (isApprovedOrPaid) {
     return (
       <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/30 font-semibold flex items-center gap-1">
         <ShieldCheck className="h-3 w-3 text-emerald-600" />
-        <span>Verified</span>
+        <span>Paid & Verified</span>
       </Badge>
     );
   }
@@ -403,15 +427,28 @@ export default function OrdersPage() {
                         </div>
                       </div>
 
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setExpandedOrder(isExpanded ? null : id)}
-                        className="gap-1.5 text-xs text-[#0F3D3E] hover:text-[#0F3D3E] font-medium shrink-0"
-                      >
-                        <span>{isExpanded ? "Hide Details" : "View Order Details"}</span>
-                        {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                      </Button>
+                      <div className="flex items-center gap-2 flex-wrap shrink-0">
+                        <Link href={`/track-order?orderNumber=${encodeURIComponent(order.orderNumber || id)}`}>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 px-3 border-[#E2E6DF] hover:border-[#0F3D3E] text-xs font-semibold text-[#0F3D3E] gap-1.5 rounded-xl cursor-pointer"
+                          >
+                            <Truck className="h-3.5 w-3.5 text-[#8A6D1E]" />
+                            <span>Track Package</span>
+                          </Button>
+                        </Link>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setExpandedOrder(isExpanded ? null : id)}
+                          className="gap-1.5 text-xs text-[#0F3D3E] hover:text-[#0F3D3E] font-medium shrink-0"
+                        >
+                          <span>{isExpanded ? "Hide Details" : "View Order Details"}</span>
+                          {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        </Button>
+                      </div>
                     </div>
 
                     {/* --- PAYMENT UI (STRICT 4-STATE MACHINE ACCORDING TO PROMPT) --- */}
@@ -836,7 +873,7 @@ export default function OrdersPage() {
                                 </a>
                               )}
 
-                              <Link href={`/track-order?orderNumber=${encodeURIComponent(id)}`}>
+                              <Link href={`/track-order?orderNumber=${encodeURIComponent(order.orderNumber || id)}`}>
                                 <Button variant="ghost" size="sm" className="gap-1.5 text-xs text-[#0F3D3E]">
                                   <span>Public Tracking Page</span>
                                   <ExternalLink className="h-3.5 w-3.5" />

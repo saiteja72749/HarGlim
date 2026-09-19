@@ -18,6 +18,7 @@ import {
   TrendingUp,
   Feather,
   Layers,
+  Award,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BookCard } from "@/components/books/book-card";
@@ -81,7 +82,7 @@ export default function Home() {
   const [categories, setCategories] = useState<any[]>([]);
   const [authors, setAuthors] = useState<any[]>([]);
   const [liveStats, setLiveStats] = useState({ booksCount: 0, authorsCount: 0 });
-  const [, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [, setError] = useState(false);
 
   // FAQ Accordion & Search State
@@ -116,7 +117,10 @@ export default function Home() {
       if (booksRes.status === "fulfilled") {
         const data = booksRes.value.data;
         const items = data?.data?.books || data?.data || data || [];
-        setFeaturedBooks(Array.isArray(items) ? items : []);
+        const rawList = Array.isArray(items) ? items : [];
+        // Strictly enforce Feature on Home (isFeatured) flag; new release alone must not qualify
+        const strictlyFeatured = rawList.filter((b: any) => b.isFeatured === true || b.featured === true);
+        setFeaturedBooks(strictlyFeatured);
       }
 
       if (bestsellersRes.status === "fulfilled") {
@@ -265,19 +269,29 @@ export default function Home() {
                 <div className="absolute -inset-4 bg-gradient-to-r from-[#D4AF37]/30 to-emerald-500/30 rounded-3xl blur-2xl opacity-60 group-hover:opacity-100 transition-opacity" />
 
                 {/* 3D Floating Book Cover Card */}
-                {(() => {
-                  const heroBook = featuredBooks[0] || bestsellers[0] || null;
+                {loading ? (
+                    <div className="relative w-full h-full rounded-2xl overflow-hidden shadow-2xl border-2 border-[#D4AF37]/30 bg-[#0C3233] animate-pulse flex flex-col justify-end p-6">
+                      <div className="space-y-3 z-10">
+                        <div className="h-4 bg-[#D4AF37]/30 rounded-md w-1/3" />
+                        <div className="h-6 bg-white/20 rounded-md w-3/4" />
+                        <div className="h-3 bg-white/10 rounded-md w-1/2" />
+                      </div>
+                    </div>
+                  ) : (() => {
+                  // Only feature a book on the homepage hero if "Feature on Home" is explicitly enabled
+                  const heroBook = featuredBooks.find((b: any) => b.isFeatured === true || b.featured === true) || null;
                   const heroAuthor = heroBook ? getBookAuthorInfo(heroBook).name : "Harglim Publishers Catalog";
                   const heroCover = heroBook?.coverImage && (heroBook.coverImage.startsWith("http") || heroBook.coverImage.startsWith("/"))
                     ? heroBook.coverImage
                     : "/logo.webp";
                   const heroTitle = heroBook?.title || "Discover Inspiring Books";
-                  const heroTag = featuredBooks.length > 0 ? "Featured Release" : bestsellers.length > 0 ? "Popular Release" : "Harglim Publishers";
+                  const heroTag = heroBook ? "Featured on Home" : "Harglim Publishers";
 
                   return (
                     <motion.div
-                      animate={{ y: [0, -10, 0] }}
-                      transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1, y: [0, -10, 0] }}
+                      transition={{ opacity: { duration: 0.5 }, y: { repeat: Infinity, duration: 4, ease: "easeInOut" } }}
                       className="relative w-full h-full rounded-2xl overflow-hidden shadow-2xl border-2 border-[#D4AF37]/40 bg-[#0C3233] flex flex-col justify-end"
                     >
                       <Image
@@ -314,10 +328,60 @@ export default function Home() {
         </div>
       </section>
 
+      
       {/* ------------------------------------------------------------------ */}
-      {/* 2. FEATURED BOOKS CAROUSEL (Strictly conditional: Only renders if books are featured) */}
+      {/* TRUST & PUBLISHING EXCELLENCE STRIP */}
       {/* ------------------------------------------------------------------ */}
-      {featuredBooks.length > 0 && (
+      <section className="bg-white border-b border-[#E2E6DF] py-6 shadow-2xs">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
+            <div className="flex items-center gap-3.5 p-2 rounded-xl hover:bg-[#F8F9F7] transition-colors">
+              <div className="h-11 w-11 rounded-xl bg-[#0F3D3E]/10 text-[#0F3D3E] flex items-center justify-center shrink-0">
+                <Truck className="h-5 w-5 text-[#8A6D1E]" />
+              </div>
+              <div>
+                <p className="font-serif font-bold text-xs sm:text-sm text-[#0F3D3E]">Nationwide Dispatch</p>
+                <p className="text-[11px] text-[#5C6E6E] font-sans">Tracked India Post & Express</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3.5 p-2 rounded-xl hover:bg-[#F8F9F7] transition-colors">
+              <div className="h-11 w-11 rounded-xl bg-[#0F3D3E]/10 text-[#0F3D3E] flex items-center justify-center shrink-0">
+                <ShieldCheck className="h-5 w-5 text-[#8A6D1E]" />
+              </div>
+              <div>
+                <p className="font-serif font-bold text-xs sm:text-sm text-[#0F3D3E]">100% Verified UPI</p>
+                <p className="text-[11px] text-[#5C6E6E] font-sans">Instant UTR confirmation</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3.5 p-2 rounded-xl hover:bg-[#F8F9F7] transition-colors">
+              <div className="h-11 w-11 rounded-xl bg-[#0F3D3E]/10 text-[#0F3D3E] flex items-center justify-center shrink-0">
+                <Sparkles className="h-5 w-5 text-[#8A6D1E]" />
+              </div>
+              <div>
+                <p className="font-serif font-bold text-xs sm:text-sm text-[#0F3D3E]">Fine Print Quality</p>
+                <p className="text-[11px] text-[#5C6E6E] font-sans">Premium paper & binding</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3.5 p-2 rounded-xl hover:bg-[#F8F9F7] transition-colors">
+              <div className="h-11 w-11 rounded-xl bg-[#0F3D3E]/10 text-[#0F3D3E] flex items-center justify-center shrink-0">
+                <Award className="h-5 w-5 text-[#8A6D1E]" />
+              </div>
+              <div>
+                <p className="font-serif font-bold text-xs sm:text-sm text-[#0F3D3E]">Direct Royalties</p>
+                <p className="text-[11px] text-[#5C6E6E] font-sans">Transparent author payouts</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* 2. FEATURED BOOKS CAROUSEL (Smooth Landing with Zero Layout Jumps) */}
+      {/* ------------------------------------------------------------------ */}
+      {(loading || featuredBooks.length > 0) && (
         <section className="py-16 sm:py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-end justify-between mb-8">
             <div>
@@ -329,20 +393,56 @@ export default function Home() {
                 Featured Releases
               </h2>
             </div>
-            <Link href="/books" className="hidden sm:flex items-center gap-1 text-sm font-serif font-bold text-[#0F3D3E] hover:text-[#D4AF37]">
+            <Link href="/books" className="hidden sm:flex items-center gap-1 text-sm font-serif font-bold text-[#0F3D3E] hover:text-[#D4AF37] transition-colors">
               <span>View All Books</span>
               <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {featuredBooks.slice(0, 4).map((book) => (
-              <BookCard key={book._id || (book as any).id} book={book} />
-            ))}
-          </div>
+          {loading ? (
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {[1, 2, 3, 4].map((n) => (
+                <div key={n} className="bg-white/80 rounded-2xl border border-[#E2E6DF] p-3 sm:p-4 space-y-3 shadow-xs animate-pulse">
+                  <div className="aspect-[2/3] w-full bg-[#F0F2EE] rounded-xl relative overflow-hidden" />
+                  <div className="space-y-2 pt-1">
+                    <div className="h-4 bg-[#E2E6DF] rounded-md w-4/5" />
+                    <div className="h-3 bg-[#E2E6DF]/60 rounded-md w-1/2" />
+                  </div>
+                  <div className="flex items-center justify-between pt-2">
+                    <div className="h-4 bg-[#E2E6DF] rounded-md w-1/3" />
+                    <div className="h-8 w-8 bg-[#E2E6DF] rounded-lg" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <motion.div
+              initial="hidden"
+              animate="visible"
+              variants={{
+                hidden: { opacity: 0 },
+                visible: {
+                  opacity: 1,
+                  transition: { staggerChildren: 0.08 }
+                }
+              }}
+              className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-6"
+            >
+              {featuredBooks.slice(0, 4).map((book) => (
+                <motion.div
+                  key={book._id || (book as any).id}
+                  variants={{
+                    hidden: { opacity: 0, y: 14 },
+                    visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: "easeOut" } }
+                  }}
+                >
+                  <BookCard book={book} />
+                </motion.div>
+              ))}
+            </motion.div>
+          )}
         </section>
       )}
-
 
       {/* ------------------------------------------------------------------ */}
       {/* 3. WHY CHOOSE HARGILM (Glassmorphic Trust Blocks) */}
@@ -430,7 +530,7 @@ export default function Home() {
       {/* ------------------------------------------------------------------ */}
       {/* 5. BESTSELLERS / TOP RATED THIS WEEK (/api/books API) */}
       {/* ------------------------------------------------------------------ */}
-      {bestsellers.length > 0 && (
+      {(loading || bestsellers.length > 0) && (
         <section className="py-16 sm:py-20 bg-white border-y border-[#E2E6DF]">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-end justify-between mb-8">
@@ -443,17 +543,54 @@ export default function Home() {
                   Top Rated This Week
                 </h2>
               </div>
-              <Link href="/books" className="hidden sm:flex items-center gap-1 text-sm font-serif font-bold text-[#0F3D3E] hover:text-[#D4AF37]">
+              <Link href="/books" className="hidden sm:flex items-center gap-1 text-sm font-serif font-bold text-[#0F3D3E] hover:text-[#D4AF37] transition-colors">
                 <span>Explore Catalog</span>
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {bestsellers.map((book) => (
-                <BookCard key={book._id || (book as any).id} book={book} />
-              ))}
-            </div>
+            {loading ? (
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                {[1, 2, 3, 4].map((n) => (
+                  <div key={n} className="bg-white rounded-2xl border border-[#E2E6DF] p-3 sm:p-4 space-y-3 shadow-xs animate-pulse">
+                    <div className="aspect-[2/3] w-full bg-[#F0F2EE] rounded-xl relative overflow-hidden" />
+                    <div className="space-y-2 pt-1">
+                      <div className="h-4 bg-[#E2E6DF] rounded-md w-4/5" />
+                      <div className="h-3 bg-[#E2E6DF]/60 rounded-md w-1/2" />
+                    </div>
+                    <div className="flex items-center justify-between pt-2">
+                      <div className="h-4 bg-[#E2E6DF] rounded-md w-1/3" />
+                      <div className="h-8 w-8 bg-[#E2E6DF] rounded-lg" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <motion.div
+                initial="hidden"
+                animate="visible"
+                variants={{
+                  hidden: { opacity: 0 },
+                  visible: {
+                    opacity: 1,
+                    transition: { staggerChildren: 0.08 }
+                  }
+                }}
+                className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-6"
+              >
+                {bestsellers.map((book) => (
+                  <motion.div
+                    key={book._id || (book as any).id}
+                    variants={{
+                      hidden: { opacity: 0, y: 14 },
+                      visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: "easeOut" } }
+                    }}
+                  >
+                    <BookCard book={book} />
+                  </motion.div>
+                ))}
+              </motion.div>
+            )}
           </div>
         </section>
       )}

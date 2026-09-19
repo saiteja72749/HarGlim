@@ -272,18 +272,25 @@ export default function AuthorRoyaltiesPage() {
                           ₹{(s.amount || s.totalRoyalty || s.totalAmount || 0).toLocaleString("en-IN")}
                         </td>
                         <td className="py-3 px-4">
-                          <Badge
-                            variant="outline"
-                            className={
-                              s.status === "PAID"
-                                ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/20"
-                                : s.status === "APPROVED"
-                                ? "bg-blue-500/10 text-blue-700 border-blue-500/20"
-                                : "bg-amber-500/10 text-amber-700 border-amber-500/20"
-                            }
-                          >
-                            {s.status}
-                          </Badge>
+                          {(() => {
+                            const st = (s.status || "").toUpperCase();
+                            const isPaid = st === "PAID" || st === "COMPLETED";
+                            const isApproved = st === "APPROVED" || st === "CONFIRMED";
+                            return (
+                              <Badge
+                                variant="outline"
+                                className={
+                                  isPaid
+                                    ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/20 font-semibold"
+                                    : isApproved
+                                    ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/20 font-semibold"
+                                    : "bg-amber-500/10 text-amber-700 border-amber-500/20 font-semibold"
+                                }
+                              >
+                                {isPaid ? "Paid" : isApproved ? "Payment Approved" : s.status || "Pending"}
+                              </Badge>
+                            );
+                          })()}
                         </td>
                         <td className="py-3 px-4 font-mono text-xs text-[#5C6E6E]">
                           {s.transactionReference || s.payoutDetails?.transactionReference || "—"}

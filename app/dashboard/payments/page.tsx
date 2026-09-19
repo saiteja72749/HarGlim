@@ -43,6 +43,9 @@ const getStatusColor = (status: string) => {
     case "VERIFIED":
     case "PAID":
     case "PAYMENT_VERIFIED":
+    case "APPROVED":
+    case "CONFIRMED":
+    case "SUCCESS":
       return "bg-emerald-500/10 text-emerald-600 border-emerald-500/20";
     case "PENDING":
     case "VERIFICATION_PENDING":
@@ -72,6 +75,9 @@ const getStatusIcon = (status: string) => {
     case "VERIFIED":
     case "PAID":
     case "PAYMENT_VERIFIED":
+    case "APPROVED":
+    case "CONFIRMED":
+    case "SUCCESS":
       return CheckCircle;
     case "PENDING":
     case "VERIFICATION_PENDING":
@@ -96,6 +102,9 @@ const getFriendlyStatus = (status: string) => {
     case "VERIFIED":
     case "PAID":
     case "PAYMENT_VERIFIED":
+    case "APPROVED":
+    case "CONFIRMED":
+    case "SUCCESS":
       return "Verified";
     case "VERIFICATION_PENDING":
     case "PAYMENT_SUBMITTED":

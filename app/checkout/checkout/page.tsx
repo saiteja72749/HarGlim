@@ -2,7 +2,8 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { CreditCard, QrCode, CheckCircle2, Loader2, X } from 'lucide-react';
+import { CreditCard, QrCode, CheckCircle2, Loader2, X, Copy, Check } from 'lucide-react';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { useCartStore } from '@/store/cart-store';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -42,6 +43,21 @@ export default function CheckoutStepPage() {
   const [backendOrder, setBackendOrder] = useState<any>(null);
   const [backendPayment, setBackendPayment] = useState<any>(null);
   const [utr, setUtr] = useState('');
+  const [copiedUpi, setCopiedUpi] = useState(false);
+  const [copiedAmt, setCopiedAmt] = useState(false);
+
+  const copyText = (text: string, type: 'upi' | 'amt') => {
+    navigator.clipboard.writeText(text);
+    if (type === 'upi') {
+      setCopiedUpi(true);
+      toast.success("UPI ID copied! 📋");
+      setTimeout(() => setCopiedUpi(false), 2000);
+    } else {
+      setCopiedAmt(true);
+      toast.success("Amount copied! 📋");
+      setTimeout(() => setCopiedAmt(false), 2000);
+    }
+  };
 
   const [upiUrl, setUpiUrl] = useState('');
 
@@ -155,6 +171,25 @@ export default function CheckoutStepPage() {
     <AuthGuard>
       <div className="bg-background min-h-screen py-16">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+          {/* 3-Step Checkout Progress Stepper */}
+          <div className="mb-8 bg-card border border-border rounded-2xl p-4 shadow-2xs">
+            <div className="flex items-center justify-between max-w-2xl mx-auto text-xs font-serif font-bold">
+              <Link href="/checkout/cart" className="flex items-center gap-2 text-emerald-700 hover:underline">
+                <span className="h-7 w-7 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-sans text-xs">✓</span>
+                <span>1. Cart Review</span>
+              </Link>
+              <div className="h-0.5 w-10 sm:w-16 bg-emerald-300" />
+              <div className="flex items-center gap-2 text-foreground">
+                <span className="h-7 w-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-sans text-xs">2</span>
+                <span>2. Delivery Address</span>
+              </div>
+              <div className="h-0.5 w-10 sm:w-16 bg-border" />
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <span className="h-7 w-7 rounded-full bg-muted text-muted-foreground flex items-center justify-center font-sans text-xs">3</span>
+                <span>3. UPI Payment &amp; UTR</span>
+              </div>
+            </div>
+          </div>
           <div className="mb-10">
             <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground">Checkout</p>
             <h1 className="text-3xl font-bold">Complete Your Order</h1>
@@ -349,9 +384,17 @@ export default function CheckoutStepPage() {
                         Order #{currentOrderNumber}
                       </span>
                       <h3 className="text-xl font-serif font-bold text-[#0F3D3E]">Scan to Pay with UPI</h3>
-                      <p className="text-xs text-[#5C6E6E]">
-                        Amount: <span className="font-bold text-[#0F3D3E] text-base">₹{(backendPayment?.amount ?? backendOrder?.totalPrice ?? total).toFixed(2)}</span>
-                      </p>
+                      <div className="flex items-center justify-center gap-2 text-xs text-[#5C6E6E]">
+                        <span>Amount: <strong className="text-[#0F3D3E] text-base font-bold font-serif">₹{(backendPayment?.amount ?? backendOrder?.totalPrice ?? total).toFixed(2)}</strong></span>
+                        <button
+                          type="button"
+                          onClick={() => copyText((backendPayment?.amount ?? backendOrder?.totalPrice ?? total).toFixed(2), 'amt')}
+                          className="p-1 text-[#5C6E6E] hover:text-[#0F3D3E] rounded border border-[#E2E6DF] bg-white text-[10px] font-mono cursor-pointer"
+                          title="Copy amount"
+                        >
+                          {copiedAmt ? <Check className="h-3 w-3 text-emerald-600 inline" /> : <Copy className="h-3 w-3 inline" />}
+                        </button>
+                      </div>
                     </div>
 
                     <div className="aspect-square bg-white w-48 mx-auto rounded-2xl border-2 border-dashed border-[#E2E6DF] flex items-center justify-center mb-4 overflow-hidden shadow-xs">
@@ -363,7 +406,17 @@ export default function CheckoutStepPage() {
                       )}
                     </div>
 
-                    {upiUrl && (
+                    <div className="flex items-center justify-center gap-2 mb-3">
+                        <button
+                          type="button"
+                          onClick={() => copyText("harglimpublications@okaxis", 'upi')}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#F8F9F7] hover:bg-[#F0F2ED] border border-[#E2E6DF] rounded-xl text-xs font-mono font-semibold text-[#0F3D3E] transition-colors cursor-pointer"
+                        >
+                          {copiedUpi ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                          <span>{copiedUpi ? "UPI ID Copied" : "Copy UPI ID"}</span>
+                        </button>
+                      </div>
+                      {upiUrl && (
                       <a
                         href={upiUrl}
                         target="_self"

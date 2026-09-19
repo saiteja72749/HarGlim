@@ -7,13 +7,15 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Star,
+  Barcode,
   ShoppingCart,
   BookOpen,
-  Calendar,
   FileText,
   Globe,
   Truck,
   ShieldCheck,
+  Copy,
+  Check,
   ChevronRight,
   Minus,
   Plus,
@@ -51,8 +53,17 @@ export default function BookDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [quantity, setQuantity] = useState(1);
+  const [copiedIsbn, setCopiedIsbn] = useState(false);
+
+  const handleCopyIsbn = (text: string) => {
+    if (!text || text === "N/A") return;
+    navigator.clipboard.writeText(text);
+    setCopiedIsbn(true);
+    toast.success("ISBN copied to clipboard! 📋");
+    setTimeout(() => setCopiedIsbn(false), 2000);
+  };
   const [selectedImage, setSelectedImage] = useState(0);
-  const [selectedFormat, setSelectedFormat] = useState<string>("Paperback");
+  // format is read directly from book.format
   const [isSynopsisExpanded, setIsSynopsisExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<"synopsis" | "details" | "reviews">("synopsis");
 
@@ -156,7 +167,7 @@ export default function BookDetailPage() {
       const bookData = bookRes.data.data || bookRes.data;
       if (bookData) {
         setBook(bookData as Book);
-        if (bookData.format) setSelectedFormat(bookData.format);
+        // format read from book.format
       } else {
         setBook(null);
       }
@@ -301,9 +312,7 @@ export default function BookDetailPage() {
     router.push("/checkout/cart");
   };
 
-  const availableFormats: string[] = Array.isArray((book as any).formats) && (book as any).formats.length > 0
-    ? (book as any).formats
-    : [book.format || "Paperback"];
+  
 
   return (
     <div className="bg-[#F8F9F7] min-h-screen text-[#0F3D3E]">
@@ -506,7 +515,7 @@ export default function BookDetailPage() {
                   <BookOpen className="h-4 w-4 text-[#0F3D3E] shrink-0" />
                   <div>
                     <span className="text-[#5C6E6E] block text-[10px]">Format</span>
-                    <span className="font-bold text-[#0F3D3E]">{book.format || "Paperback"}</span>
+                    <span className="font-bold text-[#0F3D3E] capitalize">{book.format || "Paperback"}</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-[#F8F9F7]">
@@ -523,14 +532,26 @@ export default function BookDetailPage() {
                     <span className="font-bold text-[#0F3D3E]">{book.language || "English"}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-[#F8F9F7]">
-                  <Calendar className="h-4 w-4 text-[#0F3D3E] shrink-0" />
-                  <div>
-                    <span className="text-[#5C6E6E] block text-[10px]">Published</span>
-                    <span className="font-bold text-[#0F3D3E]">
-                      {book.publishedDate ? new Date(book.publishedDate).getFullYear() : "N/A"}
-                    </span>
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#F8F9F7]">
+                  <div className="flex items-center gap-2.5">
+                    <Barcode className="h-4 w-4 text-[#0F3D3E] shrink-0" />
+                    <div>
+                      <span className="text-[#5C6E6E] block text-[10px]">ISBN</span>
+                      <span className="font-bold text-[#0F3D3E] font-mono select-all">
+                        {book.isbn || "N/A"}
+                      </span>
+                    </div>
                   </div>
+                  {book.isbn && book.isbn !== "N/A" && (
+                    <button
+                      type="button"
+                      onClick={() => handleCopyIsbn(book.isbn || "")}
+                      className="p-1.5 rounded-lg hover:bg-[#E2E6DF]/60 text-[#5C6E6E] hover:text-[#0F3D3E] transition-colors"
+                      title="Copy ISBN"
+                    >
+                      {copiedIsbn ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -575,30 +596,6 @@ export default function BookDetailPage() {
                 </div>
               </div>
 
-              {/* Format Selection Pills */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-wider text-[#5C6E6E] block">
-                  Select Edition
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {availableFormats.map((fmt: string) => (
-                    <button
-                      key={fmt}
-                      type="button"
-                      onClick={() => setSelectedFormat(fmt)}
-                      className={cn(
-                        "py-2 px-2 text-xs font-bold rounded-xl border transition-all text-center",
-                        selectedFormat === fmt
-                          ? "bg-[#0F3D3E] text-white border-[#0F3D3E] shadow-xs"
-                          : "bg-white text-[#0F3D3E] border-[#E2E6DF] hover:border-[#0F3D3E]/40"
-                      )}
-                    >
-                      {fmt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               {/* Quantity Selector */}
               <div className="space-y-2">
                 <label className="text-xs font-bold uppercase tracking-wider text-[#5C6E6E] block">
@@ -631,6 +628,10 @@ export default function BookDetailPage() {
               </div>
 
               {/* Primary Purchase Buttons (Bigger, 12px Rounded) */}
+              <div className="flex items-center gap-2.5 p-3 rounded-xl bg-[#0F3D3E]/5 border border-[#0F3D3E]/10 text-xs text-[#0F3D3E]">
+                <Truck className="h-4 w-4 text-[#8A6D1E] shrink-0" />
+                <span className="font-sans">Usually dispatches in <strong className="font-semibold">24-48 hours</strong> via Blue Dart / India Post</span>
+              </div>
               <div className="space-y-3 pt-2">
                 <Button
                   onClick={handleAddToCart}
@@ -1060,6 +1061,22 @@ export default function BookDetailPage() {
             </div>
           </section>
         )}
+      </div>
+
+      {/* Mobile Sticky Bottom Add to Cart Bar */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-[#E2E6DF] p-3 px-4 shadow-lg flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="font-serif font-bold text-xs text-[#0F3D3E] truncate">{book.title}</p>
+          <p className="font-serif font-bold text-sm text-[#0F3D3E]">₹{book.price}</p>
+        </div>
+        <Button
+          onClick={handleAddToCart}
+          disabled={(book.stock ?? 1) <= 0}
+          className="bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] font-serif font-bold text-xs h-10 px-5 rounded-xl shadow-xs shrink-0"
+        >
+          <ShoppingCart className="h-4 w-4 mr-1.5" />
+          <span>{(book.stock ?? 1) <= 0 ? "Out of Stock" : "Add to Cart"}</span>
+        </Button>
       </div>
     </div>
   );

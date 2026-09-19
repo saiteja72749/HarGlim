@@ -21,6 +21,65 @@ import {
 import { Switch } from "@/components/ui/switch";
 import toast from "react-hot-toast";
 
+export const BISAC_CATEGORIES = [
+  "Antiques & Collectibles",
+  "Architecture",
+  "Art",
+  "Bibles",
+  "Biography & Autobiography",
+  "Body, Mind & Spirit",
+  "Business & Economics",
+  "Comics & Graphic Novels",
+  "Computers",
+  "Cooking",
+  "Crafts & Hobbies",
+  "Design",
+  "Drama",
+  "Education",
+  "Family & Relationships",
+  "Fiction",
+  "Foreign Language Study",
+  "Games & Activities",
+  "Gardening",
+  "Health & Fitness",
+  "History",
+  "House & Home",
+  "Humor",
+  "Juvenile Fiction",
+  "Juvenile Nonfiction",
+  "Language Arts & Disciplines",
+  "Language Study",
+  "Law",
+  "Literary Collections",
+  "Literary Criticism",
+  "Mathematics",
+  "Medical",
+  "Mind, Body, Spirit",
+  "Music",
+  "Nature",
+  "Performing Arts",
+  "Pets",
+  "Philosophy",
+  "Photography",
+  "Poetry",
+  "Political Science",
+  "Psychology",
+  "Reference",
+  "Religion",
+  "Science",
+  "Self-Help",
+  "Social Science",
+  "Sports & Recreation",
+  "Study Aids",
+  "Technology & Engineering",
+  "Transportation",
+  "Travel",
+  "True Crime",
+  "Young Adult Fiction",
+  "Young Adult Nonfiction",
+  "Non-Classifiable",
+];
+
 type AuthorType = "existing" | "new" | "external";
 
 export default function EditBookPage() {
@@ -51,6 +110,9 @@ export default function EditBookPage() {
     stock: "0",
     isbn: "",
     status: "published",
+    format: "paperback",
+    pages: "250",
+    language: "English",
     isFeatured: false,
     isBestseller: false,
     isNewRelease: false,
@@ -127,7 +189,7 @@ export default function EditBookPage() {
         });
 
         setAuthorsList(combined);
-      } catch (err) {
+      } catch (err: any) {
         console.warn("Failed to load categories and authors:", err);
       }
     };
@@ -203,6 +265,9 @@ export default function EditBookPage() {
             stock: bookData.stock?.toString() || "0",
             isbn: bookData.isbn || "",
             status: bookData.status === "Active" ? "published" : (bookData.status || "published"),
+            format: bookData.format || "paperback",
+            pages: bookData.pages?.toString() || "250",
+            language: bookData.language || "English",
             isFeatured: Boolean(bookData.isFeatured),
             isBestseller: Boolean(bookData.isBestseller),
             isNewRelease: Boolean(bookData.isNewRelease),
@@ -211,7 +276,7 @@ export default function EditBookPage() {
         } else {
           toast.error("Book not found in database.");
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to fetch book details:", err);
         toast.error("Could not load book data.");
       } finally {
@@ -240,7 +305,7 @@ export default function EditBookPage() {
     setLoading(true);
 
     try {
-      // 1. RESOLVE OR PROVISION AUTHOR
+      // 1. RESOLVE AUTHOR
       let finalAuthorId: string | null = null;
       let targetAuthorDisplayName = "";
 
@@ -253,83 +318,56 @@ export default function EditBookPage() {
         finalAuthorId = selectedAuthorId;
         const found = authorsList.find((a) => (a._id || a.id) === selectedAuthorId);
         targetAuthorDisplayName = found?.name || selectedAuthorName || formData.authorName;
-      } else {
-        targetAuthorDisplayName = (
-          authorType === "new" ? newAuthorName : externalAuthorName || formData.authorName
-        ).trim();
+      } else if (authorType === "new") {
+        targetAuthorDisplayName = newAuthorName.trim();
+        if (!targetAuthorDisplayName) {
+          toast.error("Please enter the new author's name.");
+          setLoading(false);
+          return;
+        }
 
+        // Try creating author profile via dedicated admin user endpoint (never use public register)
+        const cleanSlug = targetAuthorDisplayName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 15) || "writer";
+        const emailToUse = newAuthorEmail.trim() || `author.${cleanSlug}.${Date.now().toString().slice(-4)}@harglim.internal`;
+        const tempPassword = `Author#${Math.random().toString(36).slice(-6)}!Aa1`;
+
+        try {
+          const adminUserRes = await api.post("/admin/users", {
+            name: targetAuthorDisplayName,
+            email: emailToUse,
+            password: tempPassword,
+            role: "author",
+            isActive: true,
+          });
+          const uData = adminUserRes?.data?.data?.user || adminUserRes?.data?.user || adminUserRes?.data?.data || adminUserRes?.data;
+          finalAuthorId = uData?._id || uData?.id || null;
+          if (finalAuthorId) {
+            toast.success(`Author account created for "${targetAuthorDisplayName}"`);
+          }
+        } catch (adminErr: any) {
+          console.warn("Admin user creation error:", adminErr?.message);
+          finalAuthorId = selectedAuthorId || null;
+        }
+      } else {
+        // External or Guest author - never call registration to prevent session disruption
+        targetAuthorDisplayName = (externalAuthorName || formData.authorName || "").trim();
         if (!targetAuthorDisplayName) {
           toast.error("Please enter the author's name.");
           setLoading(false);
           return;
         }
-
-        // Check if an existing author matches this exact name
         const existingByName = authorsList.find(
           (a) => a.name?.toLowerCase().trim() === targetAuthorDisplayName.toLowerCase()
         );
-
         if (existingByName && /^[0-9a-fA-F]{24}$/.test(existingByName._id || existingByName.id)) {
           finalAuthorId = existingByName._id || existingByName.id;
-        } else {
-          // Provision or register author user account
-          const cleanSlug = targetAuthorDisplayName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 15) || "writer";
-          const emailToUse = (authorType === "new" && newAuthorEmail.trim())
-            ? newAuthorEmail.trim()
-            : `author.${cleanSlug}.${Date.now().toString().slice(-4)}@harglim.internal`;
-          const tempPassword = `Author#${Math.random().toString(36).slice(-6)}!Aa1`;
-
-          toast.loading(`Configuring author profile for "${targetAuthorDisplayName}"...`, { id: "edit-author" });
-
-          try {
-            let newUserId: string | null = null;
-            try {
-              const adminUserRes = await api.post("/admin/users", {
-                name: targetAuthorDisplayName,
-                email: emailToUse,
-                password: tempPassword,
-                role: "author",
-                isActive: true,
-              });
-              const uData =
-                adminUserRes?.data?.data?.user ||
-                adminUserRes?.data?.user ||
-                adminUserRes?.data?.data ||
-                adminUserRes?.data;
-              newUserId = uData?._id || uData?.id;
-            } catch (adminErr: any) {
-              const regRes = await api.post("/auth/register", {
-                name: targetAuthorDisplayName,
-                email: emailToUse,
-                password: tempPassword,
-              });
-              const regData = regRes?.data?.user || regRes?.data?.data?.user || regRes?.data?.data || regRes?.data;
-              newUserId = regData?._id || regData?.id;
-
-              if (newUserId) {
-                await api.patch(`/admin/users/${newUserId}/role`, { role: "author" }).catch(() =>
-                  api.put(`/admin/users/${newUserId}/role`, { role: "author" }).catch(() => null)
-                );
-              }
-            }
-
-            if (newUserId) {
-              finalAuthorId = newUserId;
-              toast.success(`Author profile configured!`, { id: "edit-author" });
-            } else {
-              toast.dismiss("edit-author");
-              finalAuthorId = selectedAuthorId || null;
-            }
-          } catch (regErr: any) {
-            console.warn("Author registration/fallback:", regErr);
-            toast.dismiss("edit-author");
-            finalAuthorId = selectedAuthorId || null;
-          }
+        } else if (selectedAuthorId && /^[0-9a-fA-F]{24}$/.test(selectedAuthorId)) {
+          finalAuthorId = selectedAuthorId;
         }
       }
 
-      // 2. COVER IMAGE UPLOAD
-      let coverImageUrl: string | undefined = undefined;
+      // 2. COVER IMAGE UPLOAD (IF NEW IMAGE ATTACHED)
+      let coverImageUrl = undefined;
       if (imageFile) {
         try {
           const uploadFormData = new FormData();
@@ -347,11 +385,11 @@ export default function EditBookPage() {
         }
       }
 
-      // 3. CONSTRUCT PAYLOAD
+      // 3. CONSTRUCT STRICT CLEAN JSON PAYLOAD
       const numericPrice = Number(formData.price) || 0;
       const statusValue = formData.status === "Active" ? "published" : formData.status;
 
-      const jsonPayload: Record<string, any> = {
+      const jsonPayload: any = {
         title: formData.title.trim(),
         authorName: targetAuthorDisplayName || undefined,
         description: formData.description.trim(),
@@ -361,6 +399,9 @@ export default function EditBookPage() {
         stock: Number(formData.stock) || 0,
         isbn: formData.isbn.trim() || undefined,
         status: statusValue,
+        format: formData.format || "paperback",
+        pages: formData.pages ? Number(formData.pages) : 250,
+        language: formData.language || "English",
         isFeatured: Boolean(formData.isFeatured),
         isBestseller: Boolean(formData.isBestseller),
         isNewRelease: Boolean(formData.isNewRelease),
@@ -377,15 +418,29 @@ export default function EditBookPage() {
         jsonPayload.coverImage = coverImageUrl;
       }
 
-      await api
-        .put(`/admin/books/${bookId}`, jsonPayload)
-        .catch(() => api.put(`/books/${bookId}`, jsonPayload));
+      // Execute update with graceful fallback
+      let updateSuccess = false;
+      try {
+        await api.put(`/admin/books/${bookId}`, jsonPayload);
+        updateSuccess = true;
+      } catch (putErr: any) {
+        console.warn("Primary /admin/books put failed, trying /books fallback:", putErr?.message);
+        try {
+          await api.put(`/books/${bookId}`, jsonPayload);
+          updateSuccess = true;
+        } catch (fallbackErr: any) {
+          throw putErr || fallbackErr;
+        }
+      }
 
-      toast.success("Book updated successfully!");
-      router.push("/admin/books");
-    } catch (err: any) {
+      if (updateSuccess) {
+        toast.success("Book updated successfully! 📚");
+        router.push("/admin/books");
+      }
+    } catch (err) {
       console.error("Failed to update book:", err);
-      toast.error(err?.response?.data?.message || err?.message || "Failed to update book");
+      const errMsg = (err as any)?.response?.data?.message || (err as any)?.message || "Failed to update book";
+      toast.error(errMsg);
     } finally {
       setLoading(false);
     }
@@ -696,16 +751,15 @@ export default function EditBookPage() {
                   <SelectTrigger className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-sm">
                     <SelectValue placeholder="Select Category" />
                   </SelectTrigger>
-                  <SelectContent className="bg-white border-[#E2E6DF]">
-                    {categoriesList.length > 0 ? (
-                      categoriesList.map((cat: any) => (
-                        <SelectItem key={cat._id || cat.id} value={cat._id || cat.id}>
-                          {cat.name}
-                        </SelectItem>
-                      ))
-                    ) : (
-                      <SelectItem value="General">General</SelectItem>
-                    )}
+                  <SelectContent className="bg-white border-[#E2E6DF] max-h-72">
+                    {Array.from(new Set([
+                      ...categoriesList.map((c: any) => c.name || c),
+                      ...BISAC_CATEGORIES
+                    ])).map((categoryName) => (
+                      <SelectItem key={categoryName} value={categoryName}>
+                        {categoryName}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -775,6 +829,58 @@ export default function EditBookPage() {
                   value={formData.stock}
                   onChange={handleInputChange}
                   className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-sm font-bold font-mono"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="format" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                  Format *
+                </Label>
+                <Select
+                  value={formData.format}
+                  onValueChange={(val) => setFormData((prev) => ({ ...prev, format: val }))}
+                >
+                  <SelectTrigger className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-sm font-bold">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border-[#E2E6DF]">
+                    <SelectItem value="paperback">Paperback</SelectItem>
+                    <SelectItem value="hardcover">Hardcover</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="pages" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                  Number of Pages *
+                </Label>
+                <Input
+                  id="pages"
+                  name="pages"
+                  type="number"
+                  min="1"
+                  required
+                  value={formData.pages}
+                  onChange={handleInputChange}
+                  placeholder="e.g. 250"
+                  className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-sm font-bold font-mono"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="language" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                  Language *
+                </Label>
+                <Input
+                  id="language"
+                  name="language"
+                  required
+                  value={formData.language}
+                  onChange={handleInputChange}
+                  placeholder="e.g. English, Hindi, Telugu"
+                  className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-sm font-bold"
                 />
               </div>
             </div>

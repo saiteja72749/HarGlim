@@ -20,6 +20,65 @@ import {
 import { Switch } from "@/components/ui/switch";
 import toast from "react-hot-toast";
 
+export const BISAC_CATEGORIES = [
+  "Antiques & Collectibles",
+  "Architecture",
+  "Art",
+  "Bibles",
+  "Biography & Autobiography",
+  "Body, Mind & Spirit",
+  "Business & Economics",
+  "Comics & Graphic Novels",
+  "Computers",
+  "Cooking",
+  "Crafts & Hobbies",
+  "Design",
+  "Drama",
+  "Education",
+  "Family & Relationships",
+  "Fiction",
+  "Foreign Language Study",
+  "Games & Activities",
+  "Gardening",
+  "Health & Fitness",
+  "History",
+  "House & Home",
+  "Humor",
+  "Juvenile Fiction",
+  "Juvenile Nonfiction",
+  "Language Arts & Disciplines",
+  "Language Study",
+  "Law",
+  "Literary Collections",
+  "Literary Criticism",
+  "Mathematics",
+  "Medical",
+  "Mind, Body, Spirit",
+  "Music",
+  "Nature",
+  "Performing Arts",
+  "Pets",
+  "Philosophy",
+  "Photography",
+  "Poetry",
+  "Political Science",
+  "Psychology",
+  "Reference",
+  "Religion",
+  "Science",
+  "Self-Help",
+  "Social Science",
+  "Sports & Recreation",
+  "Study Aids",
+  "Technology & Engineering",
+  "Transportation",
+  "Travel",
+  "True Crime",
+  "Young Adult Fiction",
+  "Young Adult Nonfiction",
+  "Non-Classifiable",
+];
+
 type AuthorType = "existing" | "new" | "external";
 
 export default function AddBookPage() {
@@ -61,6 +120,7 @@ export default function AddBookPage() {
     status: "published",
     format: "paperback",
     pages: "250",
+    language: "English",
     isFeatured: false,
     isBestseller: false,
     isNewRelease: false,
@@ -370,6 +430,7 @@ export default function AddBookPage() {
         status: formData.status === "Active" ? "published" : formData.status,
         format: formData.format || "paperback",
         pages: formData.pages ? Number(formData.pages) : 250,
+        language: formData.language || "English",
         isFeatured: Boolean(formData.isFeatured),
         isBestseller: Boolean(formData.isBestseller),
         isNewRelease: Boolean(formData.isNewRelease),
@@ -682,23 +743,15 @@ export default function AddBookPage() {
                   <SelectTrigger className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs font-bold">
                     <SelectValue placeholder={fetchingCategories ? "Loading categories..." : "Select Category"} />
                   </SelectTrigger>
-                  <SelectContent className="bg-white border-[#E2E6DF]">
-                    {categoriesList.length > 0 ? (
-                      categoriesList.map((cat: any) => (
-                        <SelectItem key={cat._id || cat.id || cat.name} value={cat._id || cat.id || cat.name}>
-                          {cat.name}
-                        </SelectItem>
-                      ))
-                    ) : (
-                      <>
-                        <SelectItem value="Fiction">Fiction</SelectItem>
-                        <SelectItem value="Non-Fiction">Non-Fiction</SelectItem>
-                        <SelectItem value="Business & Leadership">Business & Leadership</SelectItem>
-                        <SelectItem value="Technology">Technology</SelectItem>
-                        <SelectItem value="Self Help">Self Help</SelectItem>
-                        <SelectItem value="Children">Children</SelectItem>
-                      </>
-                    )}
+                  <SelectContent className="bg-white border-[#E2E6DF] max-h-72">
+                    {Array.from(new Set([
+                      ...categoriesList.map((c: any) => c.name || c),
+                      ...BISAC_CATEGORIES
+                    ])).map((categoryName) => (
+                      <SelectItem key={categoryName} value={categoryName}>
+                        {categoryName}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -768,6 +821,58 @@ export default function AddBookPage() {
                   value={formData.stock}
                   onChange={handleInputChange}
                   className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs font-mono font-bold"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="format" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                  Format *
+                </Label>
+                <Select
+                  value={formData.format}
+                  onValueChange={(val) => setFormData((prev) => ({ ...prev, format: val }))}
+                >
+                  <SelectTrigger className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs font-bold">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border-[#E2E6DF]">
+                    <SelectItem value="paperback">Paperback</SelectItem>
+                    <SelectItem value="hardcover">Hardcover</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="pages" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                  Number of Pages *
+                </Label>
+                <Input
+                  id="pages"
+                  name="pages"
+                  type="number"
+                  min="1"
+                  required
+                  placeholder="e.g. 250"
+                  value={formData.pages}
+                  onChange={handleInputChange}
+                  className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs font-mono font-bold"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="language" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                  Language *
+                </Label>
+                <Input
+                  id="language"
+                  name="language"
+                  required
+                  placeholder="e.g. English, Hindi, Telugu"
+                  value={formData.language}
+                  onChange={handleInputChange}
+                  className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs font-bold"
                 />
               </div>
             </div>

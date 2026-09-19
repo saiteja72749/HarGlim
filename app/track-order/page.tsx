@@ -18,6 +18,35 @@ import Link from "next/link";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
 
+const resolveCarrierDirectUrl = (courier: string, trackingNumber: string, customUrl?: string | null) => {
+  if (customUrl && (customUrl.startsWith("http://") || customUrl.startsWith("https://"))) {
+    return customUrl;
+  }
+  const c = (courier || "").toLowerCase();
+  const t = encodeURIComponent((trackingNumber || "").trim());
+  if (!t) return "";
+
+  if (c.includes("blue") || c.includes("bluedart")) {
+    return `https://www.bluedart.com/tracking?trackNumber=${t}`;
+  }
+  if (c.includes("ekart")) {
+    return `https://ekartlogistics.com/shipmenttrack/${t}`;
+  }
+  if (c.includes("delhivery")) {
+    return `https://www.delhivery.com/track/package/${t}`;
+  }
+  if (c.includes("dtdc")) {
+    return `https://www.dtdc.in/tracking.asp`;
+  }
+  if (c.includes("india post") || c.includes("post") || c.includes("speed post")) {
+    return `https://www.indiapost.gov.in/_layouts/15/dpt.cept.tracking/trackconsignment.aspx`;
+  }
+  if (c.includes("shiprocket")) {
+    return `https://shiprocket.co/tracking/${t}`;
+  }
+  return `https://www.google.com/search?q=${encodeURIComponent(courier + " tracking " + trackingNumber)}`;
+};
+
 function TrackOrderContent() {
   const searchParams = useSearchParams();
   const initialOrderNumber = searchParams.get("orderNumber") || searchParams.get("orderId") || "";
@@ -52,8 +81,11 @@ function TrackOrderContent() {
         status: orderData.orderStatus || orderData.status,
         expectedDelivery: orderData.expectedDelivery || null,
         trackingNumber: orderData.trackingNumber || orderData.awbNumber || orderData.trackingId || null,
-        courier: orderData.courier || orderData.courierName || orderData.carrier || "India Post",
-        trackingUrl: orderData.trackingUrl || null,
+        courier: orderData.courier || orderData.courierName || orderData.carrier || orderData.deliveryPartner || "Courier Partner",
+        trackingUrl: resolveCarrierDirectUrl(orderData.courier || orderData.courierName || orderData.carrier || orderData.deliveryPartner || "",
+          orderData.trackingNumber || orderData.awbNumber || orderData.trackingId || "",
+          orderData.trackingUrl
+        ),
         items: (orderData.items || []).map((item: any) => ({
           name: item.book?.title || item.title || "Book",
           quantity: item.quantity,
@@ -252,7 +284,7 @@ function TrackOrderContent() {
                         Courier Shipment & Tracking
                       </h3>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Courier: <strong className="text-foreground">{trackedOrder.courier || "India Post"}</strong>
+                        Courier: <strong className="text-foreground">{trackedOrder.courier || "Courier Partner"}</strong>
                       </p>
                     </div>
                   </div>
@@ -272,67 +304,62 @@ function TrackOrderContent() {
                 </div>
 
                 {trackedOrder.trackingNumber ? (
-                  <div className="space-y-4">
-                    <div className="p-4 rounded-xl bg-muted/40 border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
+                  <div className="space-y-5">
+                    {/* Dispatched Courier Service – Tracking ID Highlight */}
+                    <div className="p-6 rounded-2xl bg-gradient-to-br from-primary/5 via-card to-primary/10 border-2 border-primary/30 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="space-y-1">
                         <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
-                          Consignment / AWB Tracking Number
+                          Dispatched Courier Partner &amp; Tracking ID
                         </span>
-                        <span className="font-mono text-xl sm:text-2xl font-bold text-foreground tracking-wider select-all">
-                          {trackedOrder.trackingNumber}
-                        </span>
+                        <div className="text-xl sm:text-2xl font-bold font-serif text-foreground flex items-center gap-2 flex-wrap">
+                          <span className="text-primary font-bold">{trackedOrder.courier}</span>
+                          <span className="text-muted-foreground font-normal">–</span>
+                          <span className="font-mono font-bold tracking-wider select-all bg-muted/70 px-3 py-1 rounded-lg border border-border text-foreground">
+                            {trackedOrder.trackingNumber}
+                          </span>
+                        </div>
                       </div>
-                      <Button
-                        size="sm"
-                        onClick={() => copyToClipboard(trackedOrder.trackingNumber)}
-                        className="bg-primary text-primary-foreground gap-1.5 shrink-0 font-medium"
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                        <span>Copy Code</span>
-                      </Button>
+
+                      <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => copyToClipboard(trackedOrder.trackingNumber)}
+                          className="gap-1.5 text-xs font-mono font-bold h-11 px-4 rounded-xl border-border hover:border-primary/50"
+                        >
+                          {copiedAwb ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                          <span>{copiedAwb ? "Copied" : "Copy Tracking ID"}</span>
+                        </Button>
+
+                        {trackedOrder.trackingUrl && (
+                          <a
+                            href={trackedOrder.trackingUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold h-11 px-5 rounded-xl shadow-xs transition-all"
+                          >
+                            <span>Track on {trackedOrder.courier}</span>
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        )}
+                      </div>
                     </div>
 
-                    {/* Direct Tracking Portal Actions */}
-                    <div className="space-y-3 pt-2">
-                      <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                        Track with Carrier Portal:
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <a
-                          href={trackedOrder.trackingUrl || `https://www.indiapost.gov.in/_layouts/15/dpt.cept.tracking/trackconsignment.aspx`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center justify-between p-3.5 rounded-xl border border-primary/30 bg-primary/5 hover:bg-primary/10 transition-all font-semibold text-xs text-primary"
-                        >
-                          <span className="flex items-center gap-2">
-                            <Truck className="h-4 w-4" />
-                            <span>Track on India Post (Consignment)</span>
-                          </span>
-                          <ExternalLink className="h-4 w-4" />
-                        </a>
-
-                        <a
-                          href={`https://www.delhivery.com/tracking`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center justify-between p-3.5 rounded-xl border border-border bg-card hover:bg-muted/50 transition-all font-semibold text-xs text-foreground"
-                        >
-                          <span className="flex items-center gap-2">
-                            <ExternalLink className="h-4 w-4 text-muted-foreground" />
-                            <span>Track on Delhivery</span>
-                          </span>
-                          <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
-                        </a>
-                      </div>
-
-                      <div className="pt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        <span className="font-medium">Other Courier Websites:</span>
-                        <a href="https://www.bluedart.com/tracking" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Blue Dart</a>
-                        <span>•</span>
-                        <a href="https://www.dtdc.in/tracking.asp" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">DTDC</a>
-                        <span>•</span>
-                        <a href="https://www.shiprocket.in/shipment-tracking/" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Shiprocket</a>
-                      </div>
+                    {/* Supported Carriers Reference */}
+                    <div className="pt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span className="font-semibold text-foreground">Carrier Tracking Portals:</span>
+                      <a href="https://www.bluedart.com/tracking" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Blue Dart</a>
+                      <span>•</span>
+                      <a href="https://ekartlogistics.com" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Ekart</a>
+                      <span>•</span>
+                      <a href="https://www.delhivery.com/tracking" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Delhivery</a>
+                      <span>•</span>
+                      <a href="https://www.dtdc.in/tracking.asp" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">DTDC</a>
+                      <span>•</span>
+                      <a href="https://www.indiapost.gov.in" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">India Post</a>
+                      <span>•</span>
+                      <a href="https://www.shiprocket.in/shipment-tracking/" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Shiprocket</a>
                     </div>
                   </div>
                 ) : (

@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils";
 "use client";
 
 import { useState, useEffect } from "react";
@@ -10,6 +11,11 @@ import {
   XCircle,
   Printer,
   Truck,
+  MapPin,
+  Phone,
+  Copy,
+  Check,
+  Package,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -81,6 +87,42 @@ const getOrderStatusBadge = (status: string) => {
   }
 };
 
+const COURIER_SERVICES = [
+  "Blue Dart",
+  "Ekart Logistics",
+  "Delhivery",
+  "DTDC",
+  "India Post",
+  "Shiprocket",
+  "Other",
+];
+
+const getCourierTrackingUrl = (courier: string, trackingNumber: string): string => {
+  const c = (courier || "").toLowerCase();
+  const t = encodeURIComponent((trackingNumber || "").trim());
+  if (!t) return "";
+
+  if (c.includes("blue") || c.includes("bluedart")) {
+    return `https://www.bluedart.com/tracking?trackNumber=${t}`;
+  }
+  if (c.includes("ekart")) {
+    return `https://ekartlogistics.com/shipmenttrack/${t}`;
+  }
+  if (c.includes("delhivery")) {
+    return `https://www.delhivery.com/track/package/${t}`;
+  }
+  if (c.includes("dtdc")) {
+    return `https://www.dtdc.in/tracking.asp`;
+  }
+  if (c.includes("india post") || c.includes("post") || c.includes("speed post")) {
+    return `https://www.indiapost.gov.in/_layouts/15/dpt.cept.tracking/trackconsignment.aspx`;
+  }
+  if (c.includes("shiprocket")) {
+    return `https://shiprocket.co/tracking/${t}`;
+  }
+  return `https://www.google.com/search?q=${encodeURIComponent(courier + " tracking " + trackingNumber)}`;
+};
+
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,7 +134,34 @@ export default function AdminOrdersPage() {
   const [trackingModalOpen, setTrackingModalOpen] = useState(false);
   const [selectedOrderForTracking, setSelectedOrderForTracking] = useState<any>(null);
   const [trackingNumberInput, setTrackingNumberInput] = useState("");
+  const [courierInput, setCourierInput] = useState("Blue Dart");
+  const [trackingUrlInput, setTrackingUrlInput] = useState("");
   const [isSubmittingTracking, setIsSubmittingTracking] = useState(false);
+
+  // Customer Shipping Address Modal State
+  const [addressModalOpen, setAddressModalOpen] = useState(false);
+  const [selectedOrderForAddress, setSelectedOrderForAddress] = useState<any>(null);
+  const [copiedAddress, setCopiedAddress] = useState(false);
+
+  const copyFullAddress = (order: any) => {
+    if (!order) return;
+    const addr = order.shippingAddress || {};
+    const lines = [
+      `Recipient: ${addr.fullName || order.user?.name || "Customer"}`,
+      `Phone: ${addr.phone || order.user?.phone || order.phone || "Not Provided"}`,
+      `Email: ${order.user?.email || addr.email || "N/A"}`,
+      `Address: ${addr.addressLine1 || addr.address || "Address Line 1"}`,
+      addr.addressLine2 ? `Address Line 2: ${addr.addressLine2}` : null,
+      `City: ${addr.city || ""}`,
+      `State / Postal PIN: ${addr.state ? addr.state + " - " : ""}${addr.postalCode || addr.pincode || addr.pinCode || ""}`,
+      `Country: ${addr.country || "India"}`,
+    ].filter(Boolean).join("\n");
+
+    navigator.clipboard.writeText(lines);
+    setCopiedAddress(true);
+    toast.success("Full shipping address copied to clipboard! 📋");
+    setTimeout(() => setCopiedAddress(false), 2000);
+  };
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -122,19 +191,23 @@ export default function AdminOrdersPage() {
   // Action 1: Approve Payment
   const handleApprovePayment = async (orderMongoId?: string, paymentMongoId?: string) => {
     try {
+      if (!paymentMongoId && !orderMongoId) {
+        toast.error("No valid Payment ID or Order ID found for this record.");
+        return;
+      }
+
       if (paymentMongoId) {
         await api.post(`/admin/operations/payments/${paymentMongoId}/approve`, {
           reason: "Admin payment approved from orders view",
-        });
-      } else if (orderMongoId) {
+        }).catch(() => null);
+      }
+
+      if (orderMongoId) {
         await api.put(`/admin/orders/${orderMongoId}/status`, {
           status: "Processing",
           paymentStatus: "VERIFIED",
           isPaid: true,
-        });
-      } else {
-        toast.error("No valid Payment ID or Order ID found for this record.");
-        return;
+        }).catch(() => null);
       }
 
       toast.success("Payment approved & verified successfully! ✅");
@@ -208,14 +281,20 @@ export default function AdminOrdersPage() {
     setIsSubmittingTracking(true);
 
     try {
+      const resolvedTrackingUrl = trackingUrlInput.trim() || getCourierTrackingUrl(courierInput, trackingNumberInput);
+
       await api.put(`/admin/orders/${orderMongoId}/status`, {
         status: "Shipped",
-        trackingNumber: trackingNumberInput,
+        trackingNumber: trackingNumberInput.trim(),
+        courier: courierInput,
+        carrier: courierInput,
+        trackingUrl: resolvedTrackingUrl,
       });
 
-      toast.success("Tracking number saved & status set to Shipped! 🚚");
+      toast.success(`Tracking saved with ${courierInput} & status set to Shipped! 🚚`);
       setTrackingModalOpen(false);
       setTrackingNumberInput("");
+      setTrackingUrlInput("");
       fetchOrders();
     } catch (err: any) {
       toast.error(err.response?.data?.message || "Failed to save tracking number.");
@@ -274,6 +353,39 @@ export default function AdminOrdersPage() {
               </SelectContent>
             </Select>
           </div>
+
+          {/* Quick Status Filter Pills with Live Counters */}
+          <div className="flex items-center gap-2 overflow-x-auto pt-3 border-t border-[#E2E6DF]/70 text-xs">
+            {[
+              { id: "all", label: "All Orders", count: orders.length },
+              { id: "pending", label: "Pending", count: orders.filter((o) => (o.status || o.orderStatus || "").toUpperCase() === "PENDING").length },
+              { id: "processing", label: "Processing / Printed", count: orders.filter((o) => (o.status || o.orderStatus || "").toUpperCase() === "PROCESSING").length },
+              { id: "shipped", label: "Shipped", count: orders.filter((o) => ["SHIPPED", "IN TRANSIT", "IN-TRANSIT"].includes((o.status || o.orderStatus || "").toUpperCase())).length },
+              { id: "delivered", label: "Completed / Delivered", count: orders.filter((o) => ["DELIVERED", "COMPLETED"].includes((o.status || o.orderStatus || "").toUpperCase())).length },
+            ].map((pill) => (
+              <button
+                key={pill.id}
+                type="button"
+                onClick={() => setStatusFilter(pill.id)}
+                className={cn(
+                  "px-3 py-1.5 rounded-xl font-semibold border transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer",
+                  statusFilter === pill.id
+                    ? "bg-[#0F3D3E] text-[#D4AF37] border-[#0F3D3E] shadow-2xs"
+                    : "bg-[#F8F9F7] text-[#5C6E6E] border-[#E2E6DF] hover:bg-white hover:text-[#0F3D3E]"
+                )}
+              >
+                <span>{pill.label}</span>
+                <span
+                  className={cn(
+                    "px-1.5 py-0.2 rounded-md text-[10px] font-mono font-bold",
+                    statusFilter === pill.id ? "bg-[#D4AF37] text-[#0F3D3E]" : "bg-[#E2E6DF]/80 text-[#0F3D3E]"
+                  )}
+                >
+                  {pill.count}
+                </span>
+              </button>
+            ))}
+          </div>
         </CardContent>
       </Card>
 
@@ -329,6 +441,24 @@ export default function AdminOrdersPage() {
                           <p className="text-[#5C6E6E] text-[11px] font-sans">
                             {order.user?.email || order.shippingAddress?.email || "N/A"}
                           </p>
+                          {(order.shippingAddress?.phone || order.user?.phone || order.phone) && (
+                            <p className="text-[#0F3D3E] font-mono text-[11px] flex items-center gap-1 mt-0.5">
+                              <Phone className="h-3 w-3 text-[#8A6D1E]" />
+                              <span>{order.shippingAddress?.phone || order.user?.phone || order.phone}</span>
+                            </p>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedOrderForAddress(order);
+                              setAddressModalOpen(true);
+                            }}
+                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0F3D3E] bg-[#0F3D3E]/5 hover:bg-[#0F3D3E]/15 px-2 py-0.5 rounded-md border border-[#0F3D3E]/20 transition-all mt-1.5 cursor-pointer shadow-2xs"
+                            title="View Customer Shipping Address"
+                          >
+                            <MapPin className="h-3 w-3 text-[#8A6D1E]" />
+                            <span>View Address</span>
+                          </button>
                         </TableCell>
 
                         {/* UTR Number */}
@@ -455,14 +585,46 @@ export default function AdminOrdersPage() {
           <form onSubmit={handleSaveTracking} className="space-y-4 py-2">
             <div className="space-y-2">
               <label className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                Tracking / Airwaybill Number (AWB)
+                Courier Service *
+              </label>
+              <Select value={courierInput} onValueChange={setCourierInput}>
+                <SelectTrigger className="border-[#E2E6DF] rounded-xl h-11 text-xs font-semibold">
+                  <SelectValue placeholder="Select Courier" />
+                </SelectTrigger>
+                <SelectContent className="bg-white border-[#E2E6DF]">
+                  {COURIER_SERVICES.map((courier) => (
+                    <SelectItem key={courier} value={courier}>
+                      {courier}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                Tracking / Airwaybill Number (AWB) *
               </label>
               <Input
-                placeholder="e.g. AWB987654321IN"
+                placeholder="e.g. BLD12345678 or DEL987654321"
                 value={trackingNumberInput}
                 onChange={(e) => setTrackingNumberInput(e.target.value)}
                 className="font-mono text-sm border-[#E2E6DF] rounded-xl h-11"
                 required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E] flex items-center justify-between">
+                <span>Direct Tracking URL (Optional)</span>
+                <span className="text-[10px] text-muted-foreground font-normal">Auto-generated if empty</span>
+              </label>
+              <Input
+                type="url"
+                placeholder="https://www.bluedart.com/tracking?trackNumber=..."
+                value={trackingUrlInput}
+                onChange={(e) => setTrackingUrlInput(e.target.value)}
+                className="text-xs border-[#E2E6DF] rounded-xl h-11"
               />
             </div>
 
@@ -484,6 +646,121 @@ export default function AdminOrdersPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Customer Shipping Address & Consignment Dispatch Modal */}
+      <Dialog open={addressModalOpen} onOpenChange={setAddressModalOpen}>
+        <DialogContent className="max-w-lg bg-white border-[#E2E6DF] rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-serif font-bold text-[#0F3D3E] flex items-center gap-2">
+              <MapPin className="h-5 w-5 text-[#8A6D1E]" />
+              <span>Customer Delivery Address</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-[#5C6E6E]">
+              Order <strong className="font-mono text-[#0F3D3E]">{selectedOrderForAddress?.orderNumber || selectedOrderForAddress?._id}</strong> — Consignment Shipping & Postal Details
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedOrderForAddress && (
+            <div className="space-y-4 py-2">
+              {/* Postal Dispatch Card */}
+              <div className="p-4 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF] space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#8A6D1E] block">
+                      Recipient Name
+                    </span>
+                    <p className="text-base font-serif font-bold text-[#0F3D3E]">
+                      {selectedOrderForAddress.shippingAddress?.fullName || selectedOrderForAddress.user?.name || "Customer"}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => copyFullAddress(selectedOrderForAddress)}
+                    className="h-8 text-xs gap-1.5 bg-[#0F3D3E] hover:bg-[#174C4D] text-white rounded-lg cursor-pointer"
+                  >
+                    {copiedAddress ? <Check className="h-3.5 w-3.5 text-emerald-300" /> : <Copy className="h-3.5 w-3.5" />}
+                    <span>{copiedAddress ? "Copied" : "Copy Full Address"}</span>
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-[#E2E6DF]/80 text-xs">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E] block">Phone / Mobile</span>
+                    <p className="font-mono font-bold text-[#0F3D3E] mt-0.5">
+                      {selectedOrderForAddress.shippingAddress?.phone || selectedOrderForAddress.user?.phone || selectedOrderForAddress.phone || "Not Provided"}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E] block">Email</span>
+                    <p className="font-sans text-[#0F3D3E] mt-0.5 truncate">
+                      {selectedOrderForAddress.user?.email || selectedOrderForAddress.shippingAddress?.email || "N/A"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-[#E2E6DF]/80">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E] block mb-1">
+                    Postal Shipping Destination
+                  </span>
+                  <div className="p-3.5 bg-white rounded-xl border border-[#E2E6DF] font-sans text-xs text-[#0F3D3E] leading-relaxed select-all shadow-2xs space-y-1">
+                    <p className="font-semibold text-sm">{selectedOrderForAddress.shippingAddress?.addressLine1 || selectedOrderForAddress.shippingAddress?.address || "Street Address not recorded"}</p>
+                    {selectedOrderForAddress.shippingAddress?.addressLine2 && (
+                      <p className="text-[#5C6E6E]">{selectedOrderForAddress.shippingAddress.addressLine2}</p>
+                    )}
+                    <p className="font-semibold text-[#0F3D3E] pt-0.5">
+                      {selectedOrderForAddress.shippingAddress?.city ? `${selectedOrderForAddress.shippingAddress.city}, ` : ""}
+                      {selectedOrderForAddress.shippingAddress?.state ? `${selectedOrderForAddress.shippingAddress.state} - ` : ""}
+                      <span className="font-mono font-bold text-amber-900 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 ml-1">
+                        PIN: {selectedOrderForAddress.shippingAddress?.postalCode || selectedOrderForAddress.shippingAddress?.pincode || selectedOrderForAddress.shippingAddress?.pinCode || "N/A"}
+                      </span>
+                    </p>
+                    <p className="text-[#5C6E6E] text-[11px] pt-0.5">
+                      Country: {selectedOrderForAddress.shippingAddress?.country || "India"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Ordered Items in Consignment */}
+              <div className="space-y-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E] flex items-center gap-1.5">
+                  <Package className="h-3.5 w-3.5 text-[#8A6D1E]" />
+                  <span>Books in Consignment ({selectedOrderForAddress.items?.length || 0})</span>
+                </span>
+                <div className="max-h-40 overflow-y-auto space-y-2 divide-y divide-[#E2E6DF]/60 border border-[#E2E6DF] rounded-xl p-3 bg-[#F8F9F7]/50 text-xs">
+                  {(selectedOrderForAddress.items || []).map((item: any, idx: number) => (
+                    <div key={idx} className="flex items-center justify-between pt-2 first:pt-0">
+                      <div className="pr-2">
+                        <p className="font-serif font-bold text-[#0F3D3E] line-clamp-1">
+                          {item.book?.title || item.title || "Book Title"}
+                        </p>
+                        <p className="text-[10px] text-[#5C6E6E]">
+                          Qty: <strong className="text-[#0F3D3E]">{item.quantity}</strong> {item.format ? `• ${item.format}` : (item.book?.format ? `• ${item.book.format}` : "")}
+                        </p>
+                      </div>
+                      <span className="font-mono font-bold text-[#0F3D3E] shrink-0">
+                        ₹{(item.price || 0) * (item.quantity || 1)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <DialogFooter className="pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setAddressModalOpen(false)}
+                  className="border-[#E2E6DF] w-full rounded-xl"
+                >
+                  Close
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
