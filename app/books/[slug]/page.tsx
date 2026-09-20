@@ -368,15 +368,10 @@ export default function BookDetailPage() {
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-              <Link href={`/track-order?orderNumber=${encodeURIComponent(existingOrder.orderNumber || existingOrder._id || existingOrder.id)}`}>
+              <Link href="/dashboard/orders">
                 <Button size="sm" className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white gap-1.5 text-xs font-bold shadow-xs">
                   <Truck className="h-4 w-4" />
-                  <span>Track Package</span>
-                </Button>
-              </Link>
-              <Link href="/dashboard/orders">
-                <Button size="sm" variant="outline" className="border-emerald-600/30 text-emerald-900 hover:bg-emerald-100 text-xs">
-                  View Order Details
+                  <span>View Order & Tracking</span>
                 </Button>
               </Link>
             </div>
@@ -577,10 +572,10 @@ export default function BookDetailPage() {
                     }) : "recently"}.
                   </p>
                   <Link
-                    href={`/track-order?orderNumber=${encodeURIComponent(existingOrder.orderNumber || existingOrder._id || existingOrder.id)}`}
+                    href="/dashboard/orders"
                     className="inline-flex items-center gap-1 text-[11px] text-[#0F3D3E] underline font-bold hover:no-underline pt-0.5"
                   >
-                    <span>Track Order Package</span>
+                    <span>View in My Orders</span>
                     <ArrowRight className="h-3 w-3" />
                   </Link>
                 </div>

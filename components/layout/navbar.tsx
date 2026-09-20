@@ -44,7 +44,6 @@ const navLinks = [
   { href: "/categories", label: "Categories" },
   { href: "/authors", label: "Authors" },
   { href: "/publish", label: "Publish with Us" },
-  { href: "/track-order", label: "Track Order" },
   { href: "/about", label: "About" },
   { href: "/contact", label: "Contact" },
 ];
