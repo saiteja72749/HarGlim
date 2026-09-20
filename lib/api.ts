@@ -101,13 +101,16 @@ api.interceptors.response.use(
       }
     }
 
-    if (error.response?.status === 429) {
-      if (typeof window !== 'undefined') {
+    const status = error.response?.status;
+
+    if (typeof window !== 'undefined') {
+      if (status === 403) {
+        toast.error('Admin access required or permission denied.', { id: 'admin-access-required' });
+      } else if (status === 429) {
         toast.error('Too many requests. Please wait a few seconds and try again.', {
           id: 'rate-limit-toast',
         });
       }
-      return Promise.reject(error);
     }
 
     return Promise.reject(error);

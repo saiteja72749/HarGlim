@@ -37,6 +37,7 @@ export default function AdminDashboard() {
       ]);
 
       const dashData = dashRes.status === "fulfilled" ? (dashRes.value.data?.data || dashRes.value.data) : {};
+      const opCounts = dashData.operationalCounts || {};
       const ordersList = ordersRes.status === "fulfilled" ? (ordersRes.value.data?.data?.orders || ordersRes.value.data?.data || ordersRes.value.data) : [];
       const authorsList = authorsRes.status === "fulfilled" ? (authorsRes.value.data?.data?.applications || authorsRes.value.data?.data || authorsRes.value.data) : [];
       const booksList = booksRes.status === "fulfilled" ? (booksRes.value.data?.books || booksRes.value.data?.data || booksRes.value.data) : [];
@@ -53,7 +54,7 @@ export default function AdminDashboard() {
       const authorsArr = Array.isArray(authorsList) ? authorsList : [];
       const booksArr = Array.isArray(booksList) ? booksList : [];
 
-      // Calculate state machine metrics
+      // Calculate state machine metrics as resilient fallbacks
       const calculatedPendingPayments = ordersArr.filter(
         (o) => !o.isPaid && (o.paymentStatus === "PENDING" || o.paymentStatus === "VERIFICATION_PENDING" || o.utr)
       ).length;
@@ -68,10 +69,12 @@ export default function AdminDashboard() {
 
       setDashboardData({
         ...dashData,
-        pendingPaymentsCount: realPaymentsCount || (dashData.pendingPaymentsCount ?? dashData.pendingOrders ?? calculatedPendingPayments),
-        processingOrdersCount: dashData.processingOrdersCount ?? dashData.processingOrders ?? calculatedProcessingOrders,
-        pendingAuthorsCount: dashData.pendingAuthorsCount ?? dashData.pendingApplications ?? calculatedPendingAuthors,
-        totalBooks: booksArr.length || dashData.totalBooks || dashData.booksCount || 0,
+        pendingPaymentsCount: opCounts.paymentsAwaitingVerification ?? (realPaymentsCount || (dashData.pendingPaymentsCount ?? dashData.pendingOrders ?? calculatedPendingPayments)),
+        processingOrdersCount: opCounts.ordersRequiringAction ?? (dashData.processingOrdersCount ?? dashData.processingOrders ?? calculatedProcessingOrders),
+        pendingAuthorsCount: opCounts.pendingAuthorApplications ?? (dashData.pendingAuthorsCount ?? dashData.pendingApplications ?? calculatedPendingAuthors),
+        pendingPublishRequests: opCounts.pendingPublishRequests ?? 0,
+        activeAuthorsCount: opCounts.activeAuthors ?? 0,
+        totalBooks: opCounts.publishedBooks ?? (booksArr.length || dashData.totalBooks || dashData.booksCount || 0),
         recentOrders: ordersArr.slice(0, 5),
         recentAuthors: authorsArr.slice(0, 5),
       });

@@ -18,6 +18,7 @@ import {
   X,
   Check,
   Loader2,
+  KeyRound,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth-store";
 import { Card, CardContent } from "@/components/ui/card";
@@ -245,6 +246,35 @@ export default function AdminUsersPage() {
   });
   const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Reset Password State (POST /api/admin/users/:id/reset-password)
+  const [resetPasswordUser, setResetPasswordUser] = useState<any | null>(null);
+  const [newPasswordInput, setNewPasswordInput] = useState("");
+  const [isSubmittingReset, setIsSubmittingReset] = useState(false);
+
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetPasswordUser) return;
+    if (!newPasswordInput || newPasswordInput.length < 6) {
+      toast.error("Password must be at least 6 characters long.");
+      return;
+    }
+    const targetUserId = resetPasswordUser.id || resetPasswordUser._id;
+    setIsSubmittingReset(true);
+    try {
+      await api.post(`/admin/users/${targetUserId}/reset-password`, {
+        password: newPasswordInput,
+      });
+      toast.success(`Password reset successfully for ${resetPasswordUser.name}! 🔑`);
+      setResetPasswordUser(null);
+      setNewPasswordInput("");
+    } catch (err: any) {
+      console.error("Password reset error:", err);
+      toast.error(err.response?.data?.message || "Failed to reset password.");
+    } finally {
+      setIsSubmittingReset(false);
+    }
+  };
 
   const handleDeleteUser = async (id: string, name: string) => {
     if (currentUserId && (id === currentUserId || String(id) === String(currentUserId))) {
@@ -588,6 +618,13 @@ export default function AdminUsersPage() {
                               <Pencil className="mr-2 h-4 w-4 text-primary" />
                               Edit Details
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => {
+                              setResetPasswordUser(user);
+                              setNewPasswordInput("");
+                            }}>
+                              <KeyRound className="mr-2 h-4 w-4 text-[#D4AF37]" />
+                              Reset Password
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => window.location.href = `mailto:${user.email}`}>
                               <Mail className="mr-2 h-4 w-4" />
                               Send Email
@@ -877,6 +914,82 @@ export default function AdminUsersPage() {
                       <Check className="h-4 w-4" />
                       <span>Create User</span>
                     </>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Reset Password Modal (POST /api/admin/users/:id/reset-password) */}
+      {resetPasswordUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl overflow-hidden"
+          >
+            <div className="flex items-center justify-between p-5 border-b border-border bg-muted/40">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600">
+                  <KeyRound className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-serif font-bold text-base text-foreground">Reset Password</h3>
+                  <p className="text-xs text-muted-foreground">{resetPasswordUser.name} ({resetPasswordUser.email})</p>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setResetPasswordUser(null)}
+                className="h-8 w-8 text-muted-foreground"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <form onSubmit={handleResetPasswordSubmit} className="p-6 space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block">
+                  New Password
+                </label>
+                <Input
+                  type="password"
+                  placeholder="Enter new strong password (min 6 chars)"
+                  value={newPasswordInput}
+                  onChange={(e) => setNewPasswordInput(e.target.value)}
+                  className="bg-background text-sm"
+                  required
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  This will immediately update the user's password on the backend.
+                </p>
+              </div>
+
+              <div className="pt-3 flex items-center justify-end gap-3 border-t border-border">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setResetPasswordUser(null)}
+                  disabled={isSubmittingReset}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSubmittingReset}
+                  className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-bold gap-2"
+                >
+                  {isSubmittingReset ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <span>Set New Password</span>
                   )}
                 </Button>
               </div>

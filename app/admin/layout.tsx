@@ -20,6 +20,14 @@ import {
   LogOut,
   ShieldCheck,
   ChevronRight,
+  Truck,
+  Tags,
+  Star,
+  Receipt,
+  Bell,
+  BarChart3,
+  Feather,
+  PackageCheck,
 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -29,33 +37,41 @@ import { AuthGuard } from "@/components/auth/auth-guard";
 
 const sidebarSections = [
   {
-    title: "MAIN",
+    title: "OPERATIONS",
     items: [
       { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
       { href: "/admin/orders", label: "Orders & Verification", icon: ShoppingBag },
-      { href: "/admin/books", label: "Books Catalog", icon: BookOpen },
+      { href: "/admin/payments", label: "Payment Operations", icon: CreditCard },
+      { href: "/admin/shipments", label: "Shipments & Courier", icon: Truck },
+      { href: "/admin/inventory", label: "Inventory & Ledger", icon: PackageCheck },
     ],
   },
   {
-    title: "MANAGEMENT",
+    title: "CATALOG & CONTENT",
+    items: [
+      { href: "/admin/books", label: "Books Catalog", icon: BookOpen },
+      { href: "/admin/categories", label: "Categories", icon: Tags },
+      { href: "/admin/manuscripts", label: "Publish Requests", icon: FileText },
+      { href: "/admin/reviews", label: "Customer Reviews", icon: Star },
+      { href: "/admin/content", label: "Site Content CMS", icon: Globe },
+    ],
+  },
+  {
+    title: "AUTHORS & USERS",
     items: [
       { href: "/admin/users", label: "Users & Accounts", icon: Users },
+      { href: "/admin/authors", label: "Authors Directory", icon: Feather },
       { href: "/admin/author-applications", label: "Author Applications", icon: UserPlus },
-      { href: "/admin/manuscripts", label: "Manuscripts", icon: FileText },
+      { href: "/admin/author-access", label: "Author Dashboard Access", icon: ShieldCheck },
     ],
   },
   {
-    title: "FINANCIAL",
+    title: "FINANCE & AUDIT",
     items: [
-      { href: "/admin/payments", label: "Payment Verification Queue", icon: CreditCard },
-      { href: "/admin/royalties", label: "Royalty Entry", icon: DollarSign },
-      { href: "/admin/settlements", label: "Settlements", icon: CreditCard },
-    ],
-  },
-  {
-    title: "SETTINGS",
-    items: [
-      { href: "/admin/content", label: "Site Content", icon: Globe },
+      { href: "/admin/settlements", label: "Royalty Settlements", icon: DollarSign },
+      { href: "/admin/invoices", label: "Invoices", icon: Receipt },
+      { href: "/admin/analytics", label: "Platform Analytics", icon: BarChart3 },
+      { href: "/admin/notifications", label: "Notifications Log", icon: Bell },
     ],
   },
 ];
