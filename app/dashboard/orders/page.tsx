@@ -81,6 +81,32 @@ const getOrderStatusBadge = (status: string) => {
   );
 };
 
+const getCourierTrackingUrl = (courier: string, trackingNumber: string): string => {
+  const c = (courier || "").toLowerCase();
+  const t = encodeURIComponent((trackingNumber || "").trim());
+  if (!t) return "";
+
+  if (c.includes("speed post") || c.includes("speed") || c.includes("india post") || c.includes("post")) {
+    return `https://www.indiapost.gov.in/_layouts/15/dpt.cept.tracking/trackconsignment.aspx`;
+  }
+  if (c.includes("blue") || c.includes("bluedart")) {
+    return `https://www.bluedart.com/tracking?trackNumber=${t}`;
+  }
+  if (c.includes("ekart")) {
+    return `https://ekartlogistics.com/shipmenttrack/${t}`;
+  }
+  if (c.includes("delhivery")) {
+    return `https://www.delhivery.com/track/package/${t}`;
+  }
+  if (c.includes("dtdc")) {
+    return `https://www.dtdc.in/tracking.asp`;
+  }
+  if (c.includes("shiprocket")) {
+    return `https://shiprocket.co/tracking/${t}`;
+  }
+  return `https://www.google.com/search?q=${encodeURIComponent((courier || "courier") + " tracking " + trackingNumber)}`;
+};
+
 // Payment Status Badge mapping
 const getPaymentStatusBadge = (isPaid: boolean, paymentStatus?: string) => {
   const ps = (paymentStatus || "").toUpperCase();
@@ -325,6 +351,7 @@ export default function OrdersPage() {
             const trackingNumber = order.tracking_id || order.trackingId || order.trackingNumber || order.awbNumber || null;
             const courierName = order.courier_name || order.courierName || order.courier || order.carrier || "";
             const trackingUrl = order.tracking_url || order.trackingUrl || null;
+            const resolvedTrackingUrl = trackingUrl || (trackingNumber ? getCourierTrackingUrl(courierName, trackingNumber) : null);
 
             return (
               <motion.div
@@ -406,24 +433,9 @@ export default function OrdersPage() {
                       </div>
 
                       <div className="flex items-center gap-2 flex-wrap shrink-0">
-                        {trackingUrl ? (
+                        {resolvedTrackingUrl ? (
                           <a
-                            href={trackingUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            <Button
-                              type="button"
-                              size="sm"
-                              className="h-8 px-3.5 bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] text-xs font-serif font-bold gap-1.5 rounded-xl cursor-pointer shadow-2xs"
-                            >
-                              <Truck className="h-3.5 w-3.5" />
-                              <span>Track Package ↗</span>
-                            </Button>
-                          </a>
-                        ) : trackingNumber ? (
-                          <a
-                            href={`https://www.google.com/search?q=${encodeURIComponent((courierName || "courier") + " tracking " + trackingNumber)}`}
+                            href={resolvedTrackingUrl}
                             target="_blank"
                             rel="noopener noreferrer"
                           >
@@ -666,43 +678,47 @@ export default function OrdersPage() {
                                 <MapPin className="h-3.5 w-3.5 text-[#0F3D3E]" />
                                 <span>Delivery Address</span>
                               </div>
-                              {order.shippingAddress ? (
-                                <div className="text-xs text-[#0F3D3E] space-y-1 leading-relaxed font-sans">
-                                  <p className="font-bold text-sm text-[#0F3D3E]">
-                                    {order.shippingAddress.fullName || order.shippingAddress.name || order.user?.name || "Reader"}
-                                  </p>
-                                  {(order.shippingAddress.phone || order.shippingAddress.recipientPhone || order.user?.phone) && (
-                                    <p className="text-[#5C6E6E]">
-                                      <span className="font-medium text-[#0F3D3E]">Phone:</span>{" "}
-                                      {order.shippingAddress.phone || order.shippingAddress.recipientPhone || order.user?.phone}
+                              {(() => {
+                                const shippingAddress = order.shippingAddress || order.deliveryAddress || order.address || order.shipping_address;
+                                if (!shippingAddress) {
+                                  return <p className="text-xs text-[#5C6E6E]">No shipping address recorded.</p>;
+                                }
+                                return (
+                                  <div className="text-xs text-[#0F3D3E] space-y-1 leading-relaxed font-sans">
+                                    <p className="font-bold text-sm text-[#0F3D3E]">
+                                      {shippingAddress.fullName || shippingAddress.name || order.user?.name || "Reader"}
                                     </p>
-                                  )}
-                                  {(order.shippingAddress.email || order.user?.email) && (
-                                    <p className="text-[#5C6E6E]">
-                                      <span className="font-medium text-[#0F3D3E]">Email:</span>{" "}
-                                      {order.shippingAddress.email || order.user?.email}
+                                    {(shippingAddress.phone || shippingAddress.recipientPhone || order.user?.phone) && (
+                                      <p className="text-[#5C6E6E]">
+                                        <span className="font-medium text-[#0F3D3E]">Phone:</span>{" "}
+                                        {shippingAddress.phone || shippingAddress.recipientPhone || order.user?.phone}
+                                      </p>
+                                    )}
+                                    {(shippingAddress.email || order.user?.email) && (
+                                      <p className="text-[#5C6E6E]">
+                                        <span className="font-medium text-[#0F3D3E]">Email:</span>{" "}
+                                        {shippingAddress.email || order.user?.email}
+                                      </p>
+                                    )}
+                                    <p className="pt-0.5">
+                                      {shippingAddress.addressLine1 || shippingAddress.street || shippingAddress.address}
                                     </p>
-                                  )}
-                                  <p className="pt-0.5">
-                                    {order.shippingAddress.addressLine1 || order.shippingAddress.street || order.shippingAddress.address}
-                                  </p>
-                                  {order.shippingAddress.addressLine2 && (
-                                    <p>{order.shippingAddress.addressLine2}</p>
-                                  )}
-                                  <p className="font-medium">
-                                    {[
-                                      order.shippingAddress.city,
-                                      order.shippingAddress.state,
-                                      order.shippingAddress.postalCode || order.shippingAddress.pincode
-                                    ].filter(Boolean).join(", ")}
-                                  </p>
-                                  <p className="text-[#5C6E6E]">
-                                    {order.shippingAddress.country || "India"}
-                                  </p>
-                                </div>
-                              ) : (
-                                <p className="text-xs text-[#5C6E6E]">No shipping address recorded.</p>
-                              )}
+                                    {shippingAddress.addressLine2 && (
+                                      <p>{shippingAddress.addressLine2}</p>
+                                    )}
+                                    <p className="font-medium">
+                                      {[
+                                        shippingAddress.city,
+                                        shippingAddress.state,
+                                        shippingAddress.postalCode || shippingAddress.pincode || shippingAddress.pinCode
+                                      ].filter(Boolean).join(", ")}
+                                    </p>
+                                    <p className="text-[#5C6E6E]">
+                                      {shippingAddress.country || "India"}
+                                    </p>
+                                  </div>
+                                );
+                              })()}
                             </div>
 
                             {/* Cost Summary */}
@@ -807,14 +823,29 @@ export default function OrdersPage() {
                                       {trackingNumber}
                                     </span>
                                   </div>
-                                  <Button
-                                    size="sm"
-                                    onClick={() => copyAwbToClipboard(id, trackingNumber)}
-                                    className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white text-xs gap-1.5 shrink-0"
-                                  >
-                                    <Copy className="h-3.5 w-3.5" />
-                                    <span>Copy Tracking ID</span>
-                                  </Button>
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      size="sm"
+                                      onClick={() => copyAwbToClipboard(id, trackingNumber)}
+                                      className="bg-white hover:bg-[#F8F9F7] text-[#0F3D3E] border border-[#E2E6DF] text-xs gap-1.5 shrink-0"
+                                    >
+                                      <Copy className="h-3.5 w-3.5" />
+                                      <span>Copy Tracking ID</span>
+                                    </Button>
+                                    <a
+                                      href={resolvedTrackingUrl || `https://www.google.com/search?q=${encodeURIComponent((courierName || "courier") + " tracking " + trackingNumber)}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                    >
+                                      <Button
+                                        size="sm"
+                                        className="bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] font-serif font-bold text-xs gap-1.5 shadow-sm"
+                                      >
+                                        <Truck className="h-3.5 w-3.5" />
+                                        <span>Track on Courier ↗</span>
+                                      </Button>
+                                    </a>
+                                  </div>
                                 </div>
                                 <div className="pt-1 text-xs text-[#5C6E6E] flex items-center gap-2">
                                   <Clock className="h-3.5 w-3.5 text-[#0F3D3E] shrink-0" />

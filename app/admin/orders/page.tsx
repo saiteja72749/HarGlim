@@ -448,18 +448,25 @@ export default function AdminOrdersPage() {
 
                         {/* Customer & Contact */}
                         <TableCell>
-                          <p className="font-serif font-bold text-[#0F3D3E]">
-                            {order.shippingAddress?.fullName || order.user?.name || "Customer"}
-                          </p>
-                          <p className="text-[#5C6E6E] text-[11px] font-sans">
-                            {order.user?.email || order.shippingAddress?.email || "N/A"}
-                          </p>
-                          {(order.shippingAddress?.phone || order.user?.phone || order.phone) && (
-                            <p className="text-[#0F3D3E] font-mono text-[11px] flex items-center gap-1 mt-0.5">
-                              <Phone className="h-3 w-3 text-[#8A6D1E]" />
-                              <span>{order.shippingAddress?.phone || order.user?.phone || order.phone}</span>
-                            </p>
-                          )}
+                          {(() => {
+                            const shippingAddress = order.shippingAddress || order.deliveryAddress || order.address || order.shipping_address || {};
+                            return (
+                              <>
+                                <p className="font-serif font-bold text-[#0F3D3E]">
+                                  {shippingAddress.fullName || shippingAddress.name || order.user?.name || "Customer"}
+                                </p>
+                                <p className="text-[#5C6E6E] text-[11px] font-sans">
+                                  {order.user?.email || shippingAddress.email || "N/A"}
+                                </p>
+                                {(shippingAddress.phone || order.user?.phone || order.phone) && (
+                                  <p className="text-[#0F3D3E] font-mono text-[11px] flex items-center gap-1 mt-0.5">
+                                    <Phone className="h-3 w-3 text-[#8A6D1E]" />
+                                    <span>{shippingAddress.phone || order.user?.phone || order.phone}</span>
+                                  </p>
+                                )}
+                              </>
+                            );
+                          })()}
                           <button
                             type="button"
                             onClick={() => {
@@ -678,64 +685,67 @@ export default function AdminOrdersPage() {
           {selectedOrderForAddress && (
             <div className="space-y-4 py-2">
               {/* Postal Dispatch Card */}
-              <div className="p-4 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF] space-y-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#8A6D1E] block">
-                      Recipient Name
-                    </span>
-                    <p className="text-base font-serif font-bold text-[#0F3D3E]">
-                      {selectedOrderForAddress.shippingAddress?.fullName || selectedOrderForAddress.user?.name || "Customer"}
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => copyFullAddress(selectedOrderForAddress)}
-                    className="h-8 text-xs gap-1.5 bg-[#0F3D3E] hover:bg-[#174C4D] text-white rounded-lg cursor-pointer"
-                  >
-                    {copiedAddress ? <Check className="h-3.5 w-3.5 text-emerald-300" /> : <Copy className="h-3.5 w-3.5" />}
-                    <span>{copiedAddress ? "Copied" : "Copy Full Address"}</span>
-                  </Button>
-                </div>
+              {(() => {
+                const modalAddress = selectedOrderForAddress.shippingAddress || selectedOrderForAddress.deliveryAddress || selectedOrderForAddress.address || selectedOrderForAddress.shipping_address || {};
+                return (
+                  <div className="bg-[#F8F9F7] rounded-xl p-4 border border-[#E2E6DF] space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E] block">Recipient Full Name</span>
+                        <p className="font-serif font-bold text-base text-[#0F3D3E]">
+                          {modalAddress.fullName || modalAddress.name || selectedOrderForAddress.user?.name || "Customer"}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => copyFullAddress(selectedOrderForAddress)}
+                        className="h-8 text-xs gap-1.5 bg-[#0F3D3E] hover:bg-[#174C4D] text-white rounded-lg cursor-pointer"
+                      >
+                        {copiedAddress ? <Check className="h-3.5 w-3.5 text-emerald-300" /> : <Copy className="h-3.5 w-3.5" />}
+                        <span>{copiedAddress ? "Copied" : "Copy Full Address"}</span>
+                      </Button>
+                    </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-[#E2E6DF]/80 text-xs">
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E] block">Phone / Mobile</span>
-                    <p className="font-mono font-bold text-[#0F3D3E] mt-0.5">
-                      {selectedOrderForAddress.shippingAddress?.phone || selectedOrderForAddress.user?.phone || selectedOrderForAddress.phone || "Not Provided"}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E] block">Email</span>
-                    <p className="font-sans text-[#0F3D3E] mt-0.5 truncate">
-                      {selectedOrderForAddress.user?.email || selectedOrderForAddress.shippingAddress?.email || "N/A"}
-                    </p>
-                  </div>
-                </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-[#E2E6DF]/80 text-xs">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E] block">Phone / Mobile</span>
+                        <p className="font-mono font-bold text-[#0F3D3E] mt-0.5">
+                          {modalAddress.phone || selectedOrderForAddress.user?.phone || selectedOrderForAddress.phone || "Not Provided"}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E] block">Email</span>
+                        <p className="font-sans text-[#0F3D3E] mt-0.5 truncate">
+                          {selectedOrderForAddress.user?.email || modalAddress.email || "N/A"}
+                        </p>
+                      </div>
+                    </div>
 
-                <div className="pt-2 border-t border-[#E2E6DF]/80">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E] block mb-1">
-                    Postal Shipping Destination
-                  </span>
-                  <div className="p-3.5 bg-white rounded-xl border border-[#E2E6DF] font-sans text-xs text-[#0F3D3E] leading-relaxed select-all shadow-2xs space-y-1">
-                    <p className="font-semibold text-sm">{selectedOrderForAddress.shippingAddress?.addressLine1 || selectedOrderForAddress.shippingAddress?.address || "Street Address not recorded"}</p>
-                    {selectedOrderForAddress.shippingAddress?.addressLine2 && (
-                      <p className="text-[#5C6E6E]">{selectedOrderForAddress.shippingAddress.addressLine2}</p>
-                    )}
-                    <p className="font-semibold text-[#0F3D3E] pt-0.5">
-                      {selectedOrderForAddress.shippingAddress?.city ? `${selectedOrderForAddress.shippingAddress.city}, ` : ""}
-                      {selectedOrderForAddress.shippingAddress?.state ? `${selectedOrderForAddress.shippingAddress.state} - ` : ""}
-                      <span className="font-mono font-bold text-amber-900 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 ml-1">
-                        PIN: {selectedOrderForAddress.shippingAddress?.postalCode || selectedOrderForAddress.shippingAddress?.pincode || selectedOrderForAddress.shippingAddress?.pinCode || "N/A"}
+                    <div className="pt-2 border-t border-[#E2E6DF]/80">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E] block mb-1">
+                        Postal Shipping Destination
                       </span>
-                    </p>
-                    <p className="text-[#5C6E6E] text-[11px] pt-0.5">
-                      Country: {selectedOrderForAddress.shippingAddress?.country || "India"}
-                    </p>
+                      <div className="p-3.5 bg-white rounded-xl border border-[#E2E6DF] font-sans text-xs text-[#0F3D3E] leading-relaxed select-all shadow-2xs space-y-1">
+                        <p className="font-semibold text-sm">{modalAddress.addressLine1 || modalAddress.street || modalAddress.address || "Street Address not recorded"}</p>
+                        {modalAddress.addressLine2 && (
+                          <p className="text-[#5C6E6E]">{modalAddress.addressLine2}</p>
+                        )}
+                        <p className="font-semibold text-[#0F3D3E] pt-0.5">
+                          {modalAddress.city ? `${modalAddress.city}, ` : ""}
+                          {modalAddress.state ? `${modalAddress.state} - ` : ""}
+                          <span className="font-mono font-bold text-amber-900 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 ml-1">
+                            PIN: {modalAddress.postalCode || modalAddress.pincode || modalAddress.pinCode || "N/A"}
+                          </span>
+                        </p>
+                        <p className="text-[#5C6E6E] text-[11px] pt-0.5">
+                          Country: {modalAddress.country || "India"}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
+                );
+              })()}
 
               {/* Ordered Items in Consignment */}
               <div className="space-y-2">
