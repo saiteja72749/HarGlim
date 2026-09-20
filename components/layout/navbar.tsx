@@ -72,7 +72,7 @@ export function Navbar() {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 10);
     };
-    window.addEventListener("scroll", handleScroll);
+    window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
@@ -182,7 +182,7 @@ export function Navbar() {
               </Button>
             </Link>
 
-            {/* User Menu */}
+            {/* User Menu (Desktop) */}
             {isAuthenticated && user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -311,7 +311,56 @@ export function Navbar() {
                     </Link>
                   ))}
                 </div>
-                {!isAuthenticated && (
+
+                {/* Mobile Drawer Footer: Authenticated User & Guest controls */}
+                {isAuthenticated && user ? (
+                  <div className="pt-4 border-t border-border mt-auto space-y-2 pb-4">
+                    <div className="px-3 py-2.5 bg-[#F8F9F7] rounded-xl border border-[#E2E6DF]">
+                      <div className="flex items-center justify-between mb-0.5">
+                        <p className="text-sm font-serif font-bold text-[#0F3D3E] truncate">{user.name}</p>
+                        <span className={cn(
+                          "text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border",
+                          user.role === "admin" ? "bg-rose-50 text-rose-700 border-rose-200" :
+                          user.role === "author" ? "bg-[#D4AF37]/20 text-[#0F3D3E] border-[#D4AF37]/40" :
+                          "bg-[#0F3D3E]/10 text-[#0F3D3E] border-[#0F3D3E]/20"
+                        )}>
+                          {user.role === "admin" ? "Admin" : user.role === "author" ? "Author" : "Reader"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#5C6E6E] truncate">{user.email}</p>
+                    </div>
+
+                    <Link
+                      href={getDashboardLink()}
+                      onClick={() => setIsOpen(false)}
+                      className="flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-[#0F3D3E] rounded-lg hover:bg-muted"
+                    >
+                      <LayoutDashboard className="h-4 w-4" />
+                      <span>{user.role === "admin" ? "Admin Ops Control Panel" : user.role === "author" ? "Author Studio Workspace" : "Reader Dashboard"}</span>
+                    </Link>
+
+                    <Link
+                      href="/dashboard/orders"
+                      onClick={() => setIsOpen(false)}
+                      className="flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-[#0F3D3E] rounded-lg hover:bg-muted"
+                    >
+                      <ShoppingCart className="h-4 w-4" />
+                      <span>My Orders & Tracking</span>
+                    </Link>
+
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setIsOpen(false);
+                        handleLogout();
+                      }}
+                      className="w-full justify-start text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 gap-2 h-9 px-3"
+                    >
+                      <LogOut className="h-4 w-4 text-rose-500" />
+                      <span>Log out</span>
+                    </Button>
+                  </div>
+                ) : (
                   <div className="pt-4 border-t border-border mt-auto space-y-3 pb-6">
                     <Link
                       href={pathname && pathname !== "/login" && pathname !== "/register" ? `/login?redirect=${encodeURIComponent(pathname)}` : "/login"}

@@ -521,8 +521,8 @@ export default function BookDetailPage() {
                 <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-[#F8F9F7]">
                   <FileText className="h-4 w-4 text-[#0F3D3E] shrink-0" />
                   <div>
-                    <span className="text-[#5C6E6E] block text-[10px]">Length</span>
-                    <span className="font-bold text-[#0F3D3E]">{book.pages ? `${book.pages} pages` : "N/A"}</span>
+                    <span className="text-[#5C6E6E] block text-[10px]">Pages</span>
+                    <span className="font-bold text-[#0F3D3E]">{book.pages ? `${book.pages}` : "250"}</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-[#F8F9F7]">
@@ -751,33 +751,21 @@ export default function BookDetailPage() {
               <Card className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xs">
                 <dl className="grid grid-cols-1 sm:grid-cols-2 gap-y-4 gap-x-8 text-sm">
                   <div>
-                    <dt className="text-xs text-[#5C6E6E] uppercase tracking-wider font-bold">Publisher</dt>
-                    <dd className="font-semibold text-[#0F3D3E] mt-0.5">{book.publisher || "Harglim Publishers"}</dd>
+                    <dt className="text-xs text-[#5C6E6E] uppercase tracking-wider font-bold">Format</dt>
+                    <dd className="font-semibold text-[#0F3D3E] mt-0.5 capitalize">{book.format || "Paperback"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-[#5C6E6E] uppercase tracking-wider font-bold">Pages</dt>
+                    <dd className="font-semibold text-[#0F3D3E] mt-0.5">{book.pages ? `${book.pages}` : "250"}</dd>
                   </div>
                   <div>
                     <dt className="text-xs text-[#5C6E6E] uppercase tracking-wider font-bold">Language</dt>
                     <dd className="font-semibold text-[#0F3D3E] mt-0.5">{book.language || "English"}</dd>
                   </div>
                   <div>
-                    <dt className="text-xs text-[#5C6E6E] uppercase tracking-wider font-bold">Format / Binding</dt>
-                    <dd className="font-semibold text-[#0F3D3E] mt-0.5">{book.format || "Paperback"}</dd>
+                    <dt className="text-xs text-[#5C6E6E] uppercase tracking-wider font-bold">ISBN</dt>
+                    <dd className="font-mono font-semibold text-[#0F3D3E] mt-0.5">{book.isbn || book.isbn13 || book.isbn10 || "N/A"}</dd>
                   </div>
-                  <div>
-                    <dt className="text-xs text-[#5C6E6E] uppercase tracking-wider font-bold">Page Count</dt>
-                    <dd className="font-semibold text-[#0F3D3E] mt-0.5">{book.pages ? `${book.pages} pages` : "N/A"}</dd>
-                  </div>
-                  {book.isbn10 && (
-                    <div>
-                      <dt className="text-xs text-[#5C6E6E] uppercase tracking-wider font-bold">ISBN-10</dt>
-                      <dd className="font-mono font-semibold text-[#0F3D3E] mt-0.5">{book.isbn10}</dd>
-                    </div>
-                  )}
-                  {book.isbn13 && (
-                    <div>
-                      <dt className="text-xs text-[#5C6E6E] uppercase tracking-wider font-bold">ISBN-13</dt>
-                      <dd className="font-mono font-semibold text-[#0F3D3E] mt-0.5">{book.isbn13}</dd>
-                    </div>
-                  )}
                 </dl>
               </Card>
             </div>

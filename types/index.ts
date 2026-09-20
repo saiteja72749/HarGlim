@@ -73,16 +73,42 @@ export interface Review {
   createdAt: string;
 }
 
+export interface ShippingAddress {
+  fullName?: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  addressLine1?: string;
+  street?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  pincode?: string;
+  pinCode?: string;
+  country?: string;
+}
+
 export interface Order {
   _id: string;
   user: string | any;
   orderNumber: string;
   items: CartItem[];
   totalAmount: number;
-  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
-  paymentStatus: 'pending' | 'paid' | 'failed';
-  shippingAddress: any;
+  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'Placed' | 'Printed' | 'Shipped' | string;
+  paymentStatus: 'pending' | 'paid' | 'failed' | 'verified' | 'VERIFIED' | string;
+  payment_status?: 'pending' | 'approved' | 'rejected' | string;
+  shippingAddress: ShippingAddress | any;
   createdAt: string;
+  courier_name?: string;
+  courierName?: string;
+  courier?: string;
+  carrier?: string;
+  tracking_id?: string;
+  trackingId?: string;
+  trackingNumber?: string;
+  tracking_url?: string;
+  trackingUrl?: string;
 }
 
 export type Role = 'visitor' | 'reader' | 'author' | 'admin';

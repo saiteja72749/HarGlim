@@ -15,6 +15,7 @@ const defaultAddress = {
   addressLine1: '',
   addressLine2: '',
   city: '',
+  state: '',
   postalCode: '',
   country: 'India',
   phone: '',
@@ -70,13 +71,8 @@ export default function CheckoutStepPage() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!address.fullName || !address.addressLine1 || !address.city || !address.postalCode || !address.country || !address.phone || !address.email) {
-      toast.error("Please fill in all required shipping address fields.");
-      return;
-    }
-
-    if (paymentMethod !== 'upi') {
-      toast.error("Only UPI payments are supported currently.");
+    if (!address.fullName || !address.addressLine1 || !address.city || !address.state || !address.postalCode || !address.country || !address.phone || !address.email) {
+      toast.error("Please fill in all required shipping address fields (including phone, state, and pincode).");
       return;
     }
 
@@ -97,10 +93,17 @@ export default function CheckoutStepPage() {
         items: formattedItems,
         shippingAddress: {
           fullName: address.fullName.trim(),
+          name: address.fullName.trim(),
+          phone: address.phone.trim(),
+          email: address.email.trim(),
           addressLine1: address.addressLine1.trim(),
+          street: address.addressLine1.trim(),
+          address: address.addressLine1.trim(),
           addressLine2: address.addressLine2 ? address.addressLine2.trim() : undefined,
           city: address.city.trim(),
+          state: address.state.trim(),
           postalCode: address.postalCode.trim(),
+          pincode: address.postalCode.trim(),
           country: address.country || 'India',
         },
         paymentMethod: 'UPI'
@@ -237,10 +240,11 @@ export default function CheckoutStepPage() {
                 ))}
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
                 {[
                   { name: 'city', label: 'City' },
-                  { name: 'postalCode', label: 'Postal Code' },
+                  { name: 'state', label: 'State' },
+                  { name: 'postalCode', label: 'PIN / Postal Code' },
                   { name: 'country', label: 'Country' },
                 ].map((field) => (
                   <label key={field.name} className="space-y-2">
@@ -250,6 +254,7 @@ export default function CheckoutStepPage() {
                       value={(address as any)[field.name]}
                       onChange={(event) => setAddress({ ...address, [field.name]: event.target.value })}
                       className="w-full rounded-2xl border border-border bg-background px-4 py-3 outline-none transition focus:border-primary/80"
+                      required
                     />
                   </label>
                 ))}
@@ -286,7 +291,7 @@ export default function CheckoutStepPage() {
                       type="button"
                       key={method.value}
                       onClick={() => setPaymentMethod(method.value)}
-                      className={`rounded-2xl border p-4 text-left transition border-primary bg-primary/10`}
+                      className={`rounded-2xl border p-4 text-left transition ${paymentMethod === method.value ? 'border-primary bg-primary/10' : 'border-border bg-card'}`}
                     >
                       <p className="font-semibold">{method.label}</p>
                       <p className="text-sm text-muted-foreground mt-1">

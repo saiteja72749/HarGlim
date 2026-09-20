@@ -271,11 +271,11 @@ export default function AuthorRoyaltiesPage() {
                         <td className="py-3 px-4 font-bold text-emerald-700">
                           ₹{(s.amount || s.totalRoyalty || s.totalAmount || 0).toLocaleString("en-IN")}
                         </td>
-                        <td className="py-3 px-4">
                           {(() => {
-                            const st = (s.status || "").toUpperCase();
-                            const isPaid = st === "PAID" || st === "COMPLETED";
-                            const isApproved = st === "APPROVED" || st === "CONFIRMED";
+                            const rawStatus = (s.payment_status || s.paymentStatus || s.status || "").toUpperCase();
+                            const isPaid = rawStatus === "PAID" || rawStatus === "COMPLETED";
+                            const isApproved = rawStatus.includes("APPROV") || rawStatus === "VERIFIED" || rawStatus === "CONFIRMED";
+                            const isRejected = rawStatus.includes("REJECT") || rawStatus.includes("FAIL");
                             return (
                               <Badge
                                 variant="outline"
@@ -284,14 +284,15 @@ export default function AuthorRoyaltiesPage() {
                                     ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/20 font-semibold"
                                     : isApproved
                                     ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/20 font-semibold"
+                                    : isRejected
+                                    ? "bg-rose-500/10 text-rose-700 border-rose-500/20 font-semibold"
                                     : "bg-amber-500/10 text-amber-700 border-amber-500/20 font-semibold"
                                 }
                               >
-                                {isPaid ? "Paid" : isApproved ? "Payment Approved" : s.status || "Pending"}
+                                {isPaid ? "Paid" : isApproved ? "Approved" : isRejected ? "Rejected" : "Pending"}
                               </Badge>
                             );
                           })()}
-                        </td>
                         <td className="py-3 px-4 font-mono text-xs text-[#5C6E6E]">
                           {s.transactionReference || s.payoutDetails?.transactionReference || "—"}
                         </td>

@@ -28,64 +28,8 @@ import {
 import { Switch } from "@/components/ui/switch";
 import toast from "react-hot-toast";
 
-export const BISAC_CATEGORIES = [
-  "Antiques & Collectibles",
-  "Architecture",
-  "Art",
-  "Bibles",
-  "Biography & Autobiography",
-  "Body, Mind & Spirit",
-  "Business & Economics",
-  "Comics & Graphic Novels",
-  "Computers",
-  "Cooking",
-  "Crafts & Hobbies",
-  "Design",
-  "Drama",
-  "Education",
-  "Family & Relationships",
-  "Fiction",
-  "Foreign Language Study",
-  "Games & Activities",
-  "Gardening",
-  "Health & Fitness",
-  "History",
-  "House & Home",
-  "Humor",
-  "Juvenile Fiction",
-  "Juvenile Nonfiction",
-  "Language Arts & Disciplines",
-  "Language Study",
-  "Law",
-  "Literary Collections",
-  "Literary Criticism",
-  "Mathematics",
-  "Medical",
-  "Mind, Body, Spirit",
-  "Music",
-  "Nature",
-  "Performing Arts",
-  "Pets",
-  "Philosophy",
-  "Photography",
-  "Poetry",
-  "Political Science",
-  "Psychology",
-  "Reference",
-  "Religion",
-  "Science",
-  "Self-Help",
-  "Social Science",
-  "Sports & Recreation",
-  "Study Aids",
-  "Technology & Engineering",
-  "Transportation",
-  "Travel",
-  "True Crime",
-  "Young Adult Fiction",
-  "Young Adult Nonfiction",
-  "Non-Classifiable",
-];
+import { EXACT_CATEGORIES } from "@/config/categories";
+export const BISAC_CATEGORIES = EXACT_CATEGORIES;
 
 type AuthorType = "existing" | "new" | "external";
 
@@ -120,7 +64,6 @@ export default function AddBookPage() {
       const created = data?.data || data?.category || data;
       const catName = created?.name || newCategoryName.trim();
 
-      setCategoriesList((prev) => [created, ...prev]);
       setFormData((prev: any) => ({ ...prev, category: catName }));
       setNewCategoryName("");
       setNewCategoryDescription("");
@@ -140,9 +83,6 @@ export default function AddBookPage() {
   const [authorsList, setAuthorsList] = useState<any[]>([]);
   const [selectedAuthorId, setSelectedAuthorId] = useState<string>("");
   const [, setSelectedAuthorName] = useState<string>("");
-
-  // Categories State
-  const [categoriesList, setCategoriesList] = useState<any[]>([]);
 
   // New Author State
   const [newAuthorName, setNewAuthorName] = useState<string>("");
@@ -175,14 +115,7 @@ export default function AddBookPage() {
     const loadCategories = async () => {
       setFetchingCategories(true);
       try {
-        const { data } = await api.get("/categories").catch(() => api.get("/admin/categories"));
-        const items = data?.data?.categories || data?.data || data || [];
-        const arr = Array.isArray(items) ? items : [];
-        setCategoriesList(arr);
-        if (arr.length > 0) {
-          const firstCat = arr[0];
-          setFormData((prev) => ({ ...prev, category: firstCat._id || firstCat.id || firstCat.name }));
-        }
+        await api.get("/categories").catch(() => api.get("/admin/categories"));
       } catch (err) {
         console.warn("Failed to load categories:", err);
       } finally {
@@ -287,6 +220,8 @@ export default function AddBookPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (loading) return;
+
     if (!formData.title.trim()) {
       toast.error("Please enter a book title.");
       return;
@@ -303,7 +238,22 @@ export default function AddBookPage() {
     }
 
     if (!formData.price || Number(formData.price) <= 0) {
-      toast.error("Please enter a valid price (MRP).");
+      toast.error("Please enter a valid price.");
+      return;
+    }
+
+    if (!formData.pages || Number(formData.pages) <= 0) {
+      toast.error("Number of Pages is required.");
+      return;
+    }
+
+    if (!formData.language || !formData.language.trim()) {
+      toast.error("Language is required.");
+      return;
+    }
+
+    if (!formData.format) {
+      toast.error("Please select a format (Paperback or Hardcover).");
       return;
     }
 
@@ -797,10 +747,7 @@ export default function AddBookPage() {
                     <SelectValue placeholder={fetchingCategories ? "Loading categories..." : "Select Category"} />
                   </SelectTrigger>
                   <SelectContent className="bg-white border-[#E2E6DF] max-h-72">
-                    {Array.from(new Set([
-                      ...categoriesList.map((c: any) => c.name || c),
-                      ...BISAC_CATEGORIES
-                    ])).map((categoryName) => (
+                    {EXACT_CATEGORIES.map((categoryName) => (
                       <SelectItem key={categoryName} value={categoryName}>
                         {categoryName}
                       </SelectItem>

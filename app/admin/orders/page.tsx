@@ -70,21 +70,20 @@ const getPaymentBadge = (isPaid: boolean, paymentStatus?: string) => {
 };
 
 const getOrderStatusBadge = (status: string) => {
-  const s = (status || "").toUpperCase();
-  switch (s) {
-    case "DELIVERED":
-    case "COMPLETED":
-      return <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 text-xs">Completed</Badge>;
-    case "SHIPPED":
-    case "IN TRANSIT":
-      return <Badge className="bg-blue-500/10 text-blue-700 border-blue-500/20 text-xs">Shipped</Badge>;
-    case "PROCESSING":
-      return <Badge className="bg-purple-500/10 text-purple-700 border-purple-500/20 text-xs">Processing / Printed</Badge>;
-    case "CANCELLED":
-      return <Badge className="bg-rose-500/10 text-rose-700 border-rose-500/20 text-xs">Cancelled</Badge>;
-    default:
-      return <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/20 text-xs">Pending</Badge>;
+  const s = (status || "").toUpperCase().replace(/[-_]/g, " ");
+  if (s.includes("DELIVER")) {
+    return <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 text-xs font-semibold">Delivered</Badge>;
   }
+  if (s.includes("SHIP") || s.includes("TRANSIT")) {
+    return <Badge className="bg-blue-500/10 text-blue-700 border-blue-500/20 text-xs font-semibold">Shipped</Badge>;
+  }
+  if (s.includes("PRINT")) {
+    return <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/20 text-xs font-semibold">Printed</Badge>;
+  }
+  if (s.includes("CANCEL") || s.includes("REJECT")) {
+    return <Badge className="bg-rose-500/10 text-rose-700 border-rose-500/20 text-xs font-semibold">Cancelled</Badge>;
+  }
+  return <Badge className="bg-indigo-500/10 text-indigo-700 border-indigo-500/20 text-xs font-semibold">Order Placed</Badge>;
 };
 
 const COURIER_SERVICES = [
@@ -118,9 +117,6 @@ const getCourierTrackingUrl = (courier: string, trackingNumber: string): string 
   if (c.includes("dtdc")) {
     return `https://www.dtdc.in/tracking.asp`;
   }
-  if (c.includes("india post") || c.includes("post") || c.includes("speed post")) {
-    return `https://www.indiapost.gov.in/_layouts/15/dpt.cept.tracking/trackconsignment.aspx`;
-  }
   if (c.includes("shiprocket")) {
     return `https://shiprocket.co/tracking/${t}`;
   }
@@ -151,10 +147,10 @@ export default function AdminOrdersPage() {
     if (!order) return;
     const addr = order.shippingAddress || {};
     const lines = [
-      `Recipient: ${addr.fullName || order.user?.name || "Customer"}`,
-      `Phone: ${addr.phone || order.user?.phone || order.phone || "Not Provided"}`,
-      `Email: ${order.user?.email || addr.email || "N/A"}`,
-      `Address: ${addr.addressLine1 || addr.address || "Address Line 1"}`,
+      `Recipient: ${addr.fullName || addr.name || order.user?.name || "Customer"}`,
+      `Phone: ${addr.phone || addr.recipientPhone || order.user?.phone || order.phone || "Not Provided"}`,
+      `Email: ${addr.email || order.user?.email || "N/A"}`,
+      `Address: ${addr.addressLine1 || addr.street || addr.address || "Address Line 1"}`,
       addr.addressLine2 ? `Address Line 2: ${addr.addressLine2}` : null,
       `City: ${addr.city || ""}`,
       `State / Postal PIN: ${addr.state ? addr.state + " - " : ""}${addr.postalCode || addr.pincode || addr.pinCode || ""}`,
@@ -210,6 +206,7 @@ export default function AdminOrdersPage() {
         await api.put(`/admin/orders/${orderMongoId}/status`, {
           status: "Processing",
           paymentStatus: "VERIFIED",
+          payment_status: "approved",
           isPaid: true,
         }).catch(() => null);
       }
@@ -220,6 +217,7 @@ export default function AdminOrdersPage() {
       toast.error(err.response?.data?.message || "Failed to approve payment.");
     }
   };
+
 
   // Action 2: Reject Payment
   const handleRejectPayment = async (orderMongoId?: string, paymentMongoId?: string) => {
@@ -249,7 +247,7 @@ export default function AdminOrdersPage() {
     }
   };
 
-  // Action 3: Mark as Printed / Processing
+  // Action 3: Mark as Printed / Physical printing completed
   const handleMarkAsPrinted = async (orderMongoId?: string) => {
     if (!orderMongoId) {
       toast.error("No valid Order ID found.");
@@ -257,22 +255,27 @@ export default function AdminOrdersPage() {
     }
     try {
       await api.put(`/admin/orders/${orderMongoId}/status`, {
-        status: "Processing",
-        reason: "Marked as Printed / Processing",
+        status: "Printed",
+        orderStatus: "Printed",
+        reason: "Book physically printed",
       });
 
-      toast.success("Order status updated to Processing / Printed 🖨️");
+      toast.success("Order status updated to Printed 🖨️");
       fetchOrders();
     } catch (err: any) {
       toast.error(err.response?.data?.message || "Failed to update order status.");
     }
   };
 
-  // Action 4: Submit Tracking ID & Mark Shipped
+  // Action 4: Submit Tracking ID & URL, Mark Shipped
   const handleSaveTracking = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedOrderForTracking || !trackingNumberInput.trim()) {
-      toast.error("Please enter a tracking number.");
+    if (!selectedOrderForTracking) {
+      toast.error("No order selected.");
+      return;
+    }
+    if (!trackingNumberInput.trim() && !trackingUrlInput.trim()) {
+      toast.error("Please enter either a Tracking ID or a Tracking URL.");
       return;
     }
 
@@ -285,23 +288,29 @@ export default function AdminOrdersPage() {
     setIsSubmittingTracking(true);
 
     try {
-      const resolvedTrackingUrl = trackingUrlInput.trim() || getCourierTrackingUrl(courierInput, trackingNumberInput);
+      const resolvedTrackingUrl = trackingUrlInput.trim() || (trackingNumberInput.trim() ? getCourierTrackingUrl(courierInput, trackingNumberInput) : "");
 
       await api.put(`/admin/orders/${orderMongoId}/status`, {
         status: "Shipped",
+        orderStatus: "Shipped",
+        courier_name: courierInput.trim(),
+        courierName: courierInput.trim(),
+        courier: courierInput.trim(),
+        carrier: courierInput.trim(),
+        tracking_id: trackingNumberInput.trim(),
+        trackingId: trackingNumberInput.trim(),
         trackingNumber: trackingNumberInput.trim(),
-        courier: courierInput,
-        carrier: courierInput,
+        tracking_url: resolvedTrackingUrl,
         trackingUrl: resolvedTrackingUrl,
       });
 
-      toast.success(`Tracking saved with ${courierInput} & status set to Shipped! 🚚`);
+      toast.success(`Shipment details saved with ${courierInput} & status set to Shipped! 🚚`);
       setTrackingModalOpen(false);
       setTrackingNumberInput("");
       setTrackingUrlInput("");
       fetchOrders();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || "Failed to save tracking number.");
+      toast.error(err.response?.data?.message || "Failed to save tracking details.");
     } finally {
       setIsSubmittingTracking(false);
     }
@@ -606,26 +615,26 @@ export default function AdminOrdersPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                Tracking / Airwaybill Number (AWB) *
+              <label className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E] flex items-center justify-between">
+                <span>Tracking ID / Consignment Number</span>
+                <span className="text-[10px] text-muted-foreground font-normal">Optional if URL provided</span>
               </label>
               <Input
-                placeholder="e.g. BLD12345678 or DEL987654321"
+                placeholder="e.g. SP123456789IN or DEL987654321"
                 value={trackingNumberInput}
                 onChange={(e) => setTrackingNumberInput(e.target.value)}
                 className="font-mono text-sm border-[#E2E6DF] rounded-xl h-11"
-                required
               />
             </div>
 
             <div className="space-y-2">
               <label className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E] flex items-center justify-between">
-                <span>Direct Tracking URL (Optional)</span>
-                <span className="text-[10px] text-muted-foreground font-normal">Auto-generated if empty</span>
+                <span>Tracking URL (Direct Link)</span>
+                <span className="text-[10px] text-muted-foreground font-normal">Opens directly when user clicks "Track Package"</span>
               </label>
               <Input
                 type="url"
-                placeholder="https://www.bluedart.com/tracking?trackNumber=..."
+                placeholder="https://www.indiapost.gov.in/... or courier tracking link"
                 value={trackingUrlInput}
                 onChange={(e) => setTrackingUrlInput(e.target.value)}
                 className="text-xs border-[#E2E6DF] rounded-xl h-11"

@@ -43,64 +43,42 @@ import api from "@/lib/api";
 import { ErrorState } from "@/components/ui/error-state";
 import toast from "react-hot-toast";
 
-// Status Badge mapping for Order Status
+// Status Badge mapping for Order Status (Placed / Printed / Shipped / Delivered)
 const getOrderStatusBadge = (status: string) => {
-  const s = (status || "").toUpperCase();
-  switch (s) {
-    case "DELIVERED":
-    case "COMPLETED":
-      return (
-        <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 font-medium px-2.5 py-0.5">
-          Delivered
-        </Badge>
-      );
-    case "SHIPPED":
-    case "IN TRANSIT":
-    case "IN-TRANSIT":
-      return (
-        <Badge className="bg-blue-500/10 text-blue-700 border-blue-500/20 font-medium px-2.5 py-0.5">
-          In Transit / Shipped
-        </Badge>
-      );
-    case "PROCESSING":
-    case "PRINTING":
-    case "IN_PRINTING":
-      return (
-        <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/20 font-medium px-2.5 py-0.5">
-          Printing / Processing
-        </Badge>
-      );
-    case "CONFIRMED":
-    case "PAID":
-    case "PAYMENT_APPROVED":
-    case "APPROVED":
-      return (
-        <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 font-medium px-2.5 py-0.5">
-          Order Confirmed
-        </Badge>
-      );
-    case "ORDER PLACED":
-    case "ORDER_PLACED":
-    case "PLACED":
-      return (
-        <Badge className="bg-indigo-500/10 text-indigo-700 border-indigo-500/20 font-medium px-2.5 py-0.5">
-          Order Placed
-        </Badge>
-      );
-    case "CANCELLED":
-    case "REJECTED":
-      return (
-        <Badge className="bg-rose-500/10 text-rose-700 border-rose-500/20 font-medium px-2.5 py-0.5">
-          Cancelled
-        </Badge>
-      );
-    default:
-      return (
-        <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 font-medium px-2.5 py-0.5">
-          {status || "Active"}
-        </Badge>
-      );
+  const s = (status || "").toUpperCase().replace(/[-_]/g, " ");
+  if (s.includes("DELIVER")) {
+    return (
+      <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 font-semibold px-2.5 py-0.5">
+        Delivered
+      </Badge>
+    );
   }
+  if (s.includes("SHIP") || s.includes("TRANSIT") || s.includes("DISPATCH")) {
+    return (
+      <Badge className="bg-blue-500/10 text-blue-700 border-blue-500/20 font-semibold px-2.5 py-0.5">
+        Shipped
+      </Badge>
+    );
+  }
+  if (s.includes("PRINT")) {
+    return (
+      <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/20 font-semibold px-2.5 py-0.5">
+        Printed
+      </Badge>
+    );
+  }
+  if (s.includes("CANCEL") || s.includes("REJECT")) {
+    return (
+      <Badge className="bg-rose-500/10 text-rose-700 border-rose-500/20 font-semibold px-2.5 py-0.5">
+        Cancelled
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="bg-indigo-500/10 text-indigo-700 border-indigo-500/20 font-semibold px-2.5 py-0.5">
+      Order Placed
+    </Badge>
+  );
 };
 
 // Payment Status Badge mapping
@@ -344,9 +322,9 @@ export default function OrdersPage() {
             const subtotal = order.subtotal ?? (order.totalPrice ? order.totalPrice - (order.shippingPrice || 0) : order.items?.reduce((acc: number, item: any) => acc + (item.price || item.book?.price || 0) * (item.quantity || 1), 0) || 0);
             const shippingPrice = order.shippingPrice ?? order.shippingFee ?? 0;
             const totalPrice = order.totalPrice ?? order.totalAmount ?? order.amount ?? (subtotal + shippingPrice);
-            const trackingNumber = order.trackingNumber || order.awbNumber || order.trackingId || null;
-            const courierName = order.courier || order.courierName || order.carrier || "India Post";
-            const trackingUrl = order.trackingUrl || null;
+            const trackingNumber = order.tracking_id || order.trackingId || order.trackingNumber || order.awbNumber || null;
+            const courierName = order.courier_name || order.courierName || order.courier || order.carrier || "";
+            const trackingUrl = order.tracking_url || order.trackingUrl || null;
 
             return (
               <motion.div
@@ -683,23 +661,42 @@ export default function OrdersPage() {
                           {/* Address & Cost Summary */}
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {/* Shipping Address */}
-                            <div className="p-4 rounded-xl bg-white border border-[#E2E6DF] space-y-2">
+                            <div className="p-4 rounded-xl bg-white border border-[#E2E6DF] space-y-2.5">
                               <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#5C6E6E]">
                                 <MapPin className="h-3.5 w-3.5 text-[#0F3D3E]" />
                                 <span>Delivery Address</span>
                               </div>
                               {order.shippingAddress ? (
-                                <div className="text-xs text-[#0F3D3E] space-y-0.5 leading-relaxed font-sans">
-                                  <p className="font-bold text-sm">
-                                    {order.shippingAddress.fullName || order.shippingAddress.name || "Reader"}
+                                <div className="text-xs text-[#0F3D3E] space-y-1 leading-relaxed font-sans">
+                                  <p className="font-bold text-sm text-[#0F3D3E]">
+                                    {order.shippingAddress.fullName || order.shippingAddress.name || order.user?.name || "Reader"}
                                   </p>
-                                  <p>{order.shippingAddress.addressLine1 || order.shippingAddress.address}</p>
-                                  {order.shippingAddress.addressLine2 && <p>{order.shippingAddress.addressLine2}</p>}
-                                  <p>
-                                    {order.shippingAddress.city},{" "}
-                                    {order.shippingAddress.postalCode || order.shippingAddress.pincode}
+                                  {(order.shippingAddress.phone || order.shippingAddress.recipientPhone || order.user?.phone) && (
+                                    <p className="text-[#5C6E6E]">
+                                      <span className="font-medium text-[#0F3D3E]">Phone:</span>{" "}
+                                      {order.shippingAddress.phone || order.shippingAddress.recipientPhone || order.user?.phone}
+                                    </p>
+                                  )}
+                                  {(order.shippingAddress.email || order.user?.email) && (
+                                    <p className="text-[#5C6E6E]">
+                                      <span className="font-medium text-[#0F3D3E]">Email:</span>{" "}
+                                      {order.shippingAddress.email || order.user?.email}
+                                    </p>
+                                  )}
+                                  <p className="pt-0.5">
+                                    {order.shippingAddress.addressLine1 || order.shippingAddress.street || order.shippingAddress.address}
                                   </p>
-                                  <p className="text-[#5C6E6E] font-medium">
+                                  {order.shippingAddress.addressLine2 && (
+                                    <p>{order.shippingAddress.addressLine2}</p>
+                                  )}
+                                  <p className="font-medium">
+                                    {[
+                                      order.shippingAddress.city,
+                                      order.shippingAddress.state,
+                                      order.shippingAddress.postalCode || order.shippingAddress.pincode
+                                    ].filter(Boolean).join(", ")}
+                                  </p>
+                                  <p className="text-[#5C6E6E]">
                                     {order.shippingAddress.country || "India"}
                                   </p>
                                 </div>
@@ -730,7 +727,7 @@ export default function OrdersPage() {
                             </div>
                           </div>
 
-                          {/* Courier Shipment & External Carrier Tracking */}
+                          {/* Simplified Order Tracking System */}
                           <div className="rounded-2xl border border-[#0F3D3E]/20 bg-[#F8F9F7] p-5 space-y-4">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#E2E6DF] pb-3">
                               <div className="flex items-center gap-3">
@@ -738,11 +735,14 @@ export default function OrdersPage() {
                                   <Truck className="h-5 w-5" />
                                 </div>
                                 <div>
-                                  <h4 className="font-serif font-bold text-sm text-[#0F3D3E]">
-                                    Courier Shipment & Tracking
-                                  </h4>
-                                  <p className="text-xs text-[#5C6E6E]">
-                                    Carrier: <strong className="text-[#0F3D3E]">{courierName}</strong>
+                                  <div className="flex items-center gap-2">
+                                    <h4 className="font-serif font-bold text-sm text-[#0F3D3E]">
+                                      Shipment & Tracking
+                                    </h4>
+                                    {getOrderStatusBadge(status)}
+                                  </div>
+                                  <p className="text-xs text-[#5C6E6E] mt-0.5">
+                                    Courier Partner: <strong className="text-[#0F3D3E]">{courierName || "To be assigned upon dispatch"}</strong>
                                   </p>
                                 </div>
                               </div>
@@ -753,24 +753,55 @@ export default function OrdersPage() {
                                   variant="outline"
                                   size="sm"
                                   onClick={() => copyAwbToClipboard(id, trackingNumber)}
-                                  className="gap-1.5 text-xs font-mono font-bold border-[#E2E6DF]"
+                                  className="gap-1.5 text-xs font-mono font-bold border-[#E2E6DF] shrink-0"
                                 >
                                   {copiedAwbMap[id] ? (
                                     <Check className="h-3.5 w-3.5 text-emerald-600" />
                                   ) : (
                                     <Copy className="h-3.5 w-3.5 text-[#0F3D3E]" />
                                   )}
-                                  <span>{copiedAwbMap[id] ? "Copied" : "Copy Consignment ID"}</span>
+                                  <span>{copiedAwbMap[id] ? "Copied" : "Copy Tracking ID"}</span>
                                 </Button>
                               )}
                             </div>
 
-                            {trackingNumber ? (
-                              <div className="space-y-3">
-                                <div className="p-3.5 rounded-xl bg-white border border-[#E2E6DF] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            {/* CASE 1: tracking_url is available -> Show "Track Package" button */}
+                            {trackingUrl ? (
+                              <div className="p-4 rounded-xl bg-white border border-emerald-200/60 shadow-2xs space-y-3">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                  <div>
+                                    {trackingNumber && (
+                                      <p className="text-xs text-[#5C6E6E]">
+                                        Tracking ID: <span className="font-mono font-bold text-sm text-[#0F3D3E]">{trackingNumber}</span>
+                                      </p>
+                                    )}
+                                    <p className="text-xs text-emerald-800 font-medium mt-0.5">
+                                      Your package has been dispatched via {courierName || "courier"}. Click below to view live tracking directly.
+                                    </p>
+                                  </div>
+                                  <a
+                                    href={trackingUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="shrink-0"
+                                  >
+                                    <Button
+                                      className="bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] font-serif font-bold text-xs gap-2 px-4 shadow-sm"
+                                    >
+                                      <Truck className="h-4 w-4" />
+                                      <span>Track Package</span>
+                                      <ExternalLink className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </a>
+                                </div>
+                              </div>
+                            ) : trackingNumber ? (
+                              /* CASE 2: Only tracking_id is available -> Show tracking ID + instructional message */
+                              <div className="p-4 rounded-xl bg-white border border-[#E2E6DF] space-y-3">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                                   <div>
                                     <span className="text-[11px] font-bold uppercase tracking-wider text-[#5C6E6E] block">
-                                      Consignment / AWB Tracking Number
+                                      Courier Tracking ID
                                     </span>
                                     <span className="font-mono text-lg font-bold text-[#0F3D3E] tracking-wider select-all">
                                       {trackingNumber}
@@ -782,88 +813,26 @@ export default function OrdersPage() {
                                     className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white text-xs gap-1.5 shrink-0"
                                   >
                                     <Copy className="h-3.5 w-3.5" />
-                                    <span>Copy Tracking Code</span>
+                                    <span>Copy Tracking ID</span>
                                   </Button>
                                 </div>
-
-                                <div className="space-y-2 pt-1">
-                                  <p className="text-xs font-bold uppercase tracking-wider text-[#5C6E6E]">
-                                    Direct Courier Tracking Links:
-                                  </p>
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                    <a
-                                      href={trackingUrl || "https://www.indiapost.gov.in/_layouts/15/dpt.cept.tracking/trackconsignment.aspx"}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="flex items-center justify-between p-3 rounded-xl border border-[#0F3D3E]/30 bg-emerald-50 hover:bg-emerald-100/60 transition-all font-semibold text-xs text-[#0F3D3E]"
-                                    >
-                                      <span className="flex items-center gap-2">
-                                        <Truck className="h-4 w-4" />
-                                        <span>Track on India Post (Consignment)</span>
-                                      </span>
-                                      <ExternalLink className="h-3.5 w-3.5" />
-                                    </a>
-
-                                    <a
-                                      href="https://www.delhivery.com/tracking"
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="flex items-center justify-between p-3 rounded-xl border border-[#E2E6DF] bg-white hover:bg-muted/50 transition-all font-semibold text-xs text-[#0F3D3E]"
-                                    >
-                                      <span className="flex items-center gap-2">
-                                        <ExternalLink className="h-4 w-4 text-[#5C6E6E]" />
-                                        <span>Track on Delhivery</span>
-                                      </span>
-                                      <ExternalLink className="h-3.5 w-3.5 text-[#5C6E6E]" />
-                                    </a>
-                                  </div>
-
-                                  <div className="pt-1 flex flex-wrap items-center gap-2 text-xs text-[#5C6E6E]">
-                                    <span className="font-medium">Other Courier Websites:</span>
-                                    <a href="https://www.bluedart.com/tracking" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#0F3D3E]">Blue Dart</a>
-                                    <span>•</span>
-                                    <a href="https://www.dtdc.in/tracking.asp" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#0F3D3E]">DTDC</a>
-                                    <span>•</span>
-                                    <a href="https://www.shiprocket.in/shipment-tracking/" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#0F3D3E]">Shiprocket</a>
-                                  </div>
+                                <div className="pt-1 text-xs text-[#5C6E6E] flex items-center gap-2">
+                                  <Clock className="h-3.5 w-3.5 text-[#0F3D3E] shrink-0" />
+                                  <span>Use this tracking ID on the courier website to track your order.</span>
                                 </div>
                               </div>
                             ) : (
+                              /* Neither trackingUrl nor trackingNumber yet */
                               <div className="p-3.5 rounded-xl bg-white border border-[#E2E6DF] flex items-center gap-3">
                                 <Clock className="h-4 w-4 text-[#5C6E6E] shrink-0" />
                                 <p className="text-xs text-[#5C6E6E]">
-                                  Consignment / AWB tracking number will be provided once your package is dispatched via India Post Speed Post or courier partner.
+                                  {status.toUpperCase().includes("PRINT")
+                                    ? "Book printing is physically in progress. Courier Tracking link & ID will appear once shipped."
+                                    : "Order placed. Printing will be processed shortly and shipment details will be updated here."}
                                 </p>
                               </div>
                             )}
                           </div>
-
-                          {/* Tracking Timeline */}
-                          {order.trackingUpdates && order.trackingUpdates.length > 0 && (
-                            <div>
-                              <h4 className="text-xs font-bold uppercase tracking-wider text-[#5C6E6E] mb-3 flex items-center gap-1.5">
-                                <Truck className="h-3.5 w-3.5 text-[#0F3D3E]" />
-                                <span>Tracking Timeline</span>
-                              </h4>
-                              <div className="space-y-3 pl-2 border-l-2 border-[#0F3D3E]/30">
-                                {order.trackingUpdates.map((update: any, stepIdx: number) => (
-                                  <div key={update._id || stepIdx} className="relative pl-4 space-y-0.5">
-                                    <div className="absolute -left-[13px] top-1 h-3 w-3 rounded-full bg-[#0F3D3E] ring-4 ring-white" />
-                                    <div className="flex items-center justify-between text-xs">
-                                      <span className="font-bold text-[#0F3D3E] font-serif">{update.status}</span>
-                                      <span className="text-[11px] text-[#5C6E6E]">
-                                        {new Date(update.timestamp || update.createdAt).toLocaleString("en-IN", {
-                                          dateStyle: "medium",
-                                          timeStyle: "short",
-                                        })}
-                                      </span>
-                                    </div>
-                                    <p className="text-xs text-[#5C6E6E]">{update.description}</p>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
 
                           {/* Action Footer */}
                           <div className="flex flex-wrap items-center justify-between gap-3 pt-2">

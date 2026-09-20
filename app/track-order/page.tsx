@@ -12,6 +12,7 @@ import {
   ExternalLink,
   Copy,
   Check,
+  MapPin,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -64,7 +65,7 @@ function TrackOrderContent() {
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     setCopiedAwb(true);
-    toast.success("Consignment / Tracking ID copied to clipboard! 📋");
+    toast.success("Tracking ID copied to clipboard! 📋");
     setTimeout(() => setCopiedAwb(false), 2000);
   };
 
@@ -73,35 +74,35 @@ function TrackOrderContent() {
     setIsLoading(true);
 
     try {
-      const { data } = await api.get(`/orders/track/${targetOrderNo.trim().toUpperCase()}`);
-      const orderData = data.data || data;
+      const cleanNum = targetOrderNo.trim();
+      const { data } = await api.get(`/orders/track/${encodeURIComponent(cleanNum)}`).catch(() =>
+        api.get(`/orders/${encodeURIComponent(cleanNum)}`)
+      );
+      const orderData = data?.data || data;
+      const tNum = orderData.tracking_id || orderData.trackingId || orderData.trackingNumber || orderData.awbNumber || null;
+      const cName = orderData.courier_name || orderData.courierName || orderData.courier || orderData.carrier || "";
+      const tUrl = orderData.tracking_url || orderData.trackingUrl || (tNum ? resolveCarrierDirectUrl(cName, tNum, null) : null);
+
       setTrackedOrder({
-        orderNumber: orderData.orderNumber || orderData.id,
+        orderNumber: orderData.orderNumber || orderData._id || orderData.id,
         orderDate: orderData.createdAt || orderData.date,
-        status: orderData.orderStatus || orderData.status,
+        status: orderData.orderStatus || orderData.status || "Order Placed",
         expectedDelivery: orderData.expectedDelivery || null,
-        trackingNumber: orderData.trackingNumber || orderData.awbNumber || orderData.trackingId || null,
-        courier: orderData.courier || orderData.courierName || orderData.carrier || orderData.deliveryPartner || "Courier Partner",
-        trackingUrl: resolveCarrierDirectUrl(orderData.courier || orderData.courierName || orderData.carrier || orderData.deliveryPartner || "",
-          orderData.trackingNumber || orderData.awbNumber || orderData.trackingId || "",
-          orderData.trackingUrl
-        ),
+        trackingNumber: tNum,
+        courier: cName || "Postal Courier",
+        trackingUrl: tUrl,
         items: (orderData.items || []).map((item: any) => ({
           name: item.book?.title || item.title || "Book",
           quantity: item.quantity,
-          price: `₹${item.price}`
+          price: `₹${item.price || item.book?.price || 0}`
         })),
-        totalPrice: `₹${orderData.totalAmount || orderData.total}`,
-        shippingAddress: orderData.shippingAddress ? `${orderData.shippingAddress.name || orderData.shippingAddress.fullName || ""}, ${orderData.shippingAddress.addressLine1 || orderData.shippingAddress.address || ""}, ${orderData.shippingAddress.city || ""}` : "Address not available",
-        trackingUpdates: orderData.timeline || [
-          { status: "Order Placed", date: orderData.createdAt, description: "Your order has been placed." },
-          { status: orderData.orderStatus || orderData.status, date: new Date().toISOString(), description: `Order is currently ${orderData.orderStatus || orderData.status}` }
-        ]
+        totalPrice: `₹${orderData.totalAmount || orderData.totalPrice || orderData.total || 0}`,
+        shippingAddress: orderData.shippingAddress || null,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to track order:", error);
       setTrackedOrder({
-        error: "Order not found. Please check your order number.",
+        error: error?.response?.data?.message || "Order not found. Please check your order number.",
       });
     } finally {
       setIsLoading(false);
@@ -121,58 +122,47 @@ function TrackOrderContent() {
 
   const getStatusIcon = (status: string) => {
     const s = (status || "").toLowerCase();
-    switch (s) {
-      case "delivered":
-      case "completed":
-        return <CheckCircle className="h-6 w-6 text-emerald-600" />;
-      case "shipped":
-      case "in-transit":
-      case "in transit":
-        return <Truck className="h-6 w-6 text-blue-600" />;
-      case "processing":
-        return <Package className="h-6 w-6 text-amber-600" />;
-      default:
-        return <Clock className="h-6 w-6 text-muted-foreground" />;
+    if (s.includes("deliver")) {
+      return <CheckCircle className="h-6 w-6 text-emerald-600" />;
     }
+    if (s.includes("ship") || s.includes("transit")) {
+      return <Truck className="h-6 w-6 text-blue-600" />;
+    }
+    if (s.includes("print")) {
+      return <Package className="h-6 w-6 text-amber-600" />;
+    }
+    return <Clock className="h-6 w-6 text-muted-foreground" />;
   };
 
   const getStatusColor = (status: string) => {
     const s = (status || "").toLowerCase();
-    switch (s) {
-      case "delivered":
-      case "completed":
-        return "bg-emerald-500/10 border-emerald-500/30 text-emerald-950";
-      case "in-transit":
-      case "shipped":
-      case "in transit":
-        return "bg-blue-500/10 border-blue-500/30 text-blue-950";
-      case "processing":
-        return "bg-amber-500/10 border-amber-500/30 text-amber-950";
-      default:
-        return "bg-muted/30 border-border text-foreground";
+    if (s.includes("deliver")) {
+      return "bg-emerald-500/10 border-emerald-500/30 text-emerald-950";
     }
+    if (s.includes("ship") || s.includes("transit")) {
+      return "bg-blue-500/10 border-blue-500/30 text-blue-950";
+    }
+    if (s.includes("print")) {
+      return "bg-amber-500/10 border-amber-500/30 text-amber-950";
+    }
+    return "bg-muted/30 border-border text-foreground";
   };
 
   const getStatusText = (status: string) => {
     const s = (status || "").toLowerCase();
-    switch (s) {
-      case "delivered":
-      case "completed":
-        return "Delivered";
-      case "in-transit":
-      case "shipped":
-      case "in transit":
-        return "Shipped / In Transit";
-      case "processing":
-        return "Processing / Printed";
-      case "order placed":
-      case "pending":
-        return "Order Placed";
-      case "cancelled":
-        return "Cancelled";
-      default:
-        return status || "Order Placed";
+    if (s.includes("deliver")) {
+      return "Delivered";
     }
+    if (s.includes("ship") || s.includes("transit")) {
+      return "Shipped";
+    }
+    if (s.includes("print")) {
+      return "Printed";
+    }
+    if (s.includes("cancel") || s.includes("reject")) {
+      return "Cancelled";
+    }
+    return "Order Placed";
   };
 
   return (
@@ -191,7 +181,7 @@ function TrackOrderContent() {
               Track Your Order
             </h1>
             <p className="text-xl text-primary-foreground/90">
-              Enter your order number to get real-time updates.
+              Enter your order number to check order status and external courier tracking.
             </p>
           </motion.div>
         </div>
@@ -229,8 +219,6 @@ function TrackOrderContent() {
                 </div>
               </div>
             </form>
-
-
           </motion.div>
 
           {/* Order Details */}
@@ -245,29 +233,25 @@ function TrackOrderContent() {
               <div
                 className={`rounded-2xl border-2 p-8 ${getStatusColor(trackedOrder.status)}`}
               >
-                <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center justify-between mb-2">
                   <div>
-                    <h2 className="text-3xl font-bold text-foreground mb-2">
-                      Order {trackedOrder.orderNumber}
+                    <h2 className="text-3xl font-bold text-foreground mb-1 font-serif">
+                      Order #{trackedOrder.orderNumber}
                     </h2>
-                    <p className="text-muted-foreground">
-                      Ordered on{" "}
-                      {new Date(trackedOrder.orderDate).toLocaleDateString()}
+                    <p className="text-sm text-muted-foreground">
+                      Placed on{" "}
+                      {trackedOrder.orderDate ? new Date(trackedOrder.orderDate).toLocaleDateString("en-IN", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric"
+                      }) : "Recent"}
                     </p>
                   </div>
                   <div className="text-right">
-                    <div className="flex items-center justify-end gap-2 text-lg font-semibold text-foreground mb-1">
+                    <div className="flex items-center justify-end gap-2 text-lg font-bold text-foreground mb-1">
                       {getStatusIcon(trackedOrder.status)}
                       <span>{getStatusText(trackedOrder.status)}</span>
                     </div>
-                    {trackedOrder.expectedDelivery && (
-                      <p className="text-sm text-muted-foreground">
-                        Expected:{" "}
-                        {new Date(
-                          trackedOrder.expectedDelivery,
-                        ).toLocaleDateString()}
-                      </p>
-                    )}
                   </div>
                 </div>
               </div>
@@ -281,10 +265,10 @@ function TrackOrderContent() {
                     </div>
                     <div>
                       <h3 className="text-xl font-bold font-serif text-foreground">
-                        Courier Shipment & Tracking
+                        Shipment & Tracking
                       </h3>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Courier: <strong className="text-foreground">{trackedOrder.courier || "Courier Partner"}</strong>
+                        Courier Partner: <strong className="text-foreground">{trackedOrder.courier || "To be assigned"}</strong>
                       </p>
                     </div>
                   </div>
@@ -298,78 +282,81 @@ function TrackOrderContent() {
                       className="gap-1.5 text-xs font-mono font-bold"
                     >
                       {copiedAwb ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-                      <span>{copiedAwb ? "Copied" : "Copy Consignment ID"}</span>
+                      <span>{copiedAwb ? "Copied" : "Copy Tracking ID"}</span>
                     </Button>
                   )}
                 </div>
 
-                {trackedOrder.trackingNumber ? (
-                  <div className="space-y-5">
-                    {/* Dispatched Courier Service – Tracking ID Highlight */}
-                    <div className="p-6 rounded-2xl bg-gradient-to-br from-primary/5 via-card to-primary/10 border-2 border-primary/30 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
-                          Dispatched Courier Partner &amp; Tracking ID
-                        </span>
-                        <div className="text-xl sm:text-2xl font-bold font-serif text-foreground flex items-center gap-2 flex-wrap">
-                          <span className="text-primary font-bold">{trackedOrder.courier}</span>
-                          <span className="text-muted-foreground font-normal">–</span>
-                          <span className="font-mono font-bold tracking-wider select-all bg-muted/70 px-3 py-1 rounded-lg border border-border text-foreground">
-                            {trackedOrder.trackingNumber}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2.5 flex-wrap shrink-0">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => copyToClipboard(trackedOrder.trackingNumber)}
-                          className="gap-1.5 text-xs font-mono font-bold h-11 px-4 rounded-xl border-border hover:border-primary/50"
-                        >
-                          {copiedAwb ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
-                          <span>{copiedAwb ? "Copied" : "Copy Tracking ID"}</span>
-                        </Button>
-
-                        {trackedOrder.trackingUrl && (
-                          <a
-                            href={trackedOrder.trackingUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold h-11 px-5 rounded-xl shadow-xs transition-all"
-                          >
-                            <span>Track on {trackedOrder.courier}</span>
-                            <ExternalLink className="h-4 w-4" />
-                          </a>
-                        )}
-                      </div>
+                {/* CASE 1: Tracking URL Available -> Button "Track Package" */}
+                {trackedOrder.trackingUrl ? (
+                  <div className="p-6 rounded-2xl bg-gradient-to-br from-primary/5 via-card to-primary/10 border-2 border-primary/30 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
+                        Direct Courier Tracking Link
+                      </span>
+                      <p className="text-sm text-muted-foreground">
+                        Your package has been dispatched via <strong className="text-foreground">{trackedOrder.courier}</strong>. Click below to view live external tracking.
+                      </p>
+                      {trackedOrder.trackingNumber && (
+                        <p className="text-xs text-muted-foreground font-mono mt-1">
+                          Tracking ID: <span className="font-bold text-foreground">{trackedOrder.trackingNumber}</span>
+                        </p>
+                      )}
                     </div>
 
-                    {/* Supported Carriers Reference */}
-                    <div className="pt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <span className="font-semibold text-foreground">Carrier Tracking Portals:</span>
-                      <a href="https://www.bluedart.com/tracking" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Blue Dart</a>
-                      <span>•</span>
-                      <a href="https://ekartlogistics.com" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Ekart</a>
-                      <span>•</span>
-                      <a href="https://www.delhivery.com/tracking" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Delhivery</a>
-                      <span>•</span>
-                      <a href="https://www.dtdc.in/tracking.asp" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">DTDC</a>
-                      <span>•</span>
-                      <a href="https://www.indiapost.gov.in" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">India Post</a>
-                      <span>•</span>
-                      <a href="https://www.shiprocket.in/shipment-tracking/" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">Shiprocket</a>
+                    <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+                      <a
+                        href={trackedOrder.trackingUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold h-11 px-6 rounded-xl shadow-xs transition-all"
+                      >
+                        <Truck className="h-4 w-4" />
+                        <span>Track Package</span>
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    </div>
+                  </div>
+                ) : trackedOrder.trackingNumber ? (
+                  /* CASE 2: Only Tracking ID Available -> ID + Instruction Message */
+                  <div className="p-6 rounded-2xl bg-muted/40 border border-border space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
+                          Courier Consignment Tracking ID
+                        </span>
+                        <span className="font-mono text-xl font-bold text-foreground select-all mt-1 block">
+                          {trackedOrder.trackingNumber}
+                        </span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => copyToClipboard(trackedOrder.trackingNumber)}
+                        className="gap-1.5 text-xs font-mono font-bold"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        <span>Copy Tracking ID</span>
+                      </Button>
+                    </div>
+                    <div className="pt-2 border-t border-border/60 text-xs text-muted-foreground flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-primary shrink-0" />
+                      <span>Use this tracking ID on the courier website to track your order.</span>
                     </div>
                   </div>
                 ) : (
                   <div className="p-5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-900 space-y-2">
                     <div className="flex items-center gap-2">
                       <Clock className="h-4 w-4 text-amber-600" />
-                      <h4 className="font-bold text-sm font-serif">Order In Preparation</h4>
+                      <h4 className="font-bold text-sm font-serif">
+                        {getStatusText(trackedOrder.status) === "Printed" ? "Book Physically Printed" : "Order Placed"}
+                      </h4>
                     </div>
                     <p className="text-xs text-amber-800 leading-relaxed font-sans">
-                      Your order is registered and being printed/prepared by our publishing team. Your India Post / Courier consignment tracking code will be generated and shown here as soon as the package is dispatched.
+                      {getStatusText(trackedOrder.status) === "Printed"
+                        ? "Your book has been printed physically. Parcel post dispatch with courier tracking will be generated shortly."
+                        : "Your order is confirmed and placed. Physical printing is being scheduled."}
                     </p>
                   </div>
                 )}
@@ -377,8 +364,8 @@ function TrackOrderContent() {
 
               {/* Order Items */}
               <div className="bg-card rounded-xl border border-border p-6">
-                <h3 className="text-xl font-bold text-foreground mb-4">
-                  Order Items
+                <h3 className="text-xl font-bold text-foreground mb-4 font-serif">
+                  Order Items ({trackedOrder.items.length})
                 </h3>
                 <div className="space-y-3">
                   {trackedOrder.items.map((item: any, idx: number) => (
@@ -405,21 +392,47 @@ function TrackOrderContent() {
                 </div>
                 <div className="mt-6 pt-6 border-t border-border flex justify-between">
                   <span className="font-bold text-foreground">Total:</span>
-                  <span className="text-2xl font-bold text-secondary">
+                  <span className="text-2xl font-bold text-primary">
                     {trackedOrder.totalPrice}
                   </span>
                 </div>
               </div>
 
               {/* Shipping Address */}
-              <div className="bg-card rounded-xl border border-border p-6">
-                <h3 className="text-xl font-bold text-foreground mb-4">
-                  Shipping Address
-                </h3>
-                <p className="text-muted-foreground">
-                  {trackedOrder.shippingAddress}
-                </p>
-              </div>
+              {trackedOrder.shippingAddress && (
+                <div className="bg-card rounded-xl border border-border p-6 space-y-2">
+                  <h3 className="text-xl font-bold text-foreground mb-3 font-serif flex items-center gap-2">
+                    <MapPin className="h-5 w-5 text-primary" />
+                    <span>Delivery Address</span>
+                  </h3>
+                  <div className="text-sm text-foreground space-y-1 font-sans">
+                    <p className="font-bold">
+                      {trackedOrder.shippingAddress.fullName || trackedOrder.shippingAddress.name || "Customer"}
+                    </p>
+                    {trackedOrder.shippingAddress.phone && (
+                      <p className="text-muted-foreground">
+                        Phone: {trackedOrder.shippingAddress.phone}
+                      </p>
+                    )}
+                    <p>
+                      {trackedOrder.shippingAddress.addressLine1 || trackedOrder.shippingAddress.street || trackedOrder.shippingAddress.address}
+                    </p>
+                    {trackedOrder.shippingAddress.addressLine2 && (
+                      <p>{trackedOrder.shippingAddress.addressLine2}</p>
+                    )}
+                    <p className="font-medium">
+                      {[
+                        trackedOrder.shippingAddress.city,
+                        trackedOrder.shippingAddress.state,
+                        trackedOrder.shippingAddress.postalCode || trackedOrder.shippingAddress.pincode
+                      ].filter(Boolean).join(", ")}
+                    </p>
+                    <p className="text-muted-foreground">
+                      {trackedOrder.shippingAddress.country || "India"}
+                    </p>
+                  </div>
+                </div>
+              )}
             </motion.div>
           )}
 

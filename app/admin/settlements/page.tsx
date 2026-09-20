@@ -147,7 +147,10 @@ export default function AdminSettlementsPage() {
   // Handle Approve Batch
   const handleApproveBatch = async (id: string) => {
     try {
-      await api.post(`/admin/royalty-settlements/${id}/approve`);
+      await api.post(`/admin/royalty-settlements/${id}/approve`, {
+        payment_status: "approved",
+        status: "APPROVED",
+      });
       toast.success("Settlement batch approved!");
       loadSettlements();
     } catch (err: any) {
