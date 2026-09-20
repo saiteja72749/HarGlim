@@ -110,7 +110,8 @@ function BooksContent() {
         params.q = searchQuery.trim();
       }
       if (selectedCategories.length > 0) {
-        params.category = selectedCategories[0];
+        const catObj = categories.find((c) => c._id === selectedCategories[0] || c.slug === selectedCategories[0]);
+        params.category = catObj?.slug || selectedCategories[0];
       }
 
       if (selectedPriceRange) {
@@ -149,7 +150,7 @@ function BooksContent() {
 
       // Filter by min rating
       if (minRatingFilter) {
-        result = result.filter((b) => (b.rating || 0) >= minRatingFilter);
+        result = result.filter((b) => (b.rating || b.ratings || 0) >= minRatingFilter);
       }
 
       setBooks(result);

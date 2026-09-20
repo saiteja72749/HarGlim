@@ -112,7 +112,9 @@ export function BookCard({
 
   const authorInfo = getBookAuthorInfo(book);
   const authorName = authorInfo.name;
-  const price = book.price || 0;
+  const price = book.price ?? book.mrp ?? 0;
+  const rating = book.rating ?? (book as any).ratings ?? 0;
+  const totalReviews = book.totalReviews ?? (book as any).reviewCount ?? 0;
 
   if (variant === "horizontal") {
     return (
@@ -156,14 +158,14 @@ export function BookCard({
                   key={i}
                   className={cn(
                     "h-3 w-3",
-                    i < Math.round(book.rating || 0)
+                    i < Math.round(rating || 0)
                       ? "fill-secondary text-secondary"
                       : "text-muted",
                   )}
                 />
               ))}
               <span className="text-xs text-muted-foreground ml-1">
-                ({book.totalReviews ?? 0})
+                ({totalReviews})
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -342,14 +344,14 @@ export function BookCard({
                 key={i}
                 className={cn(
                   "h-3 sm:h-3.5 w-3 sm:w-3.5",
-                  i < Math.round(book.rating || 0)
+                  i < Math.round(rating || 0)
                     ? "fill-primary text-primary"
                     : "text-muted",
                 )}
               />
             ))}
             <span className="text-[11px] sm:text-xs text-muted-foreground ml-1 font-medium">
-              ({book.totalReviews ?? 0})
+              ({totalReviews})
             </span>
           </div>
 

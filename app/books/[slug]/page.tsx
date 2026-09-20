@@ -282,10 +282,10 @@ export default function BookDetailPage() {
   const price = book.price || 0;
 
   // 100% dynamic rating calculation derived from backend reviews with fallback to book document
-  const reviewCount = reviews.length > 0 ? reviews.length : (book.totalReviews || 0);
+  const reviewCount = reviews.length > 0 ? reviews.length : (book.totalReviews || book.reviewCount || 0);
   const computedRating = reviews.length > 0
     ? reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / reviews.length
-    : Number(book.rating || 0);
+    : Number(book.rating || book.ratings || 0);
   const ratingAvg = computedRating.toFixed(1);
 
   // Dynamic review star distribution breakdown based on actual reviews

@@ -83,7 +83,7 @@ export default function CheckoutStepPage() {
     setSubmitting(true);
     try {
       const formattedItems = items.map(item => ({
-        book: item.book._id,
+        book: item.book._id || (item.book as any).id,
         quantity: item.quantity
       }));
 

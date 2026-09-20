@@ -11,7 +11,9 @@ export interface Book {
   discountPrice?: number;
   format: string;
   rating?: number;
+  ratings?: number;
   totalReviews?: number;
+  reviewCount?: number;
   totalSales?: number;
   isBestseller?: boolean;
   isNewRelease?: boolean;
