@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 
 import { useState, useEffect } from "react";
 import api from "@/lib/api";
+import { DELIVERY_PLANS, resolveCourierTrackingUrl } from "@/lib/couriers";
 import { ErrorState } from "@/components/ui/error-state";
 import {
   Search,
@@ -46,25 +47,27 @@ import {
 } from "@/components/ui/dialog";
 import toast from "react-hot-toast";
 
-const getPaymentBadge = (isPaid: boolean, paymentStatus?: string) => {
-  const ps = (paymentStatus || "").toUpperCase();
-  if (isPaid || ps === "VERIFIED" || ps === "SUCCESS") {
+const getPaymentBadge = (isPaid: boolean, paymentStatus?: string, payment_status?: string) => {
+  const ps = (payment_status || paymentStatus || "").toUpperCase();
+  if (isPaid || ["CONFIRMED", "APPROVED", "VERIFIED", "SUCCESS", "PAID"].includes(ps)) {
     return (
-      <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/30 font-semibold text-xs">
-        Verified
+      <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/30 font-semibold text-xs flex items-center gap-1 justify-center">
+        <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+        <span>Payment Confirmed</span>
       </Badge>
     );
   }
   if (ps === "REJECTED" || ps === "FAILED") {
     return (
-      <Badge className="bg-rose-500/10 text-rose-700 border-rose-500/30 font-semibold text-xs">
-        Rejected
+      <Badge className="bg-rose-500/10 text-rose-700 border-rose-500/30 font-semibold text-xs flex items-center gap-1 justify-center">
+        <XCircle className="h-3 w-3 text-rose-600" />
+        <span>Payment Failed</span>
       </Badge>
     );
   }
   return (
-    <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/30 font-semibold text-xs animate-pulse">
-      Pending
+    <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/30 font-semibold text-xs animate-pulse flex items-center gap-1 justify-center">
+      <span>Pending Payment</span>
     </Badge>
   );
 };
@@ -86,43 +89,6 @@ const getOrderStatusBadge = (status: string) => {
   return <Badge className="bg-indigo-500/10 text-indigo-700 border-indigo-500/20 text-xs font-semibold">Order Placed</Badge>;
 };
 
-const COURIER_SERVICES = [
-  "Speed Post (India Post)",
-  "India Post",
-  "Blue Dart",
-  "Ekart Logistics",
-  "Delhivery",
-  "DTDC",
-  "Shiprocket",
-  "Other Courier",
-];
-
-const getCourierTrackingUrl = (courier: string, trackingNumber: string): string => {
-  const c = (courier || "").toLowerCase();
-  const t = encodeURIComponent((trackingNumber || "").trim());
-  if (!t) return "";
-
-  if (c.includes("speed post") || c.includes("speed") || c.includes("india post") || c.includes("post")) {
-    return `https://www.indiapost.gov.in/_layouts/15/dpt.cept.tracking/trackconsignment.aspx`;
-  }
-  if (c.includes("blue") || c.includes("bluedart")) {
-    return `https://www.bluedart.com/tracking?trackNumber=${t}`;
-  }
-  if (c.includes("ekart")) {
-    return `https://ekartlogistics.com/shipmenttrack/${t}`;
-  }
-  if (c.includes("delhivery")) {
-    return `https://www.delhivery.com/track/package/${t}`;
-  }
-  if (c.includes("dtdc")) {
-    return `https://www.dtdc.in/tracking.asp`;
-  }
-  if (c.includes("shiprocket")) {
-    return `https://shiprocket.co/tracking/${t}`;
-  }
-  return `https://www.google.com/search?q=${encodeURIComponent(courier + " tracking " + trackingNumber)}`;
-};
-
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -134,7 +100,7 @@ export default function AdminOrdersPage() {
   const [trackingModalOpen, setTrackingModalOpen] = useState(false);
   const [selectedOrderForTracking, setSelectedOrderForTracking] = useState<any>(null);
   const [trackingNumberInput, setTrackingNumberInput] = useState("");
-  const [courierInput, setCourierInput] = useState("Speed Post (India Post)");
+  const [courierInput, setCourierInput] = useState("India Post");
   const [trackingUrlInput, setTrackingUrlInput] = useState("");
   const [isSubmittingTracking, setIsSubmittingTracking] = useState(false);
 
@@ -145,11 +111,14 @@ export default function AdminOrdersPage() {
 
   const copyFullAddress = (order: any) => {
     if (!order) return;
-    const addr = order.shippingAddress || {};
+    const addr = order.shippingAddress || order.deliveryAddress || order.address || {};
+    const enteredEmail = addr.email || order.customerEmail || order.email || order.user?.email || "N/A";
+    const enteredPhone = addr.phone || addr.recipientPhone || order.customerPhone || order.phone || order.user?.phone || "Not Provided";
+    const recipientName = addr.fullName || addr.name || order.customerName || order.user?.name || "Customer";
     const lines = [
-      `Recipient: ${addr.fullName || addr.name || order.user?.name || "Customer"}`,
-      `Phone: ${addr.phone || addr.recipientPhone || order.user?.phone || order.phone || "Not Provided"}`,
-      `Email: ${addr.email || order.user?.email || "N/A"}`,
+      `Recipient: ${recipientName}`,
+      `Phone: ${enteredPhone}`,
+      `Email: ${enteredEmail}`,
       `Address: ${addr.addressLine1 || addr.street || addr.address || "Address Line 1"}`,
       addr.addressLine2 ? `Address Line 2: ${addr.addressLine2}` : null,
       `City: ${addr.city || ""}`,
@@ -188,7 +157,7 @@ export default function AdminOrdersPage() {
     fetchOrders();
   }, [statusFilter, searchQuery]);
 
-  // Action 1: Approve Payment
+  // Action 1: Approve / Confirm Payment
   const handleApprovePayment = async (orderMongoId?: string, paymentMongoId?: string) => {
     try {
       if (!paymentMongoId && !orderMongoId) {
@@ -198,23 +167,23 @@ export default function AdminOrdersPage() {
 
       if (paymentMongoId) {
         await api.post(`/admin/operations/payments/${paymentMongoId}/approve`, {
-          reason: "Admin payment approved from orders view",
+          reason: "Admin payment confirmed from orders view",
         }).catch(() => null);
       }
 
       if (orderMongoId) {
         await api.put(`/admin/orders/${orderMongoId}/status`, {
           status: "Processing",
-          paymentStatus: "VERIFIED",
-          payment_status: "approved",
+          paymentStatus: "CONFIRMED",
+          payment_status: "confirmed",
           isPaid: true,
         }).catch(() => null);
       }
 
-      toast.success("Payment approved & verified successfully! ✅");
+      toast.success("Payment confirmed successfully! ✅");
       fetchOrders();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || "Failed to approve payment.");
+      toast.error(err.response?.data?.message || "Failed to confirm payment.");
     }
   };
 
@@ -274,7 +243,8 @@ export default function AdminOrdersPage() {
       toast.error("No order selected.");
       return;
     }
-    if (!trackingNumberInput.trim() && !trackingUrlInput.trim()) {
+    const isDigital = courierInput.toLowerCase().includes("digital");
+    if (!isDigital && !trackingNumberInput.trim() && !trackingUrlInput.trim()) {
       toast.error("Please enter either a Tracking ID or a Tracking URL.");
       return;
     }
@@ -288,7 +258,8 @@ export default function AdminOrdersPage() {
     setIsSubmittingTracking(true);
 
     try {
-      const resolvedTrackingUrl = trackingUrlInput.trim() || (trackingNumberInput.trim() ? getCourierTrackingUrl(courierInput, trackingNumberInput) : "");
+      const finalTrackingNumber = trackingNumberInput.trim() || (isDigital ? "DIGITAL-FULFILLMENT" : "");
+      const resolvedTrackingUrl = trackingUrlInput.trim() || (finalTrackingNumber ? resolveCourierTrackingUrl(courierInput, finalTrackingNumber) : "");
 
       await api.put(`/admin/orders/${orderMongoId}/status`, {
         status: "Shipped",
@@ -297,9 +268,9 @@ export default function AdminOrdersPage() {
         courierName: courierInput.trim(),
         courier: courierInput.trim(),
         carrier: courierInput.trim(),
-        tracking_id: trackingNumberInput.trim(),
-        trackingId: trackingNumberInput.trim(),
-        trackingNumber: trackingNumberInput.trim(),
+        tracking_id: finalTrackingNumber,
+        trackingId: finalTrackingNumber,
+        trackingNumber: finalTrackingNumber,
         tracking_url: resolvedTrackingUrl,
         trackingUrl: resolvedTrackingUrl,
       });
@@ -434,8 +405,8 @@ export default function AdminOrdersPage() {
                     const orderDisplayId = order.orderNumber || order._id || order.id;
                     const mongoOrderId = order._id || order.id;
                     const paymentId = (typeof order.payment === "object" ? order.payment?._id : (typeof order.payment === "string" ? order.payment : undefined)) || order.paymentId;
-                    const isPaid = Boolean(order.isPaid || order.paymentStatus === "VERIFIED");
-                    const paymentStatus = order.paymentStatus || (order.utr ? "VERIFICATION_PENDING" : "PENDING");
+                    const isPaid = Boolean(order.isPaid || ["CONFIRMED", "APPROVED", "VERIFIED", "PAID", "SUCCESS"].includes((order.payment_status || order.paymentStatus || "").toUpperCase()));
+                    const paymentStatus = order.payment_status || order.paymentStatus || (order.utr ? "VERIFICATION_PENDING" : "PENDING");
                     const orderStatus = order.status || order.orderStatus || "PENDING";
                     const totalPrice = order.totalPrice ?? order.totalAmount ?? order.amount ?? 0;
 
@@ -446,22 +417,29 @@ export default function AdminOrdersPage() {
                           {orderDisplayId}
                         </TableCell>
 
-                        {/* Customer & Contact */}
+                        {/* Customer & Contact (Strictly Entered Data, No Overrides) */}
                         <TableCell>
                           {(() => {
                             const shippingAddress = order.shippingAddress || order.deliveryAddress || order.address || order.shipping_address || {};
+                            const enteredName = shippingAddress.fullName || shippingAddress.name || order.customerName || order.user?.name || "Customer";
+                            const enteredEmail = shippingAddress.email || order.customerEmail || order.email || order.user?.email || "N/A";
+                            const enteredPhone = shippingAddress.phone || shippingAddress.recipientPhone || order.customerPhone || order.phone || order.user?.phone;
                             return (
                               <>
                                 <p className="font-serif font-bold text-[#0F3D3E]">
-                                  {shippingAddress.fullName || shippingAddress.name || order.user?.name || "Customer"}
+                                  {enteredName}
                                 </p>
-                                <p className="text-[#5C6E6E] text-[11px] font-sans">
-                                  {order.user?.email || shippingAddress.email || "N/A"}
+                                <p className="text-[#5C6E6E] text-[11px] font-sans break-all">
+                                  {enteredEmail}
                                 </p>
-                                {(shippingAddress.phone || order.user?.phone || order.phone) && (
+                                {enteredPhone ? (
                                   <p className="text-[#0F3D3E] font-mono text-[11px] flex items-center gap-1 mt-0.5">
-                                    <Phone className="h-3 w-3 text-[#8A6D1E]" />
-                                    <span>{shippingAddress.phone || order.user?.phone || order.phone}</span>
+                                    <Phone className="h-3 w-3 text-[#8A6D1E] shrink-0" />
+                                    <span>{enteredPhone}</span>
+                                  </p>
+                                ) : (
+                                  <p className="text-amber-800/80 italic text-[10px] mt-0.5">
+                                    No phone recorded
                                   </p>
                                 )}
                               </>
@@ -499,7 +477,7 @@ export default function AdminOrdersPage() {
 
                         {/* Payment Status */}
                         <TableCell className="text-center">
-                          {getPaymentBadge(isPaid, paymentStatus)}
+                          {getPaymentBadge(isPaid, paymentStatus, order.payment_status)}
                         </TableCell>
 
                         {/* Order Status */}
@@ -510,16 +488,16 @@ export default function AdminOrdersPage() {
                         {/* Action Buttons (Strictly matching prompt) */}
                         <TableCell className="text-center">
                           <div className="flex flex-wrap items-center justify-center gap-1.5">
-                            {/* 👉 Approve Payment */}
+                            {/* 👉 Confirm Payment */}
                             {!isPaid && (
                               <Button
                                 size="sm"
                                 onClick={() => handleApprovePayment(mongoOrderId, paymentId)}
                                 className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] h-7 px-2.5 rounded-lg gap-1 font-semibold"
-                                title="Approve UTR Payment"
+                                title="Confirm Payment"
                               >
                                 <CheckCircle2 className="h-3 w-3" />
-                                <span>Approve</span>
+                                <span>Confirm Payment</span>
                               </Button>
                             )}
 
@@ -605,16 +583,29 @@ export default function AdminOrdersPage() {
           <form onSubmit={handleSaveTracking} className="space-y-4 py-2">
             <div className="space-y-2">
               <label className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                Courier Service *
+                Courier Service / Delivery Plan *
               </label>
-              <Select value={courierInput} onValueChange={setCourierInput}>
+              <Select
+                value={courierInput}
+                onValueChange={(val) => {
+                  setCourierInput(val);
+                  if (trackingNumberInput.trim()) {
+                    setTrackingUrlInput(resolveCourierTrackingUrl(val, trackingNumberInput));
+                  }
+                }}
+              >
                 <SelectTrigger className="border-[#E2E6DF] rounded-xl h-11 text-xs font-semibold">
-                  <SelectValue placeholder="Select Courier" />
+                  <SelectValue placeholder="Select Delivery Plan / Courier Service" />
                 </SelectTrigger>
-                <SelectContent className="bg-white border-[#E2E6DF]">
-                  {COURIER_SERVICES.map((courier) => (
-                    <SelectItem key={courier} value={courier}>
-                      {courier}
+                <SelectContent className="bg-white border-[#E2E6DF] max-h-72">
+                  {DELIVERY_PLANS.map((courier) => (
+                    <SelectItem key={courier.id} value={courier.name}>
+                      <div className="flex items-center justify-between gap-3 w-full py-0.5">
+                        <span className="font-semibold text-xs text-[#0F3D3E]">{courier.name}</span>
+                        <span className="text-[10px] text-muted-foreground px-1.5 py-0.2 rounded bg-neutral-100 border border-[#E2E6DF]">
+                          {courier.category}
+                        </span>
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -624,12 +615,23 @@ export default function AdminOrdersPage() {
             <div className="space-y-2">
               <label className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E] flex items-center justify-between">
                 <span>Tracking ID / Consignment Number</span>
-                <span className="text-[10px] text-muted-foreground font-normal">Optional if URL provided</span>
+                <span className="text-[10px] text-muted-foreground font-normal">
+                  {courierInput.toLowerCase().includes("digital") ? "Optional for digital" : "Optional if URL provided"}
+                </span>
               </label>
               <Input
-                placeholder="e.g. SP123456789IN or DEL987654321"
+                placeholder={
+                  courierInput.toLowerCase().includes("digital")
+                    ? "DIGITAL-FULFILLMENT (Optional)"
+                    : "e.g. SP123456789IN or DEL987654321"
+                }
                 value={trackingNumberInput}
-                onChange={(e) => setTrackingNumberInput(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setTrackingNumberInput(val);
+                  const autoUrl = resolveCourierTrackingUrl(courierInput, val);
+                  if (autoUrl) setTrackingUrlInput(autoUrl);
+                }}
                 className="font-mono text-sm border-[#E2E6DF] rounded-xl h-11"
               />
             </div>
@@ -693,7 +695,7 @@ export default function AdminOrdersPage() {
                       <div>
                         <span className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E] block">Recipient Full Name</span>
                         <p className="font-serif font-bold text-base text-[#0F3D3E]">
-                          {modalAddress.fullName || modalAddress.name || selectedOrderForAddress.user?.name || "Customer"}
+                          {modalAddress.fullName || modalAddress.name || selectedOrderForAddress.customerName || selectedOrderForAddress.user?.name || "Customer"}
                         </p>
                       </div>
                       <Button
@@ -711,13 +713,13 @@ export default function AdminOrdersPage() {
                       <div>
                         <span className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E] block">Phone / Mobile</span>
                         <p className="font-mono font-bold text-[#0F3D3E] mt-0.5">
-                          {modalAddress.phone || selectedOrderForAddress.user?.phone || selectedOrderForAddress.phone || "Not Provided"}
+                          {modalAddress.phone || selectedOrderForAddress.customerPhone || selectedOrderForAddress.phone || selectedOrderForAddress.recipientPhone || selectedOrderForAddress.user?.phone || "Not Provided"}
                         </p>
                       </div>
                       <div>
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E] block">Email</span>
-                        <p className="font-sans text-[#0F3D3E] mt-0.5 truncate">
-                          {selectedOrderForAddress.user?.email || modalAddress.email || "N/A"}
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E] block">Entered Email</span>
+                        <p className="font-sans text-[#0F3D3E] mt-0.5 break-all">
+                          {modalAddress.email || selectedOrderForAddress.customerEmail || selectedOrderForAddress.email || selectedOrderForAddress.user?.email || "N/A"}
                         </p>
                       </div>
                     </div>

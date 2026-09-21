@@ -29,6 +29,7 @@ import { Switch } from "@/components/ui/switch";
 import toast from "react-hot-toast";
 
 import { EXACT_CATEGORIES } from "@/config/categories";
+import { resolveCategoryObjectId } from "@/lib/categories";
 export const BISAC_CATEGORIES = EXACT_CATEGORIES;
 
 type AuthorType = "existing" | "new" | "external";
@@ -410,11 +411,13 @@ export default function AddBookPage() {
           : (authorsList.find((a) => (a._id || a.id) === finalAuthorId)?.name || "")
       ).trim();
 
+      // Resolve category to a valid 24-character ObjectId to prevent Mongoose CastError
+      const resolvedCategoryObjectId = await resolveCategoryObjectId(formData.category);
+
       const jsonPayload: Record<string, any> = {
         title: formData.title.trim(),
         authorName: targetAuthorDisplayName || undefined,
         description: formData.description.trim(),
-        category: formData.category,
         author: finalAuthorId, // Selected author user ID (never falls back to admin)
         mrp: numericPrice,
         price: numericPrice, // Synchronized compatibility alias matching mrp
@@ -429,6 +432,10 @@ export default function AddBookPage() {
         isNewRelease: Boolean(formData.isNewRelease),
         royaltyPercentage: formData.royaltyPercentage ? Number(formData.royaltyPercentage) : 0,
       };
+
+      if (resolvedCategoryObjectId) {
+        jsonPayload.category = resolvedCategoryObjectId;
+      }
 
       if (coverImageUrl) {
         jsonPayload.coverImage = coverImageUrl;

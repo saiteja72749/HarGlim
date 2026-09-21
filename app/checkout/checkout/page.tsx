@@ -87,25 +87,49 @@ export default function CheckoutStepPage() {
         quantity: item.quantity
       }));
 
-      // NOTE: Price fields (mrp, subtotal, tax, shippingPrice, totalPrice) are NOT sent.
-      // Backend automatically calculates totals using canonical Book.mrp.
+      const enteredFullName = address.fullName.trim();
+      const enteredEmail = address.email.trim();
+      const enteredPhone = address.phone.trim();
+      const enteredAddressLine1 = address.addressLine1.trim();
+      const enteredAddressLine2 = address.addressLine2 ? address.addressLine2.trim() : "";
+      const enteredCity = address.city.trim();
+      const enteredState = address.state.trim();
+      const enteredPostalCode = address.postalCode.trim();
+      const enteredCountry = (address.country || "India").trim();
+
+      const shippingAddressObj = {
+        fullName: enteredFullName,
+        name: enteredFullName,
+        phone: enteredPhone,
+        phoneNumber: enteredPhone,
+        recipientPhone: enteredPhone,
+        email: enteredEmail,
+        addressLine1: enteredAddressLine1,
+        street: enteredAddressLine1,
+        address: enteredAddressLine1,
+        addressLine2: enteredAddressLine2 || undefined,
+        city: enteredCity,
+        state: enteredState,
+        postalCode: enteredPostalCode,
+        pincode: enteredPostalCode,
+        pinCode: enteredPostalCode,
+        country: enteredCountry,
+      };
+
+      // NOTE: Root level email, phone, and customerName are explicitly sent
+      // so backend never overrides them with the registered user's account email.
       const payload = {
         items: formattedItems,
-        shippingAddress: {
-          fullName: address.fullName.trim(),
-          name: address.fullName.trim(),
-          phone: address.phone.trim(),
-          email: address.email.trim(),
-          addressLine1: address.addressLine1.trim(),
-          street: address.addressLine1.trim(),
-          address: address.addressLine1.trim(),
-          addressLine2: address.addressLine2 ? address.addressLine2.trim() : undefined,
-          city: address.city.trim(),
-          state: address.state.trim(),
-          postalCode: address.postalCode.trim(),
-          pincode: address.postalCode.trim(),
-          country: address.country || 'India',
-        },
+        email: enteredEmail,
+        customerEmail: enteredEmail,
+        phone: enteredPhone,
+        customerPhone: enteredPhone,
+        recipientPhone: enteredPhone,
+        fullName: enteredFullName,
+        customerName: enteredFullName,
+        name: enteredFullName,
+        shippingAddress: shippingAddressObj,
+        deliveryAddress: shippingAddressObj,
         paymentMethod: 'UPI'
       };
 
@@ -215,6 +239,8 @@ export default function CheckoutStepPage() {
                     <span className="text-sm font-medium">{field.label}</span>
                     <input
                       type={field.type}
+                      required
+                      placeholder={field.name === 'email' ? 'e.g. yourname@gmail.com' : 'e.g. John Doe'}
                       value={(address as any)[field.name]}
                       onChange={(event) => setAddress({ ...address, [field.name]: event.target.value })}
                       className="w-full rounded-2xl border border-border bg-background px-4 py-3 outline-none transition focus:border-primary/80"
@@ -225,13 +251,14 @@ export default function CheckoutStepPage() {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 {[
-                  { name: 'addressLine1', label: 'Address Line 1' },
+                  { name: 'addressLine1', label: 'Address Line 1 *' },
                   { name: 'addressLine2', label: 'Address Line 2 (optional)' },
                 ].map((field) => (
                   <label key={field.name} className="space-y-2">
                     <span className="text-sm font-medium">{field.label}</span>
                     <input
                       type="text"
+                      required={field.name === 'addressLine1'}
                       value={(address as any)[field.name]}
                       onChange={(event) => setAddress({ ...address, [field.name]: event.target.value })}
                       className="w-full rounded-2xl border border-border bg-background px-4 py-3 outline-none transition focus:border-primary/80"
@@ -262,9 +289,11 @@ export default function CheckoutStepPage() {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="space-y-2">
-                  <span className="text-sm font-medium">Phone</span>
+                  <span className="text-sm font-medium">Phone Number *</span>
                   <input
                     type="tel"
+                    required
+                    placeholder="e.g. +91 9876543210"
                     value={address.phone}
                     onChange={(event) => setAddress({ ...address, phone: event.target.value })}
                     className="w-full rounded-2xl border border-border bg-background px-4 py-3 outline-none transition focus:border-primary/80"

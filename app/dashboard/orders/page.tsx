@@ -81,35 +81,15 @@ const getOrderStatusBadge = (status: string) => {
   );
 };
 
-const getCourierTrackingUrl = (courier: string, trackingNumber: string): string => {
-  const c = (courier || "").toLowerCase();
-  const t = encodeURIComponent((trackingNumber || "").trim());
-  if (!t) return "";
+import { resolveCourierTrackingUrl } from "@/lib/couriers";
 
-  if (c.includes("speed post") || c.includes("speed") || c.includes("india post") || c.includes("post")) {
-    return `https://www.indiapost.gov.in/_layouts/15/dpt.cept.tracking/trackconsignment.aspx`;
-  }
-  if (c.includes("blue") || c.includes("bluedart")) {
-    return `https://www.bluedart.com/tracking?trackNumber=${t}`;
-  }
-  if (c.includes("ekart")) {
-    return `https://ekartlogistics.com/shipmenttrack/${t}`;
-  }
-  if (c.includes("delhivery")) {
-    return `https://www.delhivery.com/track/package/${t}`;
-  }
-  if (c.includes("dtdc")) {
-    return `https://www.dtdc.in/tracking.asp`;
-  }
-  if (c.includes("shiprocket")) {
-    return `https://shiprocket.co/tracking/${t}`;
-  }
-  return `https://www.google.com/search?q=${encodeURIComponent((courier || "courier") + " tracking " + trackingNumber)}`;
+const getCourierTrackingUrl = (courier: string, trackingNumber: string): string => {
+  return resolveCourierTrackingUrl(courier, trackingNumber);
 };
 
 // Payment Status Badge mapping
-const getPaymentStatusBadge = (isPaid: boolean, paymentStatus?: string) => {
-  const ps = (paymentStatus || "").toUpperCase();
+const getPaymentStatusBadge = (isPaid: boolean, paymentStatus?: string, payment_status?: string) => {
+  const ps = (payment_status || paymentStatus || "").toUpperCase();
   const isApprovedOrPaid =
     isPaid === true ||
     ["PAID", "VERIFIED", "SUCCESS", "COMPLETED", "APPROVED", "CONFIRMED", "PAYMENT_APPROVED"].includes(ps);
@@ -118,7 +98,7 @@ const getPaymentStatusBadge = (isPaid: boolean, paymentStatus?: string) => {
     return (
       <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/30 font-semibold flex items-center gap-1">
         <ShieldCheck className="h-3 w-3 text-emerald-600" />
-        <span>Paid & Verified</span>
+        <span>Payment Confirmed</span>
       </Badge>
     );
   }
@@ -141,7 +121,7 @@ const getPaymentStatusBadge = (isPaid: boolean, paymentStatus?: string) => {
   return (
     <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/30 font-semibold flex items-center gap-1">
       <AlertTriangle className="h-3 w-3 text-amber-600" />
-      <span>Payment Pending</span>
+      <span>Pending Payment</span>
     </Badge>
   );
 };
@@ -342,8 +322,13 @@ export default function OrdersPage() {
             const status = order.status || order.orderStatus || "PENDING";
             const id = order.orderNumber || order._id || order.id;
             const isExpanded = expandedOrder === id;
-            const isPaid = Boolean(order.isPaid || order.paymentStatus === "VERIFIED");
-            const paymentStatus = order.paymentStatus || (order.utr ? "VERIFICATION_PENDING" : "PENDING");
+            const isPaid = Boolean(
+              order.isPaid ||
+              ["CONFIRMED", "APPROVED", "VERIFIED", "PAID", "SUCCESS"].includes(
+                (order.payment_status || order.paymentStatus || "").toUpperCase()
+              )
+            );
+            const paymentStatus = order.payment_status || order.paymentStatus || (order.utr ? "VERIFICATION_PENDING" : "PENDING");
 
             const subtotal = order.subtotal ?? (order.totalPrice ? order.totalPrice - (order.shippingPrice || 0) : order.items?.reduce((acc: number, item: any) => acc + (item.price || item.book?.price || 0) * (item.quantity || 1), 0) || 0);
             const shippingPrice = order.shippingPrice ?? order.shippingFee ?? 0;
@@ -398,7 +383,7 @@ export default function OrdersPage() {
                           <p className="text-xs text-[#5C6E6E]">Amount Payable</p>
                           <p className="text-xl font-serif font-bold text-[#0F3D3E]">₹{totalPrice.toLocaleString()}</p>
                         </div>
-                        {getPaymentStatusBadge(isPaid, paymentStatus)}
+                        {getPaymentStatusBadge(isPaid, paymentStatus, order.payment_status)}
                       </div>
                     </div>
                   </CardHeader>
@@ -536,7 +521,7 @@ export default function OrdersPage() {
                       )}
 
                       {/* STATE 2: VERIFICATION_PENDING (UTR Submitted, Waiting for Admin) */}
-                      {!isPaid && (paymentStatus === "VERIFICATION_PENDING" || (order.utr && paymentStatus !== "REJECTED")) && (
+                      {!isPaid && (paymentStatus === "VERIFICATION_PENDING" || (order.utr && !["REJECTED", "FAILED"].includes(paymentStatus.toUpperCase()))) && (
                         <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 space-y-2">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
@@ -560,17 +545,17 @@ export default function OrdersPage() {
                         </div>
                       )}
 
-                      {/* STATE 3: PAID / VERIFIED */}
-                      {(isPaid || paymentStatus === "VERIFIED") && (
+                      {/* STATE 3: PAYMENT CONFIRMED */}
+                      {isPaid && (
                         <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                           <div className="flex items-center gap-3">
                             <div className="h-9 w-9 rounded-full bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-xs">
                               <CheckCircle2 className="h-5 w-5" />
                             </div>
                             <div>
-                              <h5 className="font-bold text-sm font-serif text-emerald-950">Payment Verified & Confirmed</h5>
+                              <h5 className="font-bold text-sm font-serif text-emerald-950">Payment Confirmed</h5>
                               <p className="text-xs text-emerald-800">
-                                Order is active and moving through printing & fulfillment.
+                                Your payment has been verified and confirmed. Order is moving through printing & fulfillment.
                               </p>
                             </div>
                           </div>
@@ -686,18 +671,18 @@ export default function OrdersPage() {
                                 return (
                                   <div className="text-xs text-[#0F3D3E] space-y-1 leading-relaxed font-sans">
                                     <p className="font-bold text-sm text-[#0F3D3E]">
-                                      {shippingAddress.fullName || shippingAddress.name || order.user?.name || "Reader"}
+                                      {shippingAddress.fullName || shippingAddress.name || order.customerName || order.user?.name || "Reader"}
                                     </p>
-                                    {(shippingAddress.phone || shippingAddress.recipientPhone || order.user?.phone) && (
+                                    {(shippingAddress.phone || shippingAddress.recipientPhone || order.customerPhone || order.phone || order.user?.phone) && (
                                       <p className="text-[#5C6E6E]">
                                         <span className="font-medium text-[#0F3D3E]">Phone:</span>{" "}
-                                        {shippingAddress.phone || shippingAddress.recipientPhone || order.user?.phone}
+                                        {shippingAddress.phone || shippingAddress.recipientPhone || order.customerPhone || order.phone || order.user?.phone}
                                       </p>
                                     )}
-                                    {(shippingAddress.email || order.user?.email) && (
+                                    {(shippingAddress.email || order.customerEmail || order.email || order.user?.email) && (
                                       <p className="text-[#5C6E6E]">
                                         <span className="font-medium text-[#0F3D3E]">Email:</span>{" "}
-                                        {shippingAddress.email || order.user?.email}
+                                        {shippingAddress.email || order.customerEmail || order.email || order.user?.email}
                                       </p>
                                     )}
                                     <p className="pt-0.5">

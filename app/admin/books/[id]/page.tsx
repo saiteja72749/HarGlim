@@ -30,6 +30,7 @@ import { Switch } from "@/components/ui/switch";
 import toast from "react-hot-toast";
 
 import { EXACT_CATEGORIES } from "@/config/categories";
+import { resolveCategoryObjectId, getCategoryDisplayName } from "@/lib/categories";
 export const BISAC_CATEGORIES = EXACT_CATEGORIES;
 
 type AuthorType = "existing" | "new" | "external";
@@ -70,6 +71,8 @@ export default function EditBookPage() {
     isNewRelease: false,
     royaltyPercentage: "",
   });
+
+  const [originalCategoryId, setOriginalCategoryId] = useState<string>("");
 
   // New Category Creation Modal State
   const [addCategoryModalOpen, setAddCategoryModalOpen] = useState(false);
@@ -234,14 +237,26 @@ export default function EditBookPage() {
             setSelectedAuthorName(resolvedAuthorName);
           }
 
+          let initialCatName = "";
+          let initialCatId = "";
+          if (typeof bookData.category === "object" && bookData.category !== null) {
+            initialCatId = bookData.category._id || bookData.category.id || "";
+            initialCatName = bookData.category.name || bookData.category.slug || "";
+          } else if (typeof bookData.category === "string") {
+            if (/^[0-9a-fA-F]{24}$/.test(bookData.category)) {
+              initialCatId = bookData.category;
+              initialCatName = getCategoryDisplayName(bookData.category);
+            } else {
+              initialCatName = bookData.category;
+            }
+          }
+          setOriginalCategoryId(initialCatId);
+
           setFormData({
             title: bookData.title || "",
             authorName: resolvedAuthorName,
             description: bookData.description || "",
-            category:
-              typeof bookData.category === "object" && bookData.category !== null
-                ? bookData.category.name || bookData.category.slug || ""
-                : bookData.category || "",
+            category: initialCatName || "Fiction",
             price: (bookData.mrp || bookData.price)?.toString() || "",
             stock: bookData.stock?.toString() || "0",
             isbn: bookData.isbn || "",
@@ -402,11 +417,13 @@ export default function EditBookPage() {
       const numericPrice = Number(formData.price) || 0;
       const statusValue = formData.status === "Active" ? "published" : formData.status;
 
+      // Resolve category to a valid 24-character ObjectId to prevent Mongoose CastError
+      const resolvedCategoryObjectId = await resolveCategoryObjectId(formData.category, originalCategoryId);
+
       const jsonPayload: any = {
         title: formData.title.trim(),
         authorName: targetAuthorDisplayName || undefined,
         description: formData.description.trim(),
-        category: formData.category,
         mrp: numericPrice,
         price: numericPrice,
         stock: Number(formData.stock) || 0,
@@ -422,6 +439,10 @@ export default function EditBookPage() {
           ? Number(formData.royaltyPercentage)
           : undefined,
       };
+
+      if (resolvedCategoryObjectId) {
+        jsonPayload.category = resolvedCategoryObjectId;
+      }
 
       if (finalAuthorId && /^[0-9a-fA-F]{24}$/.test(finalAuthorId)) {
         jsonPayload.author = finalAuthorId;
