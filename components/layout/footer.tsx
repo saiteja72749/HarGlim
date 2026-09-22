@@ -14,6 +14,7 @@ import {
   MapPin,
 } from "lucide-react";
 import { siteConfig } from "@/config/site";
+import { getSafeExternalUrl } from "@/lib/utils";
 
 const footerLinks = {
   company: [
@@ -187,16 +188,18 @@ export function Footer() {
             </div>
             <div className="flex items-center gap-4">
               {dynamicSocial.map((social) => (
-                <a
-                  key={social.label}
-                  href={social.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-white/70 hover:text-white transition-colors"
-                  aria-label={social.label}
-                >
-                  <social.icon className="h-5 w-5" />
-                </a>
+                getSafeExternalUrl(social.href) ? (
+                  <a
+                    key={social.label}
+                    href={getSafeExternalUrl(social.href)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-white/70 hover:text-white transition-colors"
+                    aria-label={social.label}
+                  >
+                    <social.icon className="h-5 w-5" />
+                  </a>
+                ) : null
               ))}
             </div>
           </div>

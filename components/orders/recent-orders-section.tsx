@@ -187,13 +187,13 @@ export function RecentOrdersSection() {
 
               {/* Action Buttons */}
               <div className="pt-2 flex items-center justify-between border-t border-border/40 gap-2">
-                <Link href={`/track-order?orderNumber=${encodeURIComponent(orderNo)}`}>
+                <Link href="/dashboard/orders">
                   <Button
                     size="sm"
                     className="gap-1.5 text-xs font-semibold bg-primary hover:bg-primary/90 h-8"
                   >
                     <Truck className="h-3.5 w-3.5" />
-                    <span>Track Package</span>
+                    <span>View Shipment</span>
                   </Button>
                 </Link>
 

@@ -185,7 +185,7 @@ export function GoogleLoginButton({
 
       // Render native hidden GSI button for standard popup triggering
       if (googleBtnRef.current) {
-        googleBtnRef.current.innerHTML = "";
+        googleBtnRef.current.replaceChildren();
         window.google.accounts.id.renderButton(googleBtnRef.current, {
           theme: "outline",
           size: "large",

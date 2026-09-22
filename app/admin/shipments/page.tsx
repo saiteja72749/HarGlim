@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/table";
 import toast from "react-hot-toast";
 import { DELIVERY_PLANS, resolveCourierTrackingUrl } from "@/lib/couriers";
+import { getSafeExternalUrl } from "@/lib/utils";
 
 export default function AdminShipmentsPage() {
   const [activeTab, setActiveTab] = useState<"shipments" | "plans">("shipments");
@@ -103,7 +104,7 @@ export default function AdminShipmentsPage() {
     setSelectedShipmentForCourier(shipment);
     const existingCourier = defaultCourier || shipment.courierName || shipment.carrier || shipment.serviceName || "India Post";
     const existingTracking = shipment.trackingNumber || shipment.trackingId || "";
-    const existingUrl = shipment.trackingUrl || resolveCourierTrackingUrl(existingCourier, existingTracking);
+    const existingUrl = getSafeExternalUrl(shipment.trackingUrl) || resolveCourierTrackingUrl(existingCourier, existingTracking);
 
     setCourierForm({
       provider: "manual",
@@ -147,6 +148,12 @@ export default function AdminShipmentsPage() {
     }
 
     const shipmentId = selectedShipmentForCourier._id || selectedShipmentForCourier.id;
+    const enteredTrackingUrl = courierForm.trackingUrl.trim();
+    if (enteredTrackingUrl && !getSafeExternalUrl(enteredTrackingUrl)) {
+      toast.error("Tracking URL must be a valid http or https link.");
+      return;
+    }
+
     setSubmittingCourier(true);
 
     try {
@@ -156,7 +163,7 @@ export default function AdminShipmentsPage() {
         serviceName: courierForm.serviceName,
         courierName: courierForm.serviceName,
         trackingNumber: finalTrackingNumber,
-        trackingUrl: courierForm.trackingUrl.trim() || undefined,
+        trackingUrl: getSafeExternalUrl(enteredTrackingUrl) || undefined,
         estimatedDelivery: courierForm.estimatedDelivery ? new Date(courierForm.estimatedDelivery).toISOString() : undefined,
       };
 
@@ -388,7 +395,7 @@ export default function AdminShipmentsPage() {
                       const sId = s._id || s.id;
                       const cName = s.serviceName || s.courierName || s.carrier || "Courier Unassigned";
                       const trackingNum = s.trackingNumber || s.trackingId || s.awb;
-                      const trackingUrl = s.trackingUrl || resolveCourierTrackingUrl(cName, trackingNum);
+                      const trackingUrl = getSafeExternalUrl(s.trackingUrl) || resolveCourierTrackingUrl(cName, trackingNum);
 
                       return (
                         <TableRow key={sId} className="hover:bg-[#F8F9F7]/60 text-xs">
@@ -617,9 +624,9 @@ export default function AdminShipmentsPage() {
                   </div>
 
                   <div className="flex items-center justify-between pt-1 border-t border-[#E2E6DF]/60">
-                    {plan.website ? (
+                    {getSafeExternalUrl(plan.website) ? (
                       <a
-                        href={plan.website}
+                        href={getSafeExternalUrl(plan.website)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-[11px] text-[#8A6D1E] hover:underline flex items-center gap-1 font-semibold"
@@ -740,7 +747,7 @@ export default function AdminShipmentsPage() {
                   className="bg-[#F8F9F7] font-mono text-xs"
                 />
                 <p className="text-[11px] text-[#5C6E6E]">
-                  The customer will click this exact URL in "My Orders" to view live transit updates on the courier's website.
+                  The customer will click this exact URL in My Orders to view live transit updates on the courier website.
                 </p>
               </div>
 

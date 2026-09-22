@@ -1,3 +1,5 @@
+import { getSafeExternalUrl } from "@/lib/utils";
+
 export interface DeliveryPlan {
   id: string;
   name: string;
@@ -343,8 +345,9 @@ export function resolveCourierTrackingUrl(
   trackingNumber: string,
   customUrl?: string | null
 ): string {
-  if (customUrl && (customUrl.startsWith("http://") || customUrl.startsWith("https://"))) {
-    return customUrl;
+  const safeCustomUrl = getSafeExternalUrl(customUrl);
+  if (safeCustomUrl) {
+    return safeCustomUrl;
   }
 
   const cleanTracking = (trackingNumber || "").trim();

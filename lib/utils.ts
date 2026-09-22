@@ -23,6 +23,21 @@ export function getSafeRedirect(target: string | null | undefined, fallback = '/
   }
 }
 
+export function getSafeExternalUrl(target: string | null | undefined): string {
+  if (!target || typeof target !== 'string') return ''
+
+  try {
+    const url = new URL(target.trim())
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : ''
+  } catch {
+    return ''
+  }
+}
+
+export function isSafeExternalUrl(target: string | null | undefined): boolean {
+  return Boolean(getSafeExternalUrl(target))
+}
+
 /**
  * Resolves the real author display name and profile link eligibility for any book.
  * Defends against books mistakenly attributed to the platform admin ("Demo Admin")

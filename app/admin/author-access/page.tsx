@@ -352,7 +352,7 @@ export default function AdminAuthorAccessPage() {
               </div>
             ) : plans.length === 0 ? (
               <Card className="col-span-3 p-8 text-center text-xs text-[#5C6E6E] border-[#E2E6DF]">
-                No access plans created yet. Click "Create Access Plan" to define author entitlement tiers.
+                No access plans created yet. Click Create Access Plan to define author entitlement tiers.
               </Card>
             ) : (
               plans.map((p) => (

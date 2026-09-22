@@ -17,6 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import toast from "react-hot-toast";
+import { getSafeExternalUrl } from "@/lib/utils";
 
 const getStatusBadge = (status: string) => {
   const s = (status || "").toLowerCase();
@@ -198,9 +199,9 @@ export default function AdminAuthorApplicationsPage() {
                               Pen Name: <strong className="text-[#0F3D3E]">{app.penName}</strong>
                             </span>
                           )}
-                          {app.portfolioUrl && (
+                          {getSafeExternalUrl(app.portfolioUrl) && (
                             <a
-                              href={app.portfolioUrl}
+                              href={getSafeExternalUrl(app.portfolioUrl)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-[11px] text-primary hover:underline block truncate max-w-[180px] mt-0.5"

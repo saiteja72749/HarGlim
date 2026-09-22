@@ -965,7 +965,7 @@ export default function AdminUsersPage() {
                   required
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  This will immediately update the user's password on the backend.
+                  This will immediately update the user password on the backend.
                 </p>
               </div>
 

@@ -42,6 +42,8 @@ import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
 import { ErrorState } from "@/components/ui/error-state";
 import toast from "react-hot-toast";
+import { normalizeEmailForStorage } from "@/lib/email";
+import { getSafeExternalUrl } from "@/lib/utils";
 
 // Status Badge mapping for Order Status (Placed / Printed / Shipped / Delivered)
 const getOrderStatusBadge = (status: string) => {
@@ -81,10 +83,73 @@ const getOrderStatusBadge = (status: string) => {
   );
 };
 
-import { resolveCourierTrackingUrl } from "@/lib/couriers";
+const PAID_STATUSES = ["PAID", "VERIFIED", "SUCCESS", "COMPLETED", "APPROVED", "CONFIRMED", "PAYMENT_APPROVED"];
 
-const getCourierTrackingUrl = (courier: string, trackingNumber: string): string => {
-  return resolveCourierTrackingUrl(courier, trackingNumber);
+const getOrderPaymentStatus = (order: any) =>
+  (
+    order.payment_status ||
+    order.paymentStatus ||
+    order.paymentState ||
+    (typeof order.payment === "object" ? order.payment?.status : "") ||
+    ""
+  ).toUpperCase();
+
+const isOrderPaid = (order: any) => Boolean(order.isPaid || PAID_STATUSES.includes(getOrderPaymentStatus(order)));
+
+const getOrderAddress = (order: any) =>
+  order?.orderFormData?.shippingAddress ||
+  order?.customerSnapshot?.shippingAddress ||
+  order?.checkoutSnapshot?.shippingAddress ||
+  order?.shippingAddress ||
+  order?.deliveryAddress ||
+  order?.address ||
+  order?.shipping_address ||
+  null;
+
+const getOrderContact = (order: any) => {
+  const shippingAddress = getOrderAddress(order) || {};
+  return {
+    name:
+      shippingAddress.fullName ||
+      shippingAddress.name ||
+      shippingAddress.recipientName ||
+      order.orderFormData?.fullName ||
+      order.orderFormData?.customerName ||
+      order.customerSnapshot?.fullName ||
+      order.customerSnapshot?.customerName ||
+      order.checkoutSnapshot?.fullName ||
+      order.checkoutSnapshot?.customerName ||
+      order.customerName ||
+      "Reader",
+    phone:
+      shippingAddress.phone ||
+      shippingAddress.mobile ||
+      shippingAddress.mobileNumber ||
+      shippingAddress.phoneNumber ||
+      shippingAddress.recipientPhone ||
+      order.orderFormData?.phone ||
+      order.orderFormData?.customerPhone ||
+      order.customerSnapshot?.phone ||
+      order.customerSnapshot?.customerPhone ||
+      order.checkoutSnapshot?.phone ||
+      order.checkoutSnapshot?.customerPhone ||
+      order.customerPhone ||
+      order.customerMobile ||
+      order.phone ||
+      order.mobile ||
+      "",
+    email:
+      shippingAddress.email ||
+      order.orderFormData?.email ||
+      order.orderFormData?.customerEmail ||
+      order.customerSnapshot?.email ||
+      order.customerSnapshot?.customerEmail ||
+      order.checkoutSnapshot?.email ||
+      order.checkoutSnapshot?.customerEmail ||
+      order.customerEmail ||
+      order.email ||
+      "",
+  };
 };
 
 // Payment Status Badge mapping
@@ -322,21 +387,18 @@ export default function OrdersPage() {
             const status = order.status || order.orderStatus || "PENDING";
             const id = order.orderNumber || order._id || order.id;
             const isExpanded = expandedOrder === id;
-            const isPaid = Boolean(
-              order.isPaid ||
-              ["CONFIRMED", "APPROVED", "VERIFIED", "PAID", "SUCCESS"].includes(
-                (order.payment_status || order.paymentStatus || "").toUpperCase()
-              )
-            );
-            const paymentStatus = order.payment_status || order.paymentStatus || (order.utr ? "VERIFICATION_PENDING" : "PENDING");
+            const isPaid = isOrderPaid(order);
+            const rawPaymentStatus = getOrderPaymentStatus(order);
+            const paymentStatus = rawPaymentStatus || (order.utr ? "VERIFICATION_PENDING" : "PENDING");
 
             const subtotal = order.subtotal ?? (order.totalPrice ? order.totalPrice - (order.shippingPrice || 0) : order.items?.reduce((acc: number, item: any) => acc + (item.price || item.book?.price || 0) * (item.quantity || 1), 0) || 0);
             const shippingPrice = order.shippingPrice ?? order.shippingFee ?? 0;
             const totalPrice = order.totalPrice ?? order.totalAmount ?? order.amount ?? (subtotal + shippingPrice);
             const trackingNumber = order.tracking_id || order.trackingId || order.trackingNumber || order.awbNumber || null;
             const courierName = order.courier_name || order.courierName || order.courier || order.carrier || "";
-            const trackingUrl = order.tracking_url || order.trackingUrl || null;
-            const resolvedTrackingUrl = trackingUrl || (trackingNumber ? getCourierTrackingUrl(courierName, trackingNumber) : null);
+            const trackingUrl = getSafeExternalUrl(order.tracking_url || order.trackingUrl || "");
+            const resolvedTrackingUrl = trackingUrl;
+            const orderContact = getOrderContact(order);
 
             return (
               <motion.div
@@ -418,9 +480,9 @@ export default function OrdersPage() {
                       </div>
 
                       <div className="flex items-center gap-2 flex-wrap shrink-0">
-                        {resolvedTrackingUrl ? (
+                        {trackingUrl ? (
                           <a
-                            href={resolvedTrackingUrl}
+                            href={trackingUrl}
                             target="_blank"
                             rel="noopener noreferrer"
                           >
@@ -430,7 +492,7 @@ export default function OrdersPage() {
                               className="h-8 px-3.5 bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] text-xs font-serif font-bold gap-1.5 rounded-xl cursor-pointer shadow-2xs"
                             >
                               <Truck className="h-3.5 w-3.5" />
-                              <span>Track Package ↗</span>
+                              <span>Open Tracking Link</span>
                             </Button>
                           </a>
                         ) : null}
@@ -664,25 +726,25 @@ export default function OrdersPage() {
                                 <span>Delivery Address</span>
                               </div>
                               {(() => {
-                                const shippingAddress = order.shippingAddress || order.deliveryAddress || order.address || order.shipping_address;
+                                const shippingAddress = getOrderAddress(order);
                                 if (!shippingAddress) {
                                   return <p className="text-xs text-[#5C6E6E]">No shipping address recorded.</p>;
                                 }
                                 return (
                                   <div className="text-xs text-[#0F3D3E] space-y-1 leading-relaxed font-sans">
                                     <p className="font-bold text-sm text-[#0F3D3E]">
-                                      {shippingAddress.fullName || shippingAddress.name || order.customerName || order.user?.name || "Reader"}
+                                      {orderContact.name}
                                     </p>
-                                    {(shippingAddress.phone || shippingAddress.recipientPhone || order.customerPhone || order.phone || order.user?.phone) && (
+                                    {orderContact.phone && (
                                       <p className="text-[#5C6E6E]">
                                         <span className="font-medium text-[#0F3D3E]">Phone:</span>{" "}
-                                        {shippingAddress.phone || shippingAddress.recipientPhone || order.customerPhone || order.phone || order.user?.phone}
+                                        {orderContact.phone}
                                       </p>
                                     )}
-                                    {(shippingAddress.email || order.customerEmail || order.email || order.user?.email) && (
+                                    {orderContact.email && (
                                       <p className="text-[#5C6E6E]">
                                         <span className="font-medium text-[#0F3D3E]">Email:</span>{" "}
-                                        {shippingAddress.email || order.customerEmail || order.email || order.user?.email}
+                                        {normalizeEmailForStorage(orderContact.email)}
                                       </p>
                                     )}
                                     <p className="pt-0.5">
@@ -817,8 +879,9 @@ export default function OrdersPage() {
                                       <Copy className="h-3.5 w-3.5" />
                                       <span>Copy Tracking ID</span>
                                     </Button>
+                                    {trackingUrl && (
                                     <a
-                                      href={resolvedTrackingUrl || `https://www.google.com/search?q=${encodeURIComponent((courierName || "courier") + " tracking " + trackingNumber)}`}
+                                      href={resolvedTrackingUrl}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                     >
@@ -830,6 +893,7 @@ export default function OrdersPage() {
                                         <span>Track on Courier ↗</span>
                                       </Button>
                                     </a>
+                                    )}
                                   </div>
                                 </div>
                                 <div className="pt-1 text-xs text-[#5C6E6E] flex items-center gap-2">
@@ -864,26 +928,20 @@ export default function OrdersPage() {
                                 <span>{downloadingInvoiceId === id ? "Downloading..." : "Download Invoice"}</span>
                               </Button>
 
-                              {trackingNumber && (
+                              {trackingUrl && (
                                 <a
-                                  href={trackingUrl || "https://www.indiapost.gov.in/_layouts/15/dpt.cept.tracking/trackconsignment.aspx"}
+                                  href={trackingUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                 >
                                   <Button size="sm" className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white gap-1.5 text-xs">
                                     <Truck className="h-3.5 w-3.5" />
-                                    <span>Track with Courier Link</span>
+                                    <span>Open Tracking Link</span>
                                     <ExternalLink className="h-3 w-3" />
                                   </Button>
                                 </a>
                               )}
 
-                              <Link href={`/track-order?orderNumber=${encodeURIComponent(order.orderNumber || id)}`}>
-                                <Button variant="ghost" size="sm" className="gap-1.5 text-xs text-[#0F3D3E]">
-                                  <span>Public Tracking Page</span>
-                                  <ExternalLink className="h-3.5 w-3.5" />
-                                </Button>
-                              </Link>
                             </div>
                           </div>
                         </motion.div>

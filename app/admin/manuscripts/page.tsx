@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import toast from "react-hot-toast";
 import Link from "next/link";
+import { getSafeExternalUrl } from "@/lib/utils";
 
 const getStatusColor = (status: any) => {
   switch (String(status || "").toLowerCase()) {
@@ -277,10 +278,10 @@ export default function AdminManuscriptsPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              {(manuscript.documentUrl || manuscript.manuscriptUrl || manuscript.fileUrl) && (
+                              {getSafeExternalUrl(manuscript.documentUrl || manuscript.manuscriptUrl || manuscript.fileUrl) && (
                                 <DropdownMenuItem asChild>
                                   <a
-                                    href={manuscript.documentUrl || manuscript.manuscriptUrl || manuscript.fileUrl}
+                                    href={getSafeExternalUrl(manuscript.documentUrl || manuscript.manuscriptUrl || manuscript.fileUrl)}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                   >

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getSafeRedirect } from './utils';
+import { getSafeExternalUrl, getSafeRedirect, isSafeExternalUrl } from './utils';
 
 describe('getSafeRedirect', () => {
   it('allows a plain relative path', () => {
@@ -41,5 +41,24 @@ describe('getSafeRedirect', () => {
   it('respects a custom fallback', () => {
     expect(getSafeRedirect(null, '/login')).toBe('/login');
     expect(getSafeRedirect('https://evil.com', '/login')).toBe('/login');
+  });
+});
+
+describe('getSafeExternalUrl', () => {
+  it('allows http and https URLs', () => {
+    expect(getSafeExternalUrl('https://example.com/track?id=123')).toBe('https://example.com/track?id=123');
+    expect(getSafeExternalUrl('http://example.com')).toBe('http://example.com/');
+  });
+
+  it('trims and normalizes valid URLs', () => {
+    expect(getSafeExternalUrl('  https://example.com/path  ')).toBe('https://example.com/path');
+  });
+
+  it('rejects non-web, relative, and malformed URLs', () => {
+    expect(getSafeExternalUrl('javascript:alert(1)')).toBe('');
+    expect(getSafeExternalUrl('data:text/html,<script>alert(1)</script>')).toBe('');
+    expect(getSafeExternalUrl('/internal/path')).toBe('');
+    expect(getSafeExternalUrl('not a url')).toBe('');
+    expect(isSafeExternalUrl('mailto:test@example.com')).toBe(false);
   });
 });

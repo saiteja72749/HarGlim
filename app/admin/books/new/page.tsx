@@ -30,6 +30,7 @@ import toast from "react-hot-toast";
 
 import { EXACT_CATEGORIES } from "@/config/categories";
 import { resolveCategoryObjectId } from "@/lib/categories";
+import { isValidEmailAddress, normalizeEmailForStorage } from "@/lib/email";
 export const BISAC_CATEGORIES = EXACT_CATEGORIES;
 
 type AuthorType = "existing" | "new" | "external";
@@ -281,12 +282,26 @@ export default function AddBookPage() {
         }
 
         // Check if an existing author matches this exact name or email
-        const existingByName = authorsList.find(
-          (a) => a.name?.toLowerCase().trim() === targetName.toLowerCase()
-        );
+        const normalizedAuthorEmail =
+          authorType === "new" && newAuthorEmail.trim()
+            ? normalizeEmailForStorage(newAuthorEmail)
+            : "";
+        if (normalizedAuthorEmail && !isValidEmailAddress(normalizedAuthorEmail)) {
+          toast.error("Please enter a valid author email address.");
+          setLoading(false);
+          return;
+        }
 
-        if (existingByName && /^[0-9a-fA-F]{24}$/.test(existingByName._id)) {
-          finalAuthorId = existingByName._id;
+        const existingByNameOrEmail = authorsList.find((a) => {
+          const nameMatches = a.name?.toLowerCase().trim() === targetName.toLowerCase();
+          const emailMatches =
+            normalizedAuthorEmail &&
+            normalizeEmailForStorage(a.email || "").toLowerCase() === normalizedAuthorEmail.toLowerCase();
+          return nameMatches || emailMatches;
+        });
+
+        if (existingByNameOrEmail && /^[0-9a-fA-F]{24}$/.test(existingByNameOrEmail._id)) {
+          finalAuthorId = existingByNameOrEmail._id;
           // Ensure role is author
           await api.patch(`/admin/users/${finalAuthorId}/role`, { role: "author" }).catch(() =>
             api.put(`/admin/users/${finalAuthorId}/role`, { role: "author" }).catch(() => null)
@@ -294,8 +309,8 @@ export default function AddBookPage() {
         } else {
           // Generate a valid email & temporary credentials for the new author
           const cleanSlug = targetName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 15) || "writer";
-          const emailToUse = (authorType === "new" && newAuthorEmail.trim())
-            ? newAuthorEmail.trim()
+          const emailToUse = normalizedAuthorEmail
+            ? normalizedAuthorEmail
             : `author.${cleanSlug}.${Date.now().toString().slice(-4)}@harglim.internal`;
           const tempPassword = `Author#${Math.random().toString(36).slice(-6)}!Aa1`;
 
@@ -359,7 +374,7 @@ export default function AddBookPage() {
             // If already registered by email, look up existing user
             const lookup = await api.get("/admin/users", { params: { search: emailToUse } }).catch(() => null);
             const foundUser = lookup?.data?.data?.users?.find(
-              (u: any) => u.email?.toLowerCase() === emailToUse.toLowerCase()
+              (u: any) => normalizeEmailForStorage(u.email || "").toLowerCase() === emailToUse.toLowerCase()
             );
 
             if (foundUser?._id) {

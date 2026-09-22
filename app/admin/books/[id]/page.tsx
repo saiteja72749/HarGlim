@@ -31,6 +31,7 @@ import toast from "react-hot-toast";
 
 import { EXACT_CATEGORIES } from "@/config/categories";
 import { resolveCategoryObjectId, getCategoryDisplayName } from "@/lib/categories";
+import { isValidEmailAddress, normalizeEmailForStorage } from "@/lib/email";
 export const BISAC_CATEGORIES = EXACT_CATEGORIES;
 
 type AuthorType = "existing" | "new" | "external";
@@ -66,6 +67,7 @@ export default function EditBookPage() {
     format: "paperback",
     pages: "250",
     language: "English",
+    coverImage: "",
     isFeatured: false,
     isBestseller: false,
     isNewRelease: false,
@@ -264,6 +266,7 @@ export default function EditBookPage() {
             format: bookData.format || "paperback",
             pages: bookData.pages?.toString() || "250",
             language: bookData.language || "English",
+            coverImage: bookData.coverImage || "",
             isFeatured: Boolean(bookData.isFeatured),
             isBestseller: Boolean(bookData.isBestseller),
             isNewRelease: Boolean(bookData.isNewRelease),
@@ -355,26 +358,43 @@ export default function EditBookPage() {
         }
 
         // Try creating author profile via dedicated admin user endpoint (never use public register)
-        const cleanSlug = targetAuthorDisplayName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 15) || "writer";
-        const emailToUse = newAuthorEmail.trim() || `author.${cleanSlug}.${Date.now().toString().slice(-4)}@harglim.internal`;
-        const tempPassword = `Author#${Math.random().toString(36).slice(-6)}!Aa1`;
+        const normalizedAuthorEmail = newAuthorEmail.trim() ? normalizeEmailForStorage(newAuthorEmail) : "";
+        if (normalizedAuthorEmail && !isValidEmailAddress(normalizedAuthorEmail)) {
+          toast.error("Please enter a valid author email address.");
+          setLoading(false);
+          return;
+        }
 
-        try {
-          const adminUserRes = await api.post("/admin/users", {
-            name: targetAuthorDisplayName,
-            email: emailToUse,
-            password: tempPassword,
-            role: "author",
-            isActive: true,
-          });
-          const uData = adminUserRes?.data?.data?.user || adminUserRes?.data?.user || adminUserRes?.data?.data || adminUserRes?.data;
-          finalAuthorId = uData?._id || uData?.id || null;
-          if (finalAuthorId) {
-            toast.success(`Author account created for "${targetAuthorDisplayName}"`);
+        const existingByEmail = normalizedAuthorEmail
+          ? authorsList.find((a) => normalizeEmailForStorage(a.email || "").toLowerCase() === normalizedAuthorEmail.toLowerCase())
+          : null;
+        if (existingByEmail && /^[0-9a-fA-F]{24}$/.test(existingByEmail._id || existingByEmail.id)) {
+          finalAuthorId = existingByEmail._id || existingByEmail.id;
+          targetAuthorDisplayName = existingByEmail.name || targetAuthorDisplayName;
+        }
+
+        if (!finalAuthorId) {
+          const cleanSlug = targetAuthorDisplayName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 15) || "writer";
+          const emailToUse = normalizedAuthorEmail || `author.${cleanSlug}.${Date.now().toString().slice(-4)}@harglim.internal`;
+          const tempPassword = `Author#${Math.random().toString(36).slice(-6)}!Aa1`;
+
+          try {
+            const adminUserRes = await api.post("/admin/users", {
+              name: targetAuthorDisplayName,
+              email: emailToUse,
+              password: tempPassword,
+              role: "author",
+              isActive: true,
+            });
+            const uData = adminUserRes?.data?.data?.user || adminUserRes?.data?.user || adminUserRes?.data?.data || adminUserRes?.data;
+            finalAuthorId = uData?._id || uData?.id || null;
+            if (finalAuthorId) {
+              toast.success(`Author account created for "${targetAuthorDisplayName}"`);
+            }
+          } catch (adminErr: any) {
+            console.warn("Admin user creation error:", adminErr?.message);
+            finalAuthorId = selectedAuthorId || null;
           }
-        } catch (adminErr: any) {
-          console.warn("Admin user creation error:", adminErr?.message);
-          finalAuthorId = selectedAuthorId || null;
         }
       } else {
         // External or Guest author - never call registration to prevent session disruption
@@ -448,8 +468,9 @@ export default function EditBookPage() {
         jsonPayload.author = finalAuthorId;
       }
 
-      if (coverImageUrl) {
-        jsonPayload.coverImage = coverImageUrl;
+      const manualCoverImageUrl = formData.coverImage.trim();
+      if (coverImageUrl || manualCoverImageUrl) {
+        jsonPayload.coverImage = coverImageUrl || manualCoverImageUrl;
       }
 
       // Execute update with graceful fallback
@@ -892,6 +913,25 @@ export default function EditBookPage() {
               </div>
             </div>
 
+            <div className="grid gap-6 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="royaltyPercentage" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                  Royalty Percentage
+                </Label>
+                <Input
+                  id="royaltyPercentage"
+                  name="royaltyPercentage"
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={formData.royaltyPercentage}
+                  onChange={handleInputChange}
+                  placeholder="e.g. 30"
+                  className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-sm font-bold font-mono"
+                />
+              </div>
+            </div>
+
             <div className="grid gap-6 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="pages" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
@@ -973,6 +1013,23 @@ export default function EditBookPage() {
                   />
                 </div>
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="coverImage" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                Cover Image URL
+              </Label>
+              <Input
+                id="coverImage"
+                name="coverImage"
+                value={formData.coverImage}
+                onChange={handleInputChange}
+                placeholder="https://res.cloudinary.com/..."
+                className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-sm font-mono"
+              />
+              <p className="text-[11px] text-[#5C6E6E]">
+                Paste a direct cover image URL, or upload a new cover below to override it.
+              </p>
             </div>
 
             <div className="space-y-2">

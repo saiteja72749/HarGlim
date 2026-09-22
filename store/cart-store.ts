@@ -11,6 +11,7 @@ export interface Book {
   coverImage: string;
   price: number;
   discountPrice?: number;
+  mrp?: number;
   format: string;
   rating?: number;
   totalReviews?: number;
@@ -80,7 +81,8 @@ export const useCartStore = create<CartState>()(
       getSubtotal: () => {
         const { items } = get();
         return items.reduce((total: number, item: CartItem) => {
-          const price = item.book.price || (item.book as any).mrp || 0;
+          const prices = [item.book.price, item.book.discountPrice, item.book.mrp];
+          const price = prices.find((value) => typeof value === 'number' && Number.isFinite(value)) ?? 0;
           return total + (price * item.quantity);
         }, 0);
       },

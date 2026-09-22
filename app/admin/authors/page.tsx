@@ -346,6 +346,7 @@ export default function AdminAuthorsPage() {
                     <Link
                       href={`/authors/${selectedAuthorId}`}
                       target="_blank"
+                      rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-[#E2E6DF] hover:border-[#0F3D3E] font-medium text-[#0F3D3E] shadow-2xs"
                     >
                       <ExternalLink className="h-3.5 w-3.5" />

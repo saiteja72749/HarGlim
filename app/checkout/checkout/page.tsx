@@ -115,11 +115,24 @@ export default function CheckoutStepPage() {
         pinCode: enteredPostalCode,
         country: enteredCountry,
       };
+      const orderFormData = {
+        customerName: enteredFullName,
+        fullName: enteredFullName,
+        email: enteredEmail,
+        customerEmail: enteredEmail,
+        phone: enteredPhone,
+        customerPhone: enteredPhone,
+        shippingAddress: shippingAddressObj,
+        submittedAt: new Date().toISOString(),
+      };
 
       // NOTE: Root level email, phone, and customerName are explicitly sent
       // so backend never overrides them with the registered user's account email.
       const payload = {
         items: formattedItems,
+        orderFormData,
+        customerSnapshot: orderFormData,
+        checkoutSnapshot: orderFormData,
         email: enteredEmail,
         customerEmail: enteredEmail,
         phone: enteredPhone,

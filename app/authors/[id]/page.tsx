@@ -31,7 +31,7 @@ import { ErrorState } from '@/components/ui/error-state';
 import type { Author, Book } from '@/types';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
-import { getBookAuthorInfo } from '@/lib/utils';
+import { getBookAuthorInfo, getSafeExternalUrl } from '@/lib/utils';
 
 const socialIcons: Record<string, React.ElementType> = {
   twitter: Twitter,
@@ -551,10 +551,12 @@ export default function AuthorDetailPage() {
                     {author.socialLinks &&
                       Object.entries(author.socialLinks).map(([platform, url]) => {
                         const Icon = socialIcons[platform] || Globe;
+                        const safeUrl = getSafeExternalUrl(String(url || ''));
+                        if (!safeUrl) return null;
                         return (
                           <a
                             key={platform}
-                            href={url}
+                            href={safeUrl}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex items-center justify-between p-3 rounded-xl bg-[#F8F9F7] hover:bg-[#0F3D3E] hover:text-white transition-colors group text-xs font-medium"
