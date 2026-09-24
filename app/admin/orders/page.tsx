@@ -73,6 +73,12 @@ const getPaymentBadge = (isPaid: boolean, paymentStatus?: string, payment_status
 };
 
 const PAID_STATUSES = ["CONFIRMED", "APPROVED", "VERIFIED", "SUCCESS", "PAID", "COMPLETED", "PAYMENT_APPROVED"];
+const MONGO_ID_REGEX = /^[0-9a-fA-F]{24}$/;
+
+const getMongoId = (value?: unknown) => {
+  if (typeof value !== "string") return undefined;
+  return MONGO_ID_REGEX.test(value) ? value : undefined;
+};
 
 const getOrderStatusBadge = (status: string) => {
   const s = (status || "").toUpperCase().replace(/[-_]/g, " ");
@@ -217,9 +223,7 @@ export default function AdminOrdersPage() {
       if (statusFilter !== "all") params.status = statusFilter;
       if (searchQuery.trim()) params.search = searchQuery.trim();
 
-      const { data } = await api.get("/admin/orders", { params }).catch(() =>
-        api.get("/orders", { params })
-      );
+      const { data } = await api.get("/admin/orders", { params });
       const ordersData = data?.data?.orders || (Array.isArray(data?.data) ? data.data : []) || (Array.isArray(data) ? data : []);
       setOrders(Array.isArray(ordersData) ? ordersData : []);
     } catch (err) {
@@ -260,11 +264,7 @@ export default function AdminOrdersPage() {
           paidAt: new Date().toISOString(),
         };
 
-        await api.put(`/admin/orders/${orderMongoId}/status`, paidPayload).catch(() =>
-          api.patch(`/admin/orders/${orderMongoId}`, paidPayload).catch(() =>
-            api.put(`/orders/${orderMongoId}`, paidPayload)
-          )
-        );
+        await api.put(`/admin/orders/${orderMongoId}/status`, paidPayload);
       }
 
       toast.success("Payment confirmed successfully! ✅");
@@ -336,7 +336,7 @@ export default function AdminOrdersPage() {
       return;
     }
 
-    const orderMongoId = selectedOrderForTracking._id || selectedOrderForTracking.id;
+    const orderMongoId = getMongoId(selectedOrderForTracking._id) || getMongoId(selectedOrderForTracking.id);
     if (!orderMongoId) {
       toast.error("Order Mongo ID missing for tracking update.");
       return;
@@ -498,8 +498,12 @@ export default function AdminOrdersPage() {
                 <TableBody>
                   {filteredOrders.map((order: any) => {
                     const orderDisplayId = order.orderNumber || order._id || order.id;
-                    const mongoOrderId = order._id || order.id;
-                    const paymentId = (typeof order.payment === "object" ? order.payment?._id : (typeof order.payment === "string" ? order.payment : undefined)) || order.paymentId;
+                    const mongoOrderId = getMongoId(order._id) || getMongoId(order.id);
+                    const paymentId = (
+                      typeof order.payment === "object"
+                        ? getMongoId(order.payment?._id)
+                        : getMongoId(order.payment)
+                    ) || getMongoId(order.paymentId);
                     const rawPaymentStatus = (
                       order.payment_status ||
                       order.paymentStatus ||

@@ -112,10 +112,15 @@ export default function FAQPage() {
   useEffect(() => {
     const fetchFaqs = async () => {
       try {
-        const { data } = await api.get('/faqs').catch(() => api.get('/content'));
-        const dynamicFaqs = data?.faqs || data?.data?.faqs || data?.data;
+        const { data } = await api.get('/content');
+        const dynamicFaqs = data?.data?.faq || data?.faq;
         if (Array.isArray(dynamicFaqs) && dynamicFaqs.length > 0) {
-          setFaqCategories(dynamicFaqs);
+          const hasCategories = dynamicFaqs.some((item: any) => Array.isArray(item?.items));
+          setFaqCategories(
+            hasCategories
+              ? dynamicFaqs
+              : [{ category: "Frequently Asked Questions", items: dynamicFaqs }]
+          );
         }
       } catch {
         // Fall back to the default FAQ categories defined above.

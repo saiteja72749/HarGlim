@@ -109,9 +109,7 @@ export default function BecomeAuthorPage() {
     };
 
     try {
-      await api.post("/author-applications", payload).catch(() =>
-        api.post("/users/me/author-application", payload)
-      );
+      await api.post("/author-applications", payload);
 
       toast.success("Author application submitted successfully!");
       setApplicationStatus("pending");

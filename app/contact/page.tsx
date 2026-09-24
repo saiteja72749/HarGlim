@@ -71,14 +71,28 @@ export default function ContactPage() {
 
     setIsSubmitting(true);
     try {
-      await api.post("/contact", formState)
-        .catch(() => api.post("/contact-requests", formState))
-        .catch(() => null);
+      await api.post("/contact", {
+        name: formState.name.trim(),
+        email: formState.email.trim(),
+        phone: formState.phone.trim(),
+        subject: formState.inquiryType || "Website contact enquiry",
+        message: formState.message.trim(),
+        page: "/contact",
+      }).catch(() =>
+        api.post("/contact-requests", {
+          name: formState.name.trim(),
+          email: formState.email.trim(),
+          phone: formState.phone.trim(),
+          subject: formState.inquiryType || "Website contact enquiry",
+          message: formState.message.trim(),
+          page: "/contact",
+        })
+      );
       setIsSubmitted(true);
       toast.success("Thank you! Your message has been sent.");
     } catch (err) {
       console.error("Failed to submit contact form:", err);
-      toast.error("Failed to submit message. Please try again.");
+      toast.error("Failed to submit message. Please try again or use the email address listed on this page.");
     } finally {
       setIsSubmitting(false);
     }

@@ -43,9 +43,7 @@ export default function AdminInvoicesPage() {
           api.get("/admin/invoices", { params: { search: searchQuery.trim(), limit: 50 } })
         );
       } else {
-        res = await api.get("/admin/invoices", { params: { limit: 50 } }).catch(() =>
-          api.get("/invoices", { params: { limit: 50 } })
-        );
+        res = await api.get("/admin/invoices", { params: { limit: 50 } });
       }
 
       let items = res?.data?.data?.invoices || res?.data?.invoices || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];

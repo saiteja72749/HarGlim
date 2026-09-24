@@ -66,13 +66,7 @@ export default function AdminAuthorApplicationsPage() {
   const handleApprove = async (id: string) => {
     setProcessingId(id);
     try {
-      await api
-        .put(`/admin/author-applications/${id}/status`, { status: "approved" })
-        .catch(() =>
-          api.put(`/author-applications/${id}/status`, { status: "approved" }).catch(() =>
-            api.patch(`/admin/author-applications/${id}`, { status: "approved" })
-          )
-        );
+      await api.put(`/admin/author-applications/${id}/status`, { status: "approved" });
 
       toast.success("Author application APPROVED successfully! 🎉");
       fetchApplications();
@@ -89,13 +83,7 @@ export default function AdminAuthorApplicationsPage() {
 
     setProcessingId(id);
     try {
-      await api
-        .put(`/admin/author-applications/${id}/status`, { status: "rejected", rejectionReason: reason })
-        .catch(() =>
-          api.put(`/author-applications/${id}/status`, { status: "rejected", rejectionReason: reason }).catch(() =>
-            api.patch(`/admin/author-applications/${id}`, { status: "rejected", rejectionReason: reason })
-          )
-        );
+      await api.put(`/admin/author-applications/${id}/status`, { status: "rejected", rejectionReason: reason });
 
       toast.error("Author application REJECTED.");
       fetchApplications();

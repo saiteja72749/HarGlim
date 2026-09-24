@@ -106,11 +106,7 @@ export async function resolveCategoryObjectId(
       const createRes = await api.post("/admin/categories", {
         name: cleanInput,
         description: `Auto-created category for ${cleanInput}`,
-      }).catch(() =>
-        api.post("/categories", {
-          name: cleanInput,
-        })
-      );
+      });
 
       const created = createRes?.data?.data || createRes?.data?.category || createRes?.data;
       const createdId = created?._id || created?.id;

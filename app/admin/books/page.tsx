@@ -158,7 +158,7 @@ export default function AdminBooksPage() {
 
   const handleDelete = async (id: string) => {
     try {
-      await api.delete(`/admin/books/${id}`).catch(() => api.delete(`/books/${id}`));
+      await api.delete(`/admin/books/${id}`);
       setBooks(books.filter((b: any) => (b.id || b._id) !== id));
       toast.success("Book deleted successfully! 🗑️");
     } catch (err: any) {
@@ -375,8 +375,7 @@ export default function AdminBooksPage() {
                               const targetFeatured = !book.isFeatured;
                               try {
                                 await api
-                                  .put(`/admin/books/${bId}`, { isFeatured: targetFeatured })
-                                  .catch(() => api.put(`/books/${bId}`, { isFeatured: targetFeatured }));
+                                  .put(`/admin/books/${bId}`, { isFeatured: targetFeatured });
                                 setBooks((prev) =>
                                   prev.map((b) =>
                                     (b.id || b._id) === bId ? { ...b, isFeatured: targetFeatured } : b

@@ -1,5 +1,13 @@
 import api from '@/lib/api';
 
+const MONGO_ID_REGEX = /^[0-9a-fA-F]{24}$/;
+
+function assertMongoId(paymentId: string) {
+  if (!MONGO_ID_REGEX.test(paymentId)) {
+    throw new Error('Payment Mongo ID is required for admin payment operations.');
+  }
+}
+
 export interface AdminPaymentQueryParams {
   page?: number;
   limit?: number;
@@ -62,6 +70,7 @@ export async function listAdminPayments(params: AdminPaymentQueryParams = {}) {
  * GET /admin/operations/payments/:id
  */
 export async function getAdminPaymentDetail(paymentId: string) {
+  assertMongoId(paymentId);
   const { data } = await api.get(`/admin/operations/payments/${paymentId}`);
   return data;
 }
@@ -71,6 +80,7 @@ export async function getAdminPaymentDetail(paymentId: string) {
  * POST /admin/operations/payments/:id/approve
  */
 export async function approveAdminPayment(paymentId: string, payload: ApprovePaymentPayload = {}) {
+  assertMongoId(paymentId);
   const { data } = await api.post(`/admin/operations/payments/${paymentId}/approve`, payload);
   return data;
 }
@@ -80,6 +90,7 @@ export async function approveAdminPayment(paymentId: string, payload: ApprovePay
  * POST /admin/operations/payments/:id/reject
  */
 export async function rejectAdminPayment(paymentId: string, payload: RejectPaymentPayload = {}) {
+  assertMongoId(paymentId);
   const { data } = await api.post(`/admin/operations/payments/${paymentId}/reject`, payload);
   return data;
 }
@@ -89,6 +100,7 @@ export async function rejectAdminPayment(paymentId: string, payload: RejectPayme
  * POST /admin/operations/payments/:id/cancel
  */
 export async function cancelAdminPayment(paymentId: string, payload: CancelPaymentPayload = {}) {
+  assertMongoId(paymentId);
   const { data } = await api.post(`/admin/operations/payments/${paymentId}/cancel`, payload);
   return data;
 }
@@ -98,6 +110,7 @@ export async function cancelAdminPayment(paymentId: string, payload: CancelPayme
  * POST /admin/operations/payments/:id/expire
  */
 export async function expireAdminPayment(paymentId: string, payload: ExpirePaymentPayload = {}) {
+  assertMongoId(paymentId);
   const { data } = await api.post(`/admin/operations/payments/${paymentId}/expire`, payload);
   return data;
 }
@@ -107,6 +120,7 @@ export async function expireAdminPayment(paymentId: string, payload: ExpirePayme
  * POST /admin/operations/payments/:id/retry-verification
  */
 export async function retryAdminVerification(paymentId: string) {
+  assertMongoId(paymentId);
   const { data } = await api.post(`/admin/operations/payments/${paymentId}/retry-verification`, {});
   return data;
 }
@@ -116,6 +130,7 @@ export async function retryAdminVerification(paymentId: string) {
  * POST /admin/operations/payments/:id/recreate-qr
  */
 export async function recreateAdminQr(paymentId: string, payload: RecreateQrPayload = { force: true }) {
+  assertMongoId(paymentId);
   const { data } = await api.post(`/admin/operations/payments/${paymentId}/recreate-qr`, payload);
   return data;
 }

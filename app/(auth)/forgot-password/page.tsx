@@ -29,9 +29,7 @@ export default function ForgotPasswordPage() {
     setIsLoading(true);
 
     try {
-      await api.post('/auth/forgot-password', { email }).catch(() =>
-        api.post('/auth/reset-password-request', { email })
-      );
+      await api.post('/auth/forgot-password', { email });
       
       setIsSubmitted(true);
       toast.success("Password reset instructions sent to your email!");

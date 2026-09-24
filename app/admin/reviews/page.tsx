@@ -58,9 +58,7 @@ export default function AdminReviewsPage() {
   const handleModerate = async (reviewId: string, newStatus: "approved" | "rejected") => {
     setActionInProgressId(reviewId);
     try {
-      await api.patch(`/admin/reviews/${reviewId}/status`, { status: newStatus }).catch(() =>
-        api.put(`/admin/reviews/${reviewId}/status`, { status: newStatus })
-      );
+      await api.patch(`/admin/reviews/${reviewId}/status`, { status: newStatus });
       toast.success(`Review ${newStatus === "approved" ? "approved" : "rejected"}!`);
       setReviews((prev) =>
         prev.map((r) => ((r._id || r.id) === reviewId ? { ...r, status: newStatus } : r))

@@ -481,8 +481,7 @@ export default function EditBookPage() {
       } catch (putErr: any) {
         console.warn("Primary /admin/books put failed, trying /books fallback:", putErr?.message);
         try {
-          await api.put(`/books/${bookId}`, jsonPayload);
-          updateSuccess = true;
+          throw putErr;
         } catch (fallbackErr: any) {
           throw putErr || fallbackErr;
         }

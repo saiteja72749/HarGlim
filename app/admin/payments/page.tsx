@@ -64,6 +64,13 @@ import {
   AdminPaymentQueryParams,
 } from "@/lib/admin-payments-api";
 
+const MONGO_ID_REGEX = /^[0-9a-fA-F]{24}$/;
+
+const getMongoId = (value?: unknown) => {
+  if (typeof value !== "string") return undefined;
+  return MONGO_ID_REGEX.test(value) ? value : undefined;
+};
+
 export default function AdminPaymentVerificationPage() {
   const [payments, setPayments] = useState<any[]>([]);
   const [pagination, setPagination] = useState({
@@ -129,6 +136,11 @@ export default function AdminPaymentVerificationPage() {
 
   // Open Detail Dialog
   const handleOpenDetail = async (paymentId: string) => {
+    if (!getMongoId(paymentId)) {
+      toast.error("Payment Mongo ID is required to view details.");
+      return;
+    }
+
     setDetailModalOpen(true);
     setLoadingDetail(true);
     setSelectedPaymentDetail(null);
@@ -147,8 +159,8 @@ export default function AdminPaymentVerificationPage() {
 
   // 3. Approve Payment
   const handleApprove = async (paymentId: string) => {
-    if (!paymentId || !/^[0-9a-fA-F]{24}$/.test(paymentId)) {
-      toast.error("Invalid payment ObjectId string. Cannot approve.");
+    if (!getMongoId(paymentId)) {
+      toast.error("Payment Mongo ID is required to approve.");
       return;
     }
     setActionLoading("approve");
@@ -168,8 +180,8 @@ export default function AdminPaymentVerificationPage() {
 
   // 4. Reject Payment
   const handleReject = async (paymentId: string) => {
-    if (!paymentId || !/^[0-9a-fA-F]{24}$/.test(paymentId)) {
-      toast.error("Invalid payment ObjectId string. Cannot reject.");
+    if (!getMongoId(paymentId)) {
+      toast.error("Payment Mongo ID is required to reject.");
       return;
     }
     setActionLoading("reject");
@@ -189,6 +201,11 @@ export default function AdminPaymentVerificationPage() {
 
   // 5. Cancel Payment
   const handleCancel = async (paymentId: string) => {
+    if (!getMongoId(paymentId)) {
+      toast.error("Payment Mongo ID is required to cancel.");
+      return;
+    }
+
     if (!confirm("Are you sure you want to cancel this payment intent?")) return;
     setActionLoading("cancel");
     try {
@@ -207,6 +224,11 @@ export default function AdminPaymentVerificationPage() {
 
   // 6. Expire Payment
   const handleExpire = async (paymentId: string) => {
+    if (!getMongoId(paymentId)) {
+      toast.error("Payment Mongo ID is required to expire.");
+      return;
+    }
+
     if (!confirm("Are you sure you want to manually expire this payment intent?")) return;
     setActionLoading("expire");
     try {
@@ -225,6 +247,11 @@ export default function AdminPaymentVerificationPage() {
 
   // 7. Retry Verification
   const handleRetryVerification = async (paymentId: string) => {
+    if (!getMongoId(paymentId)) {
+      toast.error("Payment Mongo ID is required to retry verification.");
+      return;
+    }
+
     setActionLoading("retry");
     try {
       await retryAdminVerification(paymentId);
@@ -240,6 +267,11 @@ export default function AdminPaymentVerificationPage() {
 
   // 8. Recreate QR
   const handleRecreateQr = async (paymentId: string) => {
+    if (!getMongoId(paymentId)) {
+      toast.error("Payment Mongo ID is required to recreate QR.");
+      return;
+    }
+
     setActionLoading("recreate-qr");
     try {
       await recreateAdminQr(paymentId, { force: true, reason: actionReason.trim() || "Admin requested new QR" });
@@ -469,7 +501,7 @@ export default function AdminPaymentVerificationPage() {
                 </TableHeader>
                 <TableBody>
                   {payments.map((p: any) => {
-                    const paymentId = p._id || p.id;
+                    const paymentId = getMongoId(p._id) || getMongoId(p.id);
                     const orderNum = p.order?.orderNumber || p.orderId || "N/A";
                     const customerName = p.user?.name || p.customer?.name || "Customer";
                     const customerEmail = p.user?.email || p.customer?.email || "N/A";
@@ -528,7 +560,8 @@ export default function AdminPaymentVerificationPage() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => handleOpenDetail(paymentId)}
+                              onClick={() => paymentId && handleOpenDetail(paymentId)}
+                              disabled={!paymentId}
                               className="border-[#0F3D3E]/30 text-[#0F3D3E] hover:bg-[#0F3D3E]/5 text-[11px] h-7 px-2.5 rounded-lg gap-1 font-semibold"
                             >
                               <Eye className="h-3 w-3" />
@@ -539,8 +572,8 @@ export default function AdminPaymentVerificationPage() {
                               <>
                                 <Button
                                   size="sm"
-                                  onClick={() => handleApprove(paymentId)}
-                                  disabled={actionLoading === "approve"}
+                                  onClick={() => paymentId && handleApprove(paymentId)}
+                                  disabled={!paymentId || actionLoading === "approve"}
                                   className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] h-7 px-2.5 rounded-lg gap-1 font-semibold"
                                 >
                                   <CheckCircle2 className="h-3 w-3" />
@@ -550,8 +583,8 @@ export default function AdminPaymentVerificationPage() {
                                 <Button
                                   size="sm"
                                   variant="destructive"
-                                  onClick={() => handleReject(paymentId)}
-                                  disabled={actionLoading === "reject"}
+                                  onClick={() => paymentId && handleReject(paymentId)}
+                                  disabled={!paymentId || actionLoading === "reject"}
                                   className="text-[11px] h-7 px-2.5 rounded-lg gap-1 font-semibold"
                                 >
                                   <XCircle className="h-3 w-3" />
@@ -841,8 +874,11 @@ export default function AdminPaymentVerificationPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   {/* Approve */}
                   <Button
-                    onClick={() => handleApprove(selectedPaymentDetail.payment?._id || selectedPaymentDetail._id)}
-                    disabled={actionLoading !== null}
+                    onClick={() => {
+                      const paymentId = getMongoId(selectedPaymentDetail.payment?._id) || getMongoId(selectedPaymentDetail._id);
+                      if (paymentId) handleApprove(paymentId);
+                    }}
+                    disabled={actionLoading !== null || !(getMongoId(selectedPaymentDetail.payment?._id) || getMongoId(selectedPaymentDetail._id))}
                     className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs h-9 px-4 rounded-xl gap-1.5"
                   >
                     <CheckCircle2 className="h-4 w-4" />
@@ -852,8 +888,11 @@ export default function AdminPaymentVerificationPage() {
                   {/* Reject */}
                   <Button
                     variant="destructive"
-                    onClick={() => handleReject(selectedPaymentDetail.payment?._id || selectedPaymentDetail._id)}
-                    disabled={actionLoading !== null}
+                    onClick={() => {
+                      const paymentId = getMongoId(selectedPaymentDetail.payment?._id) || getMongoId(selectedPaymentDetail._id);
+                      if (paymentId) handleReject(paymentId);
+                    }}
+                    disabled={actionLoading !== null || !(getMongoId(selectedPaymentDetail.payment?._id) || getMongoId(selectedPaymentDetail._id))}
                     className="font-semibold text-xs h-9 px-4 rounded-xl gap-1.5"
                   >
                     <XCircle className="h-4 w-4" />
@@ -863,8 +902,11 @@ export default function AdminPaymentVerificationPage() {
                   {/* Recreate QR */}
                   <Button
                     variant="outline"
-                    onClick={() => handleRecreateQr(selectedPaymentDetail.payment?._id || selectedPaymentDetail._id)}
-                    disabled={actionLoading !== null}
+                    onClick={() => {
+                      const paymentId = getMongoId(selectedPaymentDetail.payment?._id) || getMongoId(selectedPaymentDetail._id);
+                      if (paymentId) handleRecreateQr(paymentId);
+                    }}
+                    disabled={actionLoading !== null || !(getMongoId(selectedPaymentDetail.payment?._id) || getMongoId(selectedPaymentDetail._id))}
                     className="border-indigo-300 text-indigo-700 hover:bg-indigo-50 font-semibold text-xs h-9 px-3.5 rounded-xl gap-1.5"
                   >
                     <QrCode className="h-4 w-4 text-indigo-600" />
@@ -874,8 +916,11 @@ export default function AdminPaymentVerificationPage() {
                   {/* Retry Verification */}
                   <Button
                     variant="outline"
-                    onClick={() => handleRetryVerification(selectedPaymentDetail.payment?._id || selectedPaymentDetail._id)}
-                    disabled={actionLoading !== null}
+                    onClick={() => {
+                      const paymentId = getMongoId(selectedPaymentDetail.payment?._id) || getMongoId(selectedPaymentDetail._id);
+                      if (paymentId) handleRetryVerification(paymentId);
+                    }}
+                    disabled={actionLoading !== null || !(getMongoId(selectedPaymentDetail.payment?._id) || getMongoId(selectedPaymentDetail._id))}
                     className="border-amber-300 text-amber-800 hover:bg-amber-50 font-semibold text-xs h-9 px-3.5 rounded-xl gap-1.5"
                   >
                     <RotateCcw className="h-4 w-4 text-amber-700" />
@@ -885,8 +930,11 @@ export default function AdminPaymentVerificationPage() {
                   {/* Expire Intent */}
                   <Button
                     variant="outline"
-                    onClick={() => handleExpire(selectedPaymentDetail.payment?._id || selectedPaymentDetail._id)}
-                    disabled={actionLoading !== null}
+                    onClick={() => {
+                      const paymentId = getMongoId(selectedPaymentDetail.payment?._id) || getMongoId(selectedPaymentDetail._id);
+                      if (paymentId) handleExpire(paymentId);
+                    }}
+                    disabled={actionLoading !== null || !(getMongoId(selectedPaymentDetail.payment?._id) || getMongoId(selectedPaymentDetail._id))}
                     className="border-gray-300 text-gray-700 hover:bg-gray-100 font-semibold text-xs h-9 px-3.5 rounded-xl gap-1.5"
                   >
                     <Clock className="h-4 w-4 text-gray-500" />
@@ -896,8 +944,11 @@ export default function AdminPaymentVerificationPage() {
                   {/* Cancel Intent */}
                   <Button
                     variant="outline"
-                    onClick={() => handleCancel(selectedPaymentDetail.payment?._id || selectedPaymentDetail._id)}
-                    disabled={actionLoading !== null}
+                    onClick={() => {
+                      const paymentId = getMongoId(selectedPaymentDetail.payment?._id) || getMongoId(selectedPaymentDetail._id);
+                      if (paymentId) handleCancel(paymentId);
+                    }}
+                    disabled={actionLoading !== null || !(getMongoId(selectedPaymentDetail.payment?._id) || getMongoId(selectedPaymentDetail._id))}
                     className="border-zinc-300 text-zinc-700 hover:bg-zinc-100 font-semibold text-xs h-9 px-3.5 rounded-xl gap-1.5"
                   >
                     <Ban className="h-4 w-4 text-zinc-500" />

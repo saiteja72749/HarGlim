@@ -89,9 +89,7 @@ export default function AdminManuscriptsPage() {
       if (statusFilter !== "all") params.status = statusFilter;
       if (searchQuery.trim()) params.search = searchQuery.trim();
 
-      const { data } = await api.get("/admin/publish-requests", { params }).catch(() =>
-        api.get("/publish-requests", { params })
-      );
+      const { data } = await api.get("/admin/publish-requests", { params });
       let fetchedManuscripts = [];
       if (Array.isArray(data)) {
         fetchedManuscripts = data;

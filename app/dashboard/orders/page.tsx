@@ -43,6 +43,7 @@ import api from "@/lib/api";
 import { ErrorState } from "@/components/ui/error-state";
 import toast from "react-hot-toast";
 import { normalizeEmailForStorage } from "@/lib/email";
+import { resolveCourierTrackingUrl } from "@/lib/couriers";
 import { getSafeExternalUrl } from "@/lib/utils";
 
 // Status Badge mapping for Order Status (Placed / Printed / Shipped / Delivered)
@@ -152,6 +153,119 @@ const getOrderContact = (order: any) => {
   };
 };
 
+const firstString = (...values: any[]) =>
+  values.find((value) => typeof value === "string" && value.trim())?.trim() || "";
+
+const getShipmentCandidates = (order: any) =>
+  [
+    order.shipment,
+    order.shipmentDetails,
+    order.shipping,
+    order.fulfillment,
+    order.delivery,
+    ...(Array.isArray(order.shipments) ? order.shipments : []),
+  ].filter(Boolean);
+
+const getLatestTrackingEvent = (shipment: any) => {
+  const trackingEvents = Array.isArray(shipment?.tracking) ? shipment.tracking : [];
+  return trackingEvents[trackingEvents.length - 1] || {};
+};
+
+const getOrderTrackingInfo = (order: any) => {
+  const shipment = getShipmentCandidates(order)[0] || {};
+  const courier = shipment.courier || order.courierDetails || {};
+  const trackingEvent = getLatestTrackingEvent(shipment);
+
+  const trackingNumber = firstString(
+    order.tracking_id,
+    order.trackingId,
+    order.trackingNumber,
+    order.awbNumber,
+    order.awb,
+    order.consignmentNumber,
+    shipment.trackingNumber,
+    shipment.trackingId,
+    shipment.awb,
+    shipment.awbNumber,
+    shipment.consignmentNumber,
+    courier.trackingNumber,
+    courier.trackingId,
+    courier.awb,
+    courier.awbNumber,
+    trackingEvent.trackingNumber,
+    trackingEvent.trackingId,
+    trackingEvent.awb,
+    trackingEvent.awbNumber
+  );
+
+  const courierName = firstString(
+    order.courier_name,
+    order.courierName,
+    order.courier,
+    order.carrier,
+    shipment.serviceName,
+    shipment.courierName,
+    shipment.carrier,
+    courier.serviceName,
+    courier.courierName,
+    courier.name,
+    courier.provider,
+    trackingEvent.courierName,
+    trackingEvent.serviceName
+  );
+
+  const directTrackingUrl = getSafeExternalUrl(
+    firstString(
+      order.tracking_url,
+      order.trackingUrl,
+      order.trackingLink,
+      shipment.trackingUrl,
+      shipment.tracking_url,
+      shipment.trackingLink,
+      courier.trackingUrl,
+      courier.tracking_url,
+      courier.trackingLink,
+      trackingEvent.trackingUrl,
+      trackingEvent.tracking_url,
+      trackingEvent.trackingLink
+    )
+  );
+
+  return {
+    trackingNumber,
+    courierName,
+    trackingUrl: directTrackingUrl || resolveCourierTrackingUrl(courierName, trackingNumber),
+  };
+};
+
+const getOrderMatchKeys = (order: any) =>
+  [
+    order._id,
+    order.id,
+    order.order,
+    order.orderId,
+    order.orderNumber,
+    typeof order.order === "object" ? order.order?._id : "",
+    typeof order.order === "object" ? order.order?.id : "",
+    typeof order.order === "object" ? order.order?.orderNumber : "",
+  ]
+    .filter(Boolean)
+    .map((value) => String(value));
+
+const mergeShipmentsIntoOrders = (orders: any[], shipments: any[]) => {
+  if (!shipments.length) return orders;
+
+  const shipmentsByOrderKey = new Map<string, any>();
+  shipments.forEach((shipment) => {
+    getOrderMatchKeys(shipment).forEach((key) => shipmentsByOrderKey.set(key, shipment));
+  });
+
+  return orders.map((order) => {
+    const shipment = getOrderMatchKeys(order).map((key) => shipmentsByOrderKey.get(key)).find(Boolean);
+    return shipment ? { ...order, shipment } : order;
+  });
+};
+
 // Payment Status Badge mapping
 const getPaymentStatusBadge = (isPaid: boolean, paymentStatus?: string, payment_status?: string) => {
   const ps = (payment_status || paymentStatus || "").toUpperCase();
@@ -220,9 +334,33 @@ export default function OrdersPage() {
     setError(false);
 
     try {
-      const { data } = await api.get(`/users/${userId}/orders`);
-      const ordersData = data?.data || data || [];
-      setOrders(Array.isArray(ordersData) ? ordersData : []);
+      const [ordersRes, shipmentsRes] = await Promise.allSettled([
+        api.get(`/users/${userId}/orders`),
+        api.get(`/users/${userId}/shipments`),
+      ]);
+
+      if (ordersRes.status !== "fulfilled") {
+        throw ordersRes.reason;
+      }
+
+      const ordersPayload = ordersRes.value.data;
+      const ordersData =
+        ordersPayload?.data?.orders ||
+        ordersPayload?.orders ||
+        ordersPayload?.data ||
+        ordersPayload ||
+        [];
+      const shipmentsPayload = shipmentsRes.status === "fulfilled" ? shipmentsRes.value.data : null;
+      const shipmentsData =
+        shipmentsPayload?.data?.shipments ||
+        shipmentsPayload?.shipments ||
+        shipmentsPayload?.data ||
+        shipmentsPayload ||
+        [];
+
+      const list = Array.isArray(ordersData) ? ordersData : [];
+      const shipments = Array.isArray(shipmentsData) ? shipmentsData : [];
+      setOrders(mergeShipmentsIntoOrders(list, shipments));
     } catch (err) {
       console.error("Failed to fetch user orders:", err);
       setError(true);
@@ -394,10 +532,7 @@ export default function OrdersPage() {
             const subtotal = order.subtotal ?? (order.totalPrice ? order.totalPrice - (order.shippingPrice || 0) : order.items?.reduce((acc: number, item: any) => acc + (item.price || item.book?.price || 0) * (item.quantity || 1), 0) || 0);
             const shippingPrice = order.shippingPrice ?? order.shippingFee ?? 0;
             const totalPrice = order.totalPrice ?? order.totalAmount ?? order.amount ?? (subtotal + shippingPrice);
-            const trackingNumber = order.tracking_id || order.trackingId || order.trackingNumber || order.awbNumber || null;
-            const courierName = order.courier_name || order.courierName || order.courier || order.carrier || "";
-            const trackingUrl = getSafeExternalUrl(order.tracking_url || order.trackingUrl || "");
-            const resolvedTrackingUrl = trackingUrl;
+            const { trackingNumber, courierName, trackingUrl } = getOrderTrackingInfo(order);
             const orderContact = getOrderContact(order);
 
             return (
@@ -881,7 +1016,7 @@ export default function OrdersPage() {
                                     </Button>
                                     {trackingUrl && (
                                     <a
-                                      href={resolvedTrackingUrl}
+                                      href={trackingUrl}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                     >

@@ -200,12 +200,10 @@ export default function BookDetailPage() {
       return;
     }
 
-    const userId = user._id || user.id;
-
     async function checkUserOrder() {
       try {
-        const { data } = await api.get(`/users/${userId}/orders`).catch(() => api.get("/orders"));
-        const ordersData = data?.data || data || [];
+        const { data } = await api.get("/users/me/orders");
+        const ordersData = data?.data?.orders || data?.orders || data?.data || data || [];
         if (Array.isArray(ordersData) && book) {
           const matchingOrder = ordersData.find((ord: any) =>
             (ord.items || []).some((item: any) => {

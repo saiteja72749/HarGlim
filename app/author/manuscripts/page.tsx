@@ -79,14 +79,8 @@ export default function ManuscriptsPage() {
     const fetchManuscripts = async () => {
       setLoading(true);
       try {
-        const { data } = await api.get("/authors/me/books").catch(() =>
-          api.get("/publish-requests").catch(() =>
-            api.get("/authors/me/publish-requests").catch(() =>
-              api.get("/authors/me/manuscripts")
-            )
-          )
-        );
-        const list = data?.data?.books || data?.data?.requests || data?.data?.manuscripts || data?.data || data || [];
+        const { data } = await api.get("/authors/me/books");
+        const list = data?.data?.books || data?.books || data?.data || data || [];
         const arr = Array.isArray(list) ? list : [];
         if (arr.length > 0) {
           const mapped = arr.map((m: any, idx: number) => ({
@@ -121,11 +115,7 @@ export default function ManuscriptsPage() {
 
   const handleDelete = async (id: any) => {
     try {
-      await api.delete(`/authors/me/manuscripts/${id}`).catch(() =>
-        api.delete(`/publish-requests/${id}`).catch(() =>
-          api.delete(`/authors/me/books/${id}`)
-        )
-      );
+      await api.delete(`/authors/me/books/${id}`);
       setItems((prev) => prev.filter((m) => m.id !== id));
       toast.success("Manuscript deleted successfully! 🗑️");
     } catch (err: any) {

@@ -20,12 +20,10 @@ export function RecentOrdersSection() {
       return;
     }
 
-    const userId = user._id || user.id;
-
     async function fetchOrders() {
       try {
-        const { data } = await api.get(`/users/${userId}/orders`).catch(() => api.get("/orders"));
-        const ordersData = data?.data || data || [];
+        const { data } = await api.get("/users/me/orders");
+        const ordersData = data?.data?.orders || data?.orders || data?.data || data || [];
         if (Array.isArray(ordersData)) {
           setOrders(ordersData.slice(0, 3)); // show top 3 recent orders
         }
