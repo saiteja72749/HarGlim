@@ -44,52 +44,30 @@ export default function AdminAnalyticsPage() {
   const fetchAnalytics = useCallback(async () => {
     setLoading(true);
     try {
-      const [dashRes, ordersRes, booksRes, usersRes, paymentsRes] = await Promise.allSettled([
-        api.get("/admin/analytics/dashboard", { params: { period } }),
-        api.get("/admin/orders", { params: { limit: 100 } }),
-        api.get("/books", { params: { limit: 100 } }),
-        api.get("/admin/users", { params: { limit: 100 } }),
-        api.get("/admin/operations/payments", { params: { limit: 100 } }),
-      ]);
-
-      const dashReport = dashRes.status === "fulfilled" ? (dashRes.value.data?.data?.report || dashRes.value.data?.data || dashRes.value.data) : null;
-      const ordersList = ordersRes.status === "fulfilled" ? (ordersRes.value.data?.data?.orders || ordersRes.value.data?.data || ordersRes.value.data || []) : [];
-      const booksList = booksRes.status === "fulfilled" ? (booksRes.value.data?.data?.books || booksRes.value.data?.data || booksRes.value.data || []) : [];
-      const usersList = usersRes.status === "fulfilled" ? (usersRes.value.data?.data?.users || usersRes.value.data?.data || usersRes.value.data || []) : [];
-      const paymentsList = paymentsRes.status === "fulfilled" ? (paymentsRes.value.data?.data?.items || paymentsRes.value.data?.items || (Array.isArray(paymentsRes.value.data?.data) ? paymentsRes.value.data.data : [])) : [];
-
-      const ordersArr = Array.isArray(ordersList) ? ordersList : [];
-      const booksArr = Array.isArray(booksList) ? booksList : [];
-      const usersArr = Array.isArray(usersList) ? usersList : [];
-      const paymentsArr = Array.isArray(paymentsList) ? paymentsList : [];
-
-      const verifiedPayments = paymentsArr.filter((p: any) => p.status === "VERIFIED" || p.status === "COMPLETED").length;
-      const pendingPayments = paymentsArr.filter((p: any) => p.status === "VERIFICATION_PENDING" || p.status === "PENDING").length;
-      const rejectedPayments = paymentsArr.filter((p: any) => p.status === "REJECTED" || p.status === "FAILED").length;
-
-      const totalRevenue = ordersArr
-        .filter((o: any) => o.status?.toUpperCase() !== "CANCELLED")
-        .reduce((sum: number, o: any) => sum + (o.totalPrice ?? o.totalAmount ?? o.amount ?? 0), 0);
-
-      const topBooks = [...booksArr]
-        .sort((a: any, b: any) => (b.totalSales || 0) - (a.totalSales || 0))
-        .slice(0, 5);
+      const { data } = await api.get("/admin/analytics/dashboard", {
+        params: { period },
+        cache: "no-store",
+      } as any);
+      const dashReport = data?.data?.report || data?.data || data || {};
+      const paymentStats = dashReport.paymentStats || dashReport.payments || {};
+      const inventoryStats = dashReport.inventoryStats || dashReport.inventory || {};
+      const topBooks = dashReport.topBooks || dashReport.topCatalogTitles || [];
 
       setAnalyticsData({
-        totalSales: dashReport?.totalSales ?? ordersArr.length,
-        totalRevenue: dashReport?.totalRevenue ?? totalRevenue,
-        activeUsers: usersArr.length,
-        totalBooks: booksArr.length,
-        topBooks,
+        totalSales: dashReport?.totalSales ?? dashReport?.orderCount ?? 0,
+        totalRevenue: dashReport?.totalRevenue ?? dashReport?.revenue ?? 0,
+        activeUsers: dashReport?.activeUsers ?? dashReport?.registeredUsers ?? 0,
+        totalBooks: dashReport?.totalBooks ?? dashReport?.catalogTitles ?? 0,
+        topBooks: Array.isArray(topBooks) ? topBooks.slice(0, 5) : [],
         revenueReport: dashReport,
         paymentStats: {
-          verified: verifiedPayments || ordersArr.filter((o: any) => o.isPaid).length,
-          pending: pendingPayments || ordersArr.filter((o: any) => !o.isPaid).length,
-          rejected: rejectedPayments,
+          verified: paymentStats.verified ?? paymentStats.approved ?? 0,
+          pending: paymentStats.pending ?? paymentStats.verificationPending ?? 0,
+          rejected: paymentStats.rejected ?? paymentStats.failed ?? 0,
         },
         inventoryStats: {
-          inStock: booksArr.filter((b: any) => (b.stock ?? 0) > 5).length,
-          lowStock: booksArr.filter((b: any) => (b.stock ?? 0) <= 5).length,
+          inStock: inventoryStats.inStock ?? inventoryStats.healthyStock ?? 0,
+          lowStock: inventoryStats.lowStock ?? inventoryStats.outOfStock ?? 0,
         },
       });
     } catch (err) {

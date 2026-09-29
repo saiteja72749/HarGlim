@@ -104,7 +104,7 @@ export default function AdminInventoryPage() {
             Monitor real-time book copies, checkout reservations, low-stock thresholds, and stock movement ledger.
           </p>
         </div>
-        <Link href="/admin/books">
+        <Link href="/admin/books" prefetch={false}>
           <Button variant="outline" className="text-xs font-bold gap-1.5 border-[#0F3D3E]/30 text-[#0F3D3E]">
             <BookOpen className="h-4 w-4" />
             <span>Manage Catalog Stock</span>
@@ -186,7 +186,7 @@ export default function AdminInventoryPage() {
                             )}
                           </TableCell>
                           <TableCell className="text-right">
-                            <Link href={`/admin/books`}>
+                            <Link href={`/admin/books`} prefetch={false}>
                               <Button size="sm" variant="outline" className="h-8 text-xs font-bold text-[#0F3D3E]">
                                 Restock Copies
                               </Button>

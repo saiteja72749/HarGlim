@@ -42,7 +42,7 @@ export default function AddBookPage() {
   const initialAuthor = searchParams.get("author") || "";
 
   const [loading, setLoading] = useState(false);
-  const [fetchingAuthors, setFetchingAuthors] = useState(true);
+  const [fetchingAuthors, setFetchingAuthors] = useState(false);
   const [fetchingCategories, setFetchingCategories] = useState(true);
 
   // New Category Creation Modal State
@@ -83,6 +83,7 @@ export default function AddBookPage() {
   // Author Selection State
   const [authorType, setAuthorType] = useState<AuthorType>("existing");
   const [authorsList, setAuthorsList] = useState<any[]>([]);
+  const [authorSearchQuery, setAuthorSearchQuery] = useState(initialAuthor);
   const [selectedAuthorId, setSelectedAuthorId] = useState<string>("");
   const [, setSelectedAuthorName] = useState<string>("");
 
@@ -127,84 +128,51 @@ export default function AddBookPage() {
     loadCategories();
   }, []);
 
-  // Fetch Existing Authors list from admin users and authors directory
+  // Search registered authors on demand.
   useEffect(() => {
-    const loadAuthors = async () => {
+    const query = authorSearchQuery.trim();
+    if (authorType !== "existing" || query.length < 2) {
+      setFetchingAuthors(false);
+      setAuthorsList([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
       setFetchingAuthors(true);
       try {
-        const [usersRes, authorsRes] = await Promise.allSettled([
-          api.get("/admin/users", { params: { limit: 100 } }),
-          api.get("/authors", { params: { limit: 100 } }),
-        ]);
-
-        const authorsMap = new Map<string, any>();
-
-        // 1. Process users from admin users API
-        if (usersRes.status === "fulfilled" && usersRes.value?.data) {
-          const uData = usersRes.value.data;
-          const userList = uData?.data?.users || (Array.isArray(uData?.data) ? uData.data : []) || (Array.isArray(uData) ? uData : []);
-          if (Array.isArray(userList)) {
-            userList.forEach((u: any) => {
-              const id = u._id || u.id;
-              if (id) {
-                authorsMap.set(String(id), {
-                  _id: String(id),
-                  name: u.name || u.fullName || u.email || "Registered User",
-                  email: u.email || "",
-                  role: u.role || "user",
-                });
-              }
-            });
-          }
+        const { data } = await api.get("/admin/users", {
+          params: { role: "author", search: query, limit: 20 },
+          signal: controller.signal,
+        } as any);
+        const userList =
+          data?.data?.users ||
+          data?.users ||
+          (Array.isArray(data?.data) ? data.data : []) ||
+          (Array.isArray(data) ? data : []);
+        const authors = Array.isArray(userList)
+          ? userList.map((u: any) => ({
+              _id: String(u._id || u.id),
+              name: u.name || u.fullName || u.email || "Registered Author",
+              email: u.email || "",
+              role: "author",
+            }))
+          : [];
+        setAuthorsList(authors);
+      } catch (err: any) {
+        if (err.name !== "CanceledError" && err.name !== "AbortError") {
+          console.warn("Failed to search authors:", err);
         }
-
-        // 2. Process authors from public authors directory
-        if (authorsRes.status === "fulfilled" && authorsRes.value?.data) {
-          const aData = authorsRes.value.data;
-          const aList = aData?.data?.authors || aData?.authors || (Array.isArray(aData?.data) ? aData.data : []) || (Array.isArray(aData) ? aData : []);
-          if (Array.isArray(aList)) {
-            aList.forEach((a: any) => {
-              const userId = a.user?._id || a.user?.id || a.userId || a._id || a.id;
-              const aName = a.name || a.user?.name || a.fullName;
-              if (userId && aName) {
-                if (authorsMap.has(String(userId))) {
-                  const existing = authorsMap.get(String(userId));
-                  authorsMap.set(String(userId), { ...existing, name: aName, role: "author" });
-                } else {
-                  authorsMap.set(String(userId), {
-                    _id: String(userId),
-                    name: aName,
-                    email: a.email || a.user?.email || "",
-                    role: "author",
-                  });
-                }
-              }
-            });
-          }
-        }
-
-        const combinedAuthors = Array.from(authorsMap.values());
-        // Sort so actual authors appear first, then alphabetical by name
-        combinedAuthors.sort((a, b) => {
-          const aIsAuthor = a.role === "author" ? 0 : 1;
-          const bIsAuthor = b.role === "author" ? 0 : 1;
-          if (aIsAuthor !== bIsAuthor) return aIsAuthor - bIsAuthor;
-          return (a.name || "").localeCompare(b.name || "");
-        });
-
-        setAuthorsList(combinedAuthors);
-        if (combinedAuthors.length > 0) {
-          setSelectedAuthorId(combinedAuthors[0]._id);
-          setSelectedAuthorName(combinedAuthors[0].name);
-        }
-      } catch (err) {
-        console.warn("Failed to load authors:", err);
       } finally {
         setFetchingAuthors(false);
       }
+    }, 400);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
     };
-    loadAuthors();
-  }, []);
+  }, [authorSearchQuery, authorType]);
 
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -337,21 +305,7 @@ export default function AddBookPage() {
               if (adminErr?.response?.status === 409) {
                 throw adminErr;
               }
-              // Fallback to /auth/register
-              const regRes = await api.post("/auth/register", {
-                name: targetName,
-                email: emailToUse,
-                password: tempPassword,
-              });
-              const regData = regRes?.data?.user || regRes?.data?.data?.user || regRes?.data?.data || regRes?.data;
-              newUserId = regData?._id || regData?.id;
-
-              if (newUserId) {
-                // Elevate role to "author"
-                await api.patch(`/admin/users/${newUserId}/role`, { role: "author" }).catch(() =>
-                  api.put(`/admin/users/${newUserId}/role`, { role: "author" }).catch(() => null)
-                );
-              }
+              throw adminErr;
             }
 
             if (!newUserId) {
@@ -372,7 +326,9 @@ export default function AddBookPage() {
           } catch (regErr: any) {
             console.warn("Author registration check/fallback:", regErr);
             // If already registered by email, look up existing user
-            const lookup = await api.get("/admin/users", { params: { search: emailToUse } }).catch(() => null);
+            const lookup = await api.get("/admin/users", {
+              params: { role: "author", search: emailToUse, limit: 20 },
+            }).catch(() => null);
             const foundUser = lookup?.data?.data?.users?.find(
               (u: any) => normalizeEmailForStorage(u.email || "").toLowerCase() === emailToUse.toLowerCase()
             );
@@ -480,7 +436,7 @@ export default function AddBookPage() {
       {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" asChild>
-          <Link href="/admin/books">
+          <Link href="/admin/books" prefetch={false}>
             <ArrowLeft className="h-5 w-5 text-[#0F3D3E]" />
           </Link>
         </Button>
@@ -588,19 +544,44 @@ export default function AddBookPage() {
                     Select Registered Author *
                   </Label>
                   <span className="text-[11px] text-[#5C6E6E]">
-                    {authorsList.length} authors / users available
+                    {authorSearchQuery.trim().length < 2 ? "Type 2+ characters" : `${authorsList.length} matches`}
                   </span>
                 </div>
+                <Input
+                  id="existingAuthorSearch"
+                  placeholder="Search author name or email..."
+                  value={authorSearchQuery}
+                  onChange={(e) => {
+                    setAuthorSearchQuery(e.target.value);
+                    setSelectedAuthorId("");
+                    setSelectedAuthorName("");
+                  }}
+                  className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl h-11 text-xs"
+                />
                 <Select
                   value={selectedAuthorId}
                   onValueChange={(val) => {
                     setSelectedAuthorId(val);
                     const found = authorsList.find((a) => (a._id || a.id) === val);
-                    if (found) setSelectedAuthorName(found.name || "");
+                    if (found) {
+                      setSelectedAuthorName(found.name || "");
+                      setAuthorSearchQuery(found.email || found.name || authorSearchQuery);
+                    }
                   }}
+                  disabled={authorSearchQuery.trim().length < 2 || fetchingAuthors || authorsList.length === 0}
                 >
                   <SelectTrigger className="w-full bg-[#F8F9F7] border-[#E2E6DF] rounded-xl h-11 text-xs font-serif font-bold">
-                    <SelectValue placeholder={fetchingAuthors ? "Loading authors..." : "Choose an author..."} />
+                    <SelectValue
+                      placeholder={
+                        authorSearchQuery.trim().length < 2
+                          ? "Search before choosing an author"
+                          : fetchingAuthors
+                          ? "Searching authors..."
+                          : authorsList.length === 0
+                          ? "No matching authors found"
+                          : "Choose an author..."
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent className="bg-white border-[#E2E6DF] max-h-72">
                     {authorsList.map((a) => (

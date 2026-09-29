@@ -154,54 +154,11 @@ export default function AdminUsersPage() {
         isActive: Boolean(createForm.isActive),
       };
 
-      let createdUser: any = null;
-
-      try {
-        const res = await api.post("/admin/users", payload);
-        createdUser =
-          res.data?.data?.user ||
-          res.data?.user ||
-          res.data?.data;
-      } catch (postErr: any) {
-        if (postErr.response?.status === 409) {
-          throw postErr;
-        }
-        // If 404 from backend (e.g. Render backend build hasn't finished deploying new route),
-        // gracefully fallback to /auth/register + role elevation
-        if (postErr.response?.status === 404) {
-          console.warn("POST /admin/users returned 404 on backend; falling back to register + role elevation.");
-          const regRes = await api.post("/auth/register", {
-            name: createForm.name.trim(),
-            email: createForm.email.trim(),
-            password: createForm.password,
-          });
-          const regUser = regRes.data?.user || regRes.data?.data?.user || regRes.data?.data;
-          const newId = regUser?._id || regUser?.id;
-
-          if (newId) {
-            if (createForm.role !== "reader") {
-              await api.patch(`/admin/users/${newId}/role`, { role: createForm.role }).catch(() =>
-                api.put(`/admin/users/${newId}/role`, { role: createForm.role }).catch(() => null)
-              );
-            }
-            if (!createForm.isActive) {
-              await api.patch(`/admin/users/${newId}/status`, { isActive: false, status: "suspended" }).catch(() =>
-                api.put(`/admin/users/${newId}/status`, { isActive: false, status: "suspended" }).catch(() => null)
-              );
-            }
-            createdUser = {
-              ...regUser,
-              role: createForm.role,
-              isActive: createForm.isActive,
-              status: createForm.isActive ? "Active" : "Suspended",
-            };
-          } else {
-            throw postErr;
-          }
-        } else {
-          throw postErr;
-        }
-      }
+      const res = await api.post("/admin/users", payload);
+      let createdUser =
+        res.data?.data?.user ||
+        res.data?.user ||
+        res.data?.data;
 
       if (!createdUser) {
         createdUser = {
@@ -214,7 +171,6 @@ export default function AdminUsersPage() {
         };
       }
 
-      setUsers((prev) => [createdUser, ...prev]);
       toast.success(`User "${createForm.name}" created successfully! 🎉`);
       setIsCreateModalOpen(false);
       setCreateForm({
@@ -224,6 +180,7 @@ export default function AdminUsersPage() {
         role: "reader",
         isActive: true,
       });
+      await fetchUsers();
     } catch (err: any) {
       console.error("Failed to create user:", err);
       if (err.response?.status === 409) {
@@ -293,15 +250,8 @@ export default function AdminUsersPage() {
     try {
       await api.delete(`/admin/users/${id}`);
 
-      // Backend performs soft delete setting isActive=false
-      setUsers((prev) =>
-        prev.map((u: any) =>
-          (u.id || u._id) === id
-            ? { ...u, status: "Suspended", isActive: false }
-            : u
-        )
-      );
       toast.success(`User "${name}" deactivated (soft deleted) successfully.`);
+      await fetchUsers();
     } catch (err: any) {
       console.error("Failed to delete user:", err);
       toast.error(err.response?.data?.message || "Failed to deactivate user.");
@@ -341,24 +291,9 @@ export default function AdminUsersPage() {
         )
       );
 
-      const formattedRole = editForm.role.charAt(0).toUpperCase() + editForm.role.slice(1);
-      setUsers((prev) =>
-        prev.map((u: any) =>
-          (u.id || u._id) === userId
-            ? {
-                ...u,
-                name: editForm.name,
-                email: editForm.email,
-                role: formattedRole,
-                status: editForm.status,
-                isActive: editForm.status === "Active",
-              }
-            : u
-        )
-      );
-
       toast.success(`User details for "${editForm.name}" updated successfully!`);
       setEditingUser(null);
+      await fetchUsers();
     } catch (err: any) {
       console.error("Failed to update user details:", err);
       toast.error(err.response?.data?.message || "Failed to update user details in backend.");
@@ -378,12 +313,8 @@ export default function AdminUsersPage() {
         api.put(`/admin/users/${id}`, { status: newStatus, isActive: !isSuspending })
       );
 
-      setUsers(
-        users.map((u: any) =>
-          (u.id || u._id) === id ? { ...u, status: newStatus, isActive: !isSuspending } : u
-        )
-      );
       toast.success(`User status updated to ${newStatus}`);
+      await fetchUsers();
     } catch (err) {
       console.error("Failed to update user status:", err);
       toast.error("Failed to update user status");

@@ -132,7 +132,7 @@ export default function AdminAuthorsPage() {
             Manage author accounts, manuscript entitlements, publication status, and royalty settlements.
           </p>
         </div>
-        <Link href="/admin/author-applications">
+        <Link href="/admin/author-applications" prefetch={false}>
           <Button variant="outline" className="text-xs font-bold gap-1.5 border-[#0F3D3E]/30 text-[#0F3D3E]">
             <span>Review Applications</span>
             <ChevronRight className="h-3.5 w-3.5" />

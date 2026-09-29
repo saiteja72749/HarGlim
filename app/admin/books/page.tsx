@@ -159,7 +159,7 @@ export default function AdminBooksPage() {
   const handleDelete = async (id: string) => {
     try {
       await api.delete(`/admin/books/${id}`);
-      setBooks(books.filter((b: any) => (b.id || b._id) !== id));
+      await fetchBooks();
       toast.success("Book deleted successfully! 🗑️");
     } catch (err: any) {
       console.error("Failed to delete book:", err);
@@ -195,7 +195,7 @@ export default function AdminBooksPage() {
           </p>
         </div>
         <Button asChild className="gap-2">
-          <Link href="/admin/books/new">
+          <Link href="/admin/books/new" prefetch={false}>
             <Plus className="h-4 w-4" />
             Add New Book
           </Link>
@@ -364,7 +364,7 @@ export default function AdminBooksPage() {
                             </Link>
                           </DropdownMenuItem>
                           <DropdownMenuItem asChild>
-                            <Link href={`/admin/books/${book.id || book._id}`}>
+                            <Link href={`/admin/books/${book.id || book._id}`} prefetch={false}>
                               <Edit className="mr-2 h-4 w-4" />
                               Edit
                             </Link>
@@ -376,11 +376,7 @@ export default function AdminBooksPage() {
                               try {
                                 await api
                                   .put(`/admin/books/${bId}`, { isFeatured: targetFeatured });
-                                setBooks((prev) =>
-                                  prev.map((b) =>
-                                    (b.id || b._id) === bId ? { ...b, isFeatured: targetFeatured } : b
-                                  )
-                                );
+                                await fetchBooks();
                                 toast.success(
                                   targetFeatured
                                     ? "Book added to Featured Releases! ⭐"

@@ -1,14 +1,14 @@
 {
   "backendBase": "https://harglimpublish-backend.onrender.com/api",
-  "generatedAt": "2026-09-24T18:02:48.008Z",
-  "totalCallSites": 258,
+  "generatedAt": "2026-09-29T14:38:00.555Z",
+  "totalCallSites": 237,
   "counts": {
-    "CONNECTED": 258,
+    "CONNECTED": 237,
     "NOT_CONNECTED": 0,
     "REVIEW_NEEDED": 0
   },
   "uniqueCounts": {
-    "CONNECTED": 143,
+    "CONNECTED": 141,
     "NOT_CONNECTED": 0,
     "REVIEW_NEEDED": 0
   },
@@ -92,61 +92,13 @@
       "normalized": "/admin/analytics/dashboard",
       "client": "api",
       "file": "app/admin/analytics/page.tsx",
-      "line": 48,
+      "line": 47,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:28085",
       "note": ""
     },
     {
       "index": 8,
-      "method": "GET",
-      "route": "/admin/orders",
-      "normalized": "/admin/orders",
-      "client": "api",
-      "file": "app/admin/analytics/page.tsx",
-      "line": 49,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:16386",
-      "note": ""
-    },
-    {
-      "index": 9,
-      "method": "GET",
-      "route": "/books",
-      "normalized": "/books",
-      "client": "api",
-      "file": "app/admin/analytics/page.tsx",
-      "line": 50,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:2486",
-      "note": ""
-    },
-    {
-      "index": 10,
-      "method": "GET",
-      "route": "/admin/users",
-      "normalized": "/admin/users",
-      "client": "api",
-      "file": "app/admin/analytics/page.tsx",
-      "line": 51,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:15014",
-      "note": ""
-    },
-    {
-      "index": 11,
-      "method": "GET",
-      "route": "/admin/operations/payments",
-      "normalized": "/admin/operations/payments",
-      "client": "api",
-      "file": "app/admin/analytics/page.tsx",
-      "line": 52,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:22182",
-      "note": ""
-    },
-    {
-      "index": 12,
       "method": "GET",
       "route": "/admin/author-access/purchases",
       "normalized": "/admin/author-access/purchases",
@@ -158,7 +110,7 @@
       "note": ""
     },
     {
-      "index": 13,
+      "index": 9,
       "method": "POST",
       "route": "/admin/author-access/entitlements/grant",
       "normalized": "/admin/author-access/entitlements/grant",
@@ -170,7 +122,7 @@
       "note": ""
     },
     {
-      "index": 14,
+      "index": 10,
       "method": "POST",
       "route": "/admin/author-access/entitlements/${userId}/revoke",
       "normalized": "/admin/author-access/entitlements/{param}/revoke",
@@ -182,7 +134,7 @@
       "note": ""
     },
     {
-      "index": 15,
+      "index": 11,
       "method": "POST",
       "route": "/admin/author-access/entitlements/${userId}/restore",
       "normalized": "/admin/author-access/entitlements/{param}/restore",
@@ -194,7 +146,7 @@
       "note": ""
     },
     {
-      "index": 16,
+      "index": 12,
       "method": "POST",
       "route": "/admin/author-access/plans",
       "normalized": "/admin/author-access/plans",
@@ -206,7 +158,7 @@
       "note": ""
     },
     {
-      "index": 17,
+      "index": 13,
       "method": "GET",
       "route": "/users/me/context",
       "normalized": "/users/me/context",
@@ -218,7 +170,7 @@
       "note": ""
     },
     {
-      "index": 18,
+      "index": 14,
       "method": "GET",
       "route": "/admin/author-access/entitlements",
       "normalized": "/admin/author-access/entitlements",
@@ -230,7 +182,7 @@
       "note": ""
     },
     {
-      "index": 19,
+      "index": 15,
       "method": "GET",
       "route": "/admin/author-access/plans",
       "normalized": "/admin/author-access/plans",
@@ -242,7 +194,7 @@
       "note": ""
     },
     {
-      "index": 20,
+      "index": 16,
       "method": "GET",
       "route": "/admin/author-applications",
       "normalized": "/admin/author-applications",
@@ -254,7 +206,7 @@
       "note": ""
     },
     {
-      "index": 21,
+      "index": 17,
       "method": "PUT",
       "route": "/admin/author-applications/${id}/status",
       "normalized": "/admin/author-applications/{param}/status",
@@ -266,7 +218,7 @@
       "note": ""
     },
     {
-      "index": 22,
+      "index": 18,
       "method": "PUT",
       "route": "/admin/author-applications/${id}/status",
       "normalized": "/admin/author-applications/{param}/status",
@@ -278,7 +230,7 @@
       "note": ""
     },
     {
-      "index": 23,
+      "index": 19,
       "method": "GET",
       "route": "/admin/users",
       "normalized": "/admin/users",
@@ -290,7 +242,7 @@
       "note": ""
     },
     {
-      "index": 24,
+      "index": 20,
       "method": "GET",
       "route": "/users",
       "normalized": "/users",
@@ -302,7 +254,7 @@
       "note": "Live probe: route exists and returns 401 without token."
     },
     {
-      "index": 25,
+      "index": 21,
       "method": "GET",
       "route": "/admin/authors/${aId}",
       "normalized": "/admin/authors/{param}",
@@ -314,331 +266,247 @@
       "note": ""
     },
     {
-      "index": 26,
-      "method": "GET",
-      "route": "/admin/categories",
-      "normalized": "/admin/categories",
-      "client": "api",
-      "file": "app/admin/books/[id]/page.tsx",
-      "line": 116,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:18433",
-      "note": ""
-    },
-    {
-      "index": 27,
-      "method": "GET",
-      "route": "/categories",
-      "normalized": "/categories",
-      "client": "api",
-      "file": "app/admin/books/[id]/page.tsx",
-      "line": 116,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:3968",
-      "note": ""
-    },
-    {
-      "index": 28,
+      "index": 22,
       "method": "GET",
       "route": "/admin/users",
       "normalized": "/admin/users",
       "client": "api",
       "file": "app/admin/books/[id]/page.tsx",
-      "line": 117,
+      "line": 126,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:15014",
       "note": ""
     },
     {
-      "index": 29,
-      "method": "GET",
-      "route": "/authors",
-      "normalized": "/authors",
-      "client": "api",
-      "file": "app/admin/books/[id]/page.tsx",
-      "line": 118,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:9845",
-      "note": ""
-    },
-    {
-      "index": 30,
+      "index": 23,
       "method": "GET",
       "route": "/admin/books/${bookId}",
       "normalized": "/admin/books/{param}",
       "client": "api",
       "file": "app/admin/books/[id]/page.tsx",
-      "line": 194,
+      "line": 168,
       "status": "CONNECTED",
       "source": "backend report/live probe",
       "note": "Backend update: all latest frontend audit endpoints are supported."
     },
     {
-      "index": 31,
+      "index": 24,
       "method": "GET",
       "route": "/books/${bookId}",
       "normalized": "/books/{param}",
       "client": "api",
       "file": "app/admin/books/[id]/page.tsx",
-      "line": 201,
+      "line": 175,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:2743",
       "note": ""
     },
     {
-      "index": 32,
+      "index": 25,
       "method": "GET",
       "route": "/books?limit=100",
       "normalized": "/books",
       "client": "api",
       "file": "app/admin/books/[id]/page.tsx",
-      "line": 209,
+      "line": 183,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:2486",
       "note": ""
     },
     {
-      "index": 33,
+      "index": 26,
       "method": "POST",
       "route": "/admin/users",
       "normalized": "/admin/users",
       "client": "api",
       "file": "app/admin/books/[id]/page.tsx",
-      "line": 382,
+      "line": 357,
       "status": "CONNECTED",
       "source": "backend report/live probe",
       "note": "Backend update: all latest frontend audit endpoints are supported."
     },
     {
-      "index": 34,
+      "index": 27,
       "method": "POST",
       "route": "/uploads/image",
       "normalized": "/uploads/image",
       "client": "api",
       "file": "app/admin/books/[id]/page.tsx",
-      "line": 424,
+      "line": 399,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:5729",
       "note": ""
     },
     {
-      "index": 35,
+      "index": 28,
       "method": "POST",
       "route": "/uploads/publishing-image",
       "normalized": "/uploads/publishing-image",
       "client": "api",
       "file": "app/admin/books/[id]/page.tsx",
-      "line": 426,
+      "line": 401,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:13537",
       "note": ""
     },
     {
-      "index": 36,
+      "index": 29,
       "method": "PUT",
       "route": "/admin/books/${bookId}",
       "normalized": "/admin/books/{param}",
       "client": "api",
       "file": "app/admin/books/[id]/page.tsx",
-      "line": 479,
+      "line": 454,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:18077",
       "note": ""
     },
     {
-      "index": 37,
+      "index": 30,
       "method": "POST",
       "route": "/admin/categories",
       "normalized": "/admin/categories",
       "client": "api",
       "file": "app/admin/books/[id]/page.tsx",
-      "line": 93,
+      "line": 95,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:18657",
       "note": ""
     },
     {
-      "index": 38,
+      "index": 31,
       "method": "GET",
       "route": "/admin/categories",
       "normalized": "/admin/categories",
       "client": "api",
       "file": "app/admin/books/new/page.tsx",
-      "line": 120,
+      "line": 121,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:18433",
       "note": ""
     },
     {
-      "index": 39,
+      "index": 32,
       "method": "GET",
       "route": "/categories",
       "normalized": "/categories",
       "client": "api",
       "file": "app/admin/books/new/page.tsx",
-      "line": 120,
+      "line": 121,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:3968",
       "note": ""
     },
     {
-      "index": 40,
+      "index": 33,
       "method": "GET",
       "route": "/admin/users",
       "normalized": "/admin/users",
       "client": "api",
       "file": "app/admin/books/new/page.tsx",
-      "line": 136,
+      "line": 144,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:15014",
       "note": ""
     },
     {
-      "index": 41,
-      "method": "GET",
-      "route": "/authors",
-      "normalized": "/authors",
-      "client": "api",
-      "file": "app/admin/books/new/page.tsx",
-      "line": 137,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:9845",
-      "note": ""
-    },
-    {
-      "index": 42,
+      "index": 34,
       "method": "PATCH",
       "route": "/admin/users/${finalAuthorId}/role",
       "normalized": "/admin/users/{param}/role",
       "client": "api",
       "file": "app/admin/books/new/page.tsx",
-      "line": 306,
+      "line": 274,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:15595",
       "note": ""
     },
     {
-      "index": 43,
+      "index": 35,
       "method": "PUT",
       "route": "/admin/users/${finalAuthorId}/role",
       "normalized": "/admin/users/{param}/role",
       "client": "api",
       "file": "app/admin/books/new/page.tsx",
-      "line": 307,
+      "line": 275,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:15795",
       "note": ""
     },
     {
-      "index": 44,
+      "index": 36,
       "method": "POST",
       "route": "/admin/users",
       "normalized": "/admin/users",
       "client": "api",
       "file": "app/admin/books/new/page.tsx",
-      "line": 323,
+      "line": 291,
       "status": "CONNECTED",
       "source": "backend report/live probe",
       "note": "Backend update: all latest frontend audit endpoints are supported."
     },
     {
-      "index": 45,
-      "method": "POST",
-      "route": "/auth/register",
-      "normalized": "/auth/register",
-      "client": "api",
-      "file": "app/admin/books/new/page.tsx",
-      "line": 341,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:404",
-      "note": ""
-    },
-    {
-      "index": 46,
-      "method": "PATCH",
-      "route": "/admin/users/${newUserId}/role",
-      "normalized": "/admin/users/{param}/role",
-      "client": "api",
-      "file": "app/admin/books/new/page.tsx",
-      "line": 351,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:15595",
-      "note": ""
-    },
-    {
-      "index": 47,
-      "method": "PUT",
-      "route": "/admin/users/${newUserId}/role",
-      "normalized": "/admin/users/{param}/role",
-      "client": "api",
-      "file": "app/admin/books/new/page.tsx",
-      "line": 352,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:15795",
-      "note": ""
-    },
-    {
-      "index": 48,
+      "index": 37,
       "method": "PUT",
       "route": "/admin/users/${newUserId}",
       "normalized": "/admin/users/{param}",
       "client": "api",
       "file": "app/admin/books/new/page.tsx",
-      "line": 363,
+      "line": 317,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:15385",
       "note": ""
     },
     {
-      "index": 49,
+      "index": 38,
       "method": "GET",
       "route": "/admin/users",
       "normalized": "/admin/users",
       "client": "api",
       "file": "app/admin/books/new/page.tsx",
-      "line": 375,
+      "line": 329,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:15014",
       "note": ""
     },
     {
-      "index": 50,
+      "index": 39,
       "method": "PATCH",
       "route": "/admin/users/${finalAuthorId}/role",
       "normalized": "/admin/users/{param}/role",
       "client": "api",
       "file": "app/admin/books/new/page.tsx",
-      "line": 382,
+      "line": 338,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:15595",
       "note": ""
     },
     {
-      "index": 51,
+      "index": 40,
       "method": "POST",
       "route": "/uploads/image",
       "normalized": "/uploads/image",
       "client": "api",
       "file": "app/admin/books/new/page.tsx",
-      "line": 409,
+      "line": 365,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:5729",
       "note": ""
     },
     {
-      "index": 52,
+      "index": 41,
       "method": "POST",
       "route": "/admin/books",
       "normalized": "/admin/books",
       "client": "api",
       "file": "app/admin/books/new/page.tsx",
-      "line": 460,
+      "line": 416,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:17887",
       "note": ""
     },
     {
-      "index": 53,
+      "index": 42,
       "method": "POST",
       "route": "/admin/categories",
       "normalized": "/admin/categories",
@@ -650,7 +518,7 @@
       "note": ""
     },
     {
-      "index": 54,
+      "index": 43,
       "method": "GET",
       "route": "/admin/books",
       "normalized": "/admin/books",
@@ -662,7 +530,7 @@
       "note": ""
     },
     {
-      "index": 55,
+      "index": 44,
       "method": "GET",
       "route": "/books",
       "normalized": "/books",
@@ -674,7 +542,7 @@
       "note": ""
     },
     {
-      "index": 56,
+      "index": 45,
       "method": "DELETE",
       "route": "/admin/books/${id}",
       "normalized": "/admin/books/{param}",
@@ -686,7 +554,7 @@
       "note": ""
     },
     {
-      "index": 57,
+      "index": 46,
       "method": "PUT",
       "route": "/admin/categories/${catId}",
       "normalized": "/admin/categories/{param}",
@@ -698,7 +566,7 @@
       "note": ""
     },
     {
-      "index": 58,
+      "index": 47,
       "method": "POST",
       "route": "/admin/categories",
       "normalized": "/admin/categories",
@@ -710,7 +578,7 @@
       "note": ""
     },
     {
-      "index": 59,
+      "index": 48,
       "method": "PATCH",
       "route": "/admin/categories/${catId}/status",
       "normalized": "/admin/categories/{param}/status",
@@ -722,7 +590,7 @@
       "note": ""
     },
     {
-      "index": 60,
+      "index": 49,
       "method": "PUT",
       "route": "/admin/categories/${catId}",
       "normalized": "/admin/categories/{param}",
@@ -734,7 +602,7 @@
       "note": ""
     },
     {
-      "index": 61,
+      "index": 50,
       "method": "DELETE",
       "route": "/admin/categories/${catId}",
       "normalized": "/admin/categories/{param}",
@@ -746,7 +614,7 @@
       "note": ""
     },
     {
-      "index": 62,
+      "index": 51,
       "method": "GET",
       "route": "/admin/categories",
       "normalized": "/admin/categories",
@@ -758,7 +626,7 @@
       "note": ""
     },
     {
-      "index": 63,
+      "index": 52,
       "method": "GET",
       "route": "/categories",
       "normalized": "/categories",
@@ -770,7 +638,7 @@
       "note": ""
     },
     {
-      "index": 64,
+      "index": 53,
       "method": "PATCH",
       "route": "/users/me",
       "normalized": "/users/me",
@@ -782,7 +650,7 @@
       "note": "Backend update: profile update alias is supported."
     },
     {
-      "index": 65,
+      "index": 54,
       "method": "POST",
       "route": "/uploads/image",
       "normalized": "/uploads/image",
@@ -794,7 +662,7 @@
       "note": ""
     },
     {
-      "index": 66,
+      "index": 55,
       "method": "POST",
       "route": "/authors/me/uploads/image",
       "normalized": "/authors/me/uploads/image",
@@ -806,7 +674,7 @@
       "note": ""
     },
     {
-      "index": 67,
+      "index": 56,
       "method": "GET",
       "route": "/admin/operations/inventory/low-stock",
       "normalized": "/admin/operations/inventory/low-stock",
@@ -818,7 +686,7 @@
       "note": ""
     },
     {
-      "index": 68,
+      "index": 57,
       "method": "GET",
       "route": "/books",
       "normalized": "/books",
@@ -830,7 +698,7 @@
       "note": ""
     },
     {
-      "index": 69,
+      "index": 58,
       "method": "GET",
       "route": "/admin/operations/inventory/reservations",
       "normalized": "/admin/operations/inventory/reservations",
@@ -842,7 +710,7 @@
       "note": ""
     },
     {
-      "index": 70,
+      "index": 59,
       "method": "GET",
       "route": "/admin/operations/ledger/timeline",
       "normalized": "/admin/operations/ledger/timeline",
@@ -854,7 +722,7 @@
       "note": ""
     },
     {
-      "index": 71,
+      "index": 60,
       "method": "GET",
       "route": "/admin/invoices/search",
       "normalized": "/admin/invoices/search",
@@ -866,7 +734,7 @@
       "note": ""
     },
     {
-      "index": 72,
+      "index": 61,
       "method": "GET",
       "route": "/admin/invoices",
       "normalized": "/admin/invoices",
@@ -878,7 +746,7 @@
       "note": ""
     },
     {
-      "index": 73,
+      "index": 62,
       "method": "GET",
       "route": "/admin/invoices",
       "normalized": "/admin/invoices",
@@ -890,7 +758,7 @@
       "note": ""
     },
     {
-      "index": 74,
+      "index": 63,
       "method": "GET",
       "route": "/admin/orders",
       "normalized": "/admin/orders",
@@ -902,7 +770,7 @@
       "note": ""
     },
     {
-      "index": 75,
+      "index": 64,
       "method": "GET",
       "route": "/admin/invoices/${invId}/download",
       "normalized": "/admin/invoices/{param}/download",
@@ -914,7 +782,7 @@
       "note": ""
     },
     {
-      "index": 76,
+      "index": 65,
       "method": "POST",
       "route": "/admin/publish-requests/${id}/approve",
       "normalized": "/admin/publish-requests/{param}/approve",
@@ -926,7 +794,7 @@
       "note": ""
     },
     {
-      "index": 77,
+      "index": 66,
       "method": "PUT",
       "route": "/admin/publish-requests/${id}/status",
       "normalized": "/admin/publish-requests/{param}/status",
@@ -938,7 +806,7 @@
       "note": ""
     },
     {
-      "index": 78,
+      "index": 67,
       "method": "POST",
       "route": "/admin/publish-requests/${id}/reject",
       "normalized": "/admin/publish-requests/{param}/reject",
@@ -950,7 +818,7 @@
       "note": ""
     },
     {
-      "index": 79,
+      "index": 68,
       "method": "PUT",
       "route": "/admin/publish-requests/${id}/status",
       "normalized": "/admin/publish-requests/{param}/status",
@@ -962,7 +830,7 @@
       "note": ""
     },
     {
-      "index": 80,
+      "index": 69,
       "method": "POST",
       "route": "/admin/publish-requests/${id}/request-changes",
       "normalized": "/admin/publish-requests/{param}/request-changes",
@@ -974,7 +842,7 @@
       "note": ""
     },
     {
-      "index": 81,
+      "index": 70,
       "method": "PUT",
       "route": "/admin/publish-requests/${id}/status",
       "normalized": "/admin/publish-requests/{param}/status",
@@ -986,7 +854,7 @@
       "note": ""
     },
     {
-      "index": 82,
+      "index": 71,
       "method": "PUT",
       "route": "/admin/publish-requests/${id}/status",
       "normalized": "/admin/publish-requests/{param}/status",
@@ -998,7 +866,7 @@
       "note": ""
     },
     {
-      "index": 83,
+      "index": 72,
       "method": "GET",
       "route": "/admin/publish-requests",
       "normalized": "/admin/publish-requests",
@@ -1010,7 +878,7 @@
       "note": ""
     },
     {
-      "index": 84,
+      "index": 73,
       "method": "GET",
       "route": "/admin/notifications/search",
       "normalized": "/admin/notifications/search",
@@ -1022,7 +890,7 @@
       "note": ""
     },
     {
-      "index": 85,
+      "index": 74,
       "method": "GET",
       "route": "/admin/notifications",
       "normalized": "/admin/notifications",
@@ -1034,7 +902,7 @@
       "note": ""
     },
     {
-      "index": 86,
+      "index": 75,
       "method": "GET",
       "route": "/admin/notifications",
       "normalized": "/admin/notifications",
@@ -1046,7 +914,7 @@
       "note": ""
     },
     {
-      "index": 87,
+      "index": 76,
       "method": "POST",
       "route": "/admin/notifications/${notificationId}/retry",
       "normalized": "/admin/notifications/{param}/retry",
@@ -1058,7 +926,7 @@
       "note": ""
     },
     {
-      "index": 88,
+      "index": 77,
       "method": "GET",
       "route": "/admin/orders",
       "normalized": "/admin/orders",
@@ -1070,7 +938,7 @@
       "note": ""
     },
     {
-      "index": 89,
+      "index": 78,
       "method": "POST",
       "route": "/admin/operations/payments/${paymentMongoId}/approve",
       "normalized": "/admin/operations/payments/{param}/approve",
@@ -1082,7 +950,7 @@
       "note": ""
     },
     {
-      "index": 90,
+      "index": 79,
       "method": "PUT",
       "route": "/admin/orders/${orderMongoId}/status",
       "normalized": "/admin/orders/{param}/status",
@@ -1094,7 +962,7 @@
       "note": ""
     },
     {
-      "index": 91,
+      "index": 80,
       "method": "POST",
       "route": "/admin/operations/payments/${paymentMongoId}/reject",
       "normalized": "/admin/operations/payments/{param}/reject",
@@ -1106,7 +974,7 @@
       "note": ""
     },
     {
-      "index": 92,
+      "index": 81,
       "method": "PUT",
       "route": "/admin/orders/${orderMongoId}/status",
       "normalized": "/admin/orders/{param}/status",
@@ -1118,7 +986,7 @@
       "note": ""
     },
     {
-      "index": 93,
+      "index": 82,
       "method": "PUT",
       "route": "/admin/orders/${orderMongoId}/status",
       "normalized": "/admin/orders/{param}/status",
@@ -1130,7 +998,7 @@
       "note": ""
     },
     {
-      "index": 94,
+      "index": 83,
       "method": "PUT",
       "route": "/admin/orders/${orderMongoId}/status",
       "normalized": "/admin/orders/{param}/status",
@@ -1142,79 +1010,19 @@
       "note": ""
     },
     {
-      "index": 95,
+      "index": 84,
       "method": "GET",
       "route": "/admin/dashboard",
       "normalized": "/admin/dashboard",
       "client": "api",
       "file": "app/admin/page.tsx",
-      "line": 32,
+      "line": 31,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:30069",
       "note": ""
     },
     {
-      "index": 96,
-      "method": "GET",
-      "route": "/admin/stats",
-      "normalized": "/admin/stats",
-      "client": "api",
-      "file": "app/admin/page.tsx",
-      "line": 32,
-      "status": "CONNECTED",
-      "source": "backend report/live probe",
-      "note": "Live probe: route exists and returns 401 without token."
-    },
-    {
-      "index": 97,
-      "method": "GET",
-      "route": "/admin/orders?limit=100",
-      "normalized": "/admin/orders",
-      "client": "api",
-      "file": "app/admin/page.tsx",
-      "line": 33,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:16386",
-      "note": ""
-    },
-    {
-      "index": 98,
-      "method": "GET",
-      "route": "/admin/author-applications",
-      "normalized": "/admin/author-applications",
-      "client": "api",
-      "file": "app/admin/page.tsx",
-      "line": 34,
-      "status": "CONNECTED",
-      "source": "HM_BACKEND_COMPLETE_HANDOVER (1).md:983",
-      "note": ""
-    },
-    {
-      "index": 99,
-      "method": "GET",
-      "route": "/books?limit=100",
-      "normalized": "/books",
-      "client": "api",
-      "file": "app/admin/page.tsx",
-      "line": 35,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:2486",
-      "note": ""
-    },
-    {
-      "index": 100,
-      "method": "GET",
-      "route": "/admin/operations/payments?status=VERIFICATION_PENDING",
-      "normalized": "/admin/operations/payments",
-      "client": "api",
-      "file": "app/admin/page.tsx",
-      "line": 36,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:22182",
-      "note": ""
-    },
-    {
-      "index": 101,
+      "index": 85,
       "method": "GET",
       "route": "/admin/reviews",
       "normalized": "/admin/reviews",
@@ -1226,7 +1034,7 @@
       "note": ""
     },
     {
-      "index": 102,
+      "index": 86,
       "method": "GET",
       "route": "/reviews",
       "normalized": "/reviews",
@@ -1238,7 +1046,7 @@
       "note": "Live probe: route exists and returns 401 without token."
     },
     {
-      "index": 103,
+      "index": 87,
       "method": "PATCH",
       "route": "/admin/reviews/${reviewId}/status",
       "normalized": "/admin/reviews/{param}/status",
@@ -1250,7 +1058,7 @@
       "note": ""
     },
     {
-      "index": 104,
+      "index": 88,
       "method": "DELETE",
       "route": "/admin/reviews/${reviewId}",
       "normalized": "/admin/reviews/{param}",
@@ -1262,7 +1070,7 @@
       "note": ""
     },
     {
-      "index": 105,
+      "index": 89,
       "method": "POST",
       "route": "/admin/royalty-settlements/preview",
       "normalized": "/admin/royalty-settlements/preview",
@@ -1274,7 +1082,7 @@
       "note": ""
     },
     {
-      "index": 106,
+      "index": 90,
       "method": "POST",
       "route": "/admin/royalty-settlements",
       "normalized": "/admin/royalty-settlements",
@@ -1286,7 +1094,7 @@
       "note": ""
     },
     {
-      "index": 107,
+      "index": 91,
       "method": "POST",
       "route": "/admin/royalty-settlements/${id}/approve",
       "normalized": "/admin/royalty-settlements/{param}/approve",
@@ -1298,7 +1106,7 @@
       "note": ""
     },
     {
-      "index": 108,
+      "index": 92,
       "method": "POST",
       "route": "/admin/royalty-settlements/${id}/mark-paid",
       "normalized": "/admin/royalty-settlements/{param}/mark-paid",
@@ -1310,7 +1118,7 @@
       "note": ""
     },
     {
-      "index": 109,
+      "index": 93,
       "method": "POST",
       "route": "/admin/royalty-settlements/${id}/cancel",
       "normalized": "/admin/royalty-settlements/{param}/cancel",
@@ -1322,7 +1130,7 @@
       "note": ""
     },
     {
-      "index": 110,
+      "index": 94,
       "method": "GET",
       "route": "/admin/royalty-settlements",
       "normalized": "/admin/royalty-settlements",
@@ -1334,7 +1142,7 @@
       "note": ""
     },
     {
-      "index": 111,
+      "index": 95,
       "method": "GET",
       "route": "/authors",
       "normalized": "/authors",
@@ -1346,7 +1154,7 @@
       "note": ""
     },
     {
-      "index": 112,
+      "index": 96,
       "method": "GET",
       "route": "/admin/users",
       "normalized": "/admin/users",
@@ -1358,7 +1166,7 @@
       "note": ""
     },
     {
-      "index": 113,
+      "index": 97,
       "method": "POST",
       "route": "/admin/shipments/${shipmentId}/assign-courier",
       "normalized": "/admin/shipments/{param}/assign-courier",
@@ -1370,7 +1178,7 @@
       "note": ""
     },
     {
-      "index": 114,
+      "index": 98,
       "method": "POST",
       "route": "/admin/shipments/${shipmentId}/update-status",
       "normalized": "/admin/shipments/{param}/update-status",
@@ -1382,7 +1190,7 @@
       "note": ""
     },
     {
-      "index": 115,
+      "index": 99,
       "method": "POST",
       "route": "/admin/shipments/${sId}/cancel",
       "normalized": "/admin/shipments/{param}/cancel",
@@ -1394,7 +1202,7 @@
       "note": ""
     },
     {
-      "index": 116,
+      "index": 100,
       "method": "GET",
       "route": "/admin/shipments/search",
       "normalized": "/admin/shipments/search",
@@ -1406,7 +1214,7 @@
       "note": ""
     },
     {
-      "index": 117,
+      "index": 101,
       "method": "GET",
       "route": "/admin/shipments",
       "normalized": "/admin/shipments",
@@ -1418,7 +1226,7 @@
       "note": ""
     },
     {
-      "index": 118,
+      "index": 102,
       "method": "GET",
       "route": "/admin/shipments",
       "normalized": "/admin/shipments",
@@ -1430,163 +1238,103 @@
       "note": ""
     },
     {
-      "index": 119,
+      "index": 103,
       "method": "POST",
       "route": "/admin/users",
       "normalized": "/admin/users",
       "client": "api",
       "file": "app/admin/users/page.tsx",
-      "line": 160,
+      "line": 157,
       "status": "CONNECTED",
       "source": "backend report/live probe",
       "note": "Backend update: all latest frontend audit endpoints are supported."
     },
     {
-      "index": 120,
-      "method": "POST",
-      "route": "/auth/register",
-      "normalized": "/auth/register",
-      "client": "api",
-      "file": "app/admin/users/page.tsx",
-      "line": 173,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:404",
-      "note": ""
-    },
-    {
-      "index": 121,
-      "method": "PATCH",
-      "route": "/admin/users/${newId}/role",
-      "normalized": "/admin/users/{param}/role",
-      "client": "api",
-      "file": "app/admin/users/page.tsx",
-      "line": 183,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:15595",
-      "note": ""
-    },
-    {
-      "index": 122,
-      "method": "PUT",
-      "route": "/admin/users/${newId}/role",
-      "normalized": "/admin/users/{param}/role",
-      "client": "api",
-      "file": "app/admin/users/page.tsx",
-      "line": 184,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:15795",
-      "note": ""
-    },
-    {
-      "index": 123,
-      "method": "PATCH",
-      "route": "/admin/users/${newId}/status",
-      "normalized": "/admin/users/{param}/status",
-      "client": "api",
-      "file": "app/admin/users/page.tsx",
-      "line": 188,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:15997",
-      "note": ""
-    },
-    {
-      "index": 124,
-      "method": "PUT",
-      "route": "/admin/users/${newId}/status",
-      "normalized": "/admin/users/{param}/status",
-      "client": "api",
-      "file": "app/admin/users/page.tsx",
-      "line": 189,
-      "status": "CONNECTED",
-      "source": "backend report/live probe",
-      "note": "Backend update: all latest frontend audit endpoints are supported."
-    },
-    {
-      "index": 125,
+      "index": 104,
       "method": "POST",
       "route": "/admin/users/${targetUserId}/reset-password",
       "normalized": "/admin/users/{param}/reset-password",
       "client": "api",
       "file": "app/admin/users/page.tsx",
-      "line": 265,
+      "line": 222,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:16191",
       "note": ""
     },
     {
-      "index": 126,
+      "index": 105,
       "method": "DELETE",
       "route": "/admin/users/${id}",
       "normalized": "/admin/users/{param}",
       "client": "api",
       "file": "app/admin/users/page.tsx",
-      "line": 294,
+      "line": 251,
       "status": "CONNECTED",
       "source": "backend report/live probe",
       "note": "Backend update: all latest frontend audit endpoints are supported."
     },
     {
-      "index": 127,
+      "index": 106,
       "method": "PUT",
       "route": "/admin/users/${userId}",
       "normalized": "/admin/users/{param}",
       "client": "api",
       "file": "app/admin/users/page.tsx",
-      "line": 338,
+      "line": 288,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:15385",
       "note": ""
     },
     {
-      "index": 128,
+      "index": 107,
       "method": "PATCH",
       "route": "/admin/users/${userId}",
       "normalized": "/admin/users/{param}",
       "client": "api",
       "file": "app/admin/users/page.tsx",
-      "line": 339,
+      "line": 289,
       "status": "CONNECTED",
       "source": "backend report/live probe",
       "note": "Backend update: all latest frontend audit endpoints are supported."
     },
     {
-      "index": 129,
+      "index": 108,
       "method": "PUT",
       "route": "/users/${userId}",
       "normalized": "/users/{param}",
       "client": "api",
       "file": "app/admin/users/page.tsx",
-      "line": 340,
+      "line": 290,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:6404",
       "note": ""
     },
     {
-      "index": 130,
+      "index": 109,
       "method": "PUT",
       "route": "/admin/users/${id}/status",
       "normalized": "/admin/users/{param}/status",
       "client": "api",
       "file": "app/admin/users/page.tsx",
-      "line": 374,
+      "line": 309,
       "status": "CONNECTED",
       "source": "backend report/live probe",
       "note": "Backend update: all latest frontend audit endpoints are supported."
     },
     {
-      "index": 131,
+      "index": 110,
       "method": "PUT",
       "route": "/admin/users/${id}",
       "normalized": "/admin/users/{param}",
       "client": "api",
       "file": "app/admin/users/page.tsx",
-      "line": 378,
+      "line": 313,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:15385",
       "note": ""
     },
     {
-      "index": 132,
+      "index": 111,
       "method": "GET",
       "route": "/admin/users",
       "normalized": "/admin/users",
@@ -1598,7 +1346,7 @@
       "note": ""
     },
     {
-      "index": 133,
+      "index": 112,
       "method": "GET",
       "route": "/users",
       "normalized": "/users",
@@ -1610,7 +1358,7 @@
       "note": "Live probe: route exists and returns 401 without token."
     },
     {
-      "index": 134,
+      "index": 113,
       "method": "GET",
       "route": "/authors/me/analytics",
       "normalized": "/authors/me/analytics",
@@ -1622,7 +1370,7 @@
       "note": ""
     },
     {
-      "index": 135,
+      "index": 114,
       "method": "GET",
       "route": "/authors/me/books/performance",
       "normalized": "/authors/me/books/performance",
@@ -1634,7 +1382,7 @@
       "note": ""
     },
     {
-      "index": 136,
+      "index": 115,
       "method": "GET",
       "route": "/authors/me/royalties",
       "normalized": "/authors/me/royalties",
@@ -1646,7 +1394,7 @@
       "note": ""
     },
     {
-      "index": 137,
+      "index": 116,
       "method": "GET",
       "route": "/authors/me/books",
       "normalized": "/authors/me/books",
@@ -1658,7 +1406,7 @@
       "note": ""
     },
     {
-      "index": 138,
+      "index": 117,
       "method": "GET",
       "route": "/books",
       "normalized": "/books",
@@ -1670,7 +1418,7 @@
       "note": ""
     },
     {
-      "index": 139,
+      "index": 118,
       "method": "POST",
       "route": "/authors/me/uploads/document",
       "normalized": "/authors/me/uploads/document",
@@ -1682,7 +1430,7 @@
       "note": ""
     },
     {
-      "index": 140,
+      "index": 119,
       "method": "POST",
       "route": "/publish-requests",
       "normalized": "/publish-requests",
@@ -1694,7 +1442,7 @@
       "note": ""
     },
     {
-      "index": 141,
+      "index": 120,
       "method": "GET",
       "route": "/publish-packages",
       "normalized": "/publish-packages",
@@ -1706,7 +1454,7 @@
       "note": ""
     },
     {
-      "index": 142,
+      "index": 121,
       "method": "DELETE",
       "route": "/authors/me/books/${id}",
       "normalized": "/authors/me/books/{param}",
@@ -1718,7 +1466,7 @@
       "note": ""
     },
     {
-      "index": 143,
+      "index": 122,
       "method": "GET",
       "route": "/authors/me/books",
       "normalized": "/authors/me/books",
@@ -1730,7 +1478,7 @@
       "note": ""
     },
     {
-      "index": 144,
+      "index": 123,
       "method": "GET",
       "route": "/authors/me/dashboard",
       "normalized": "/authors/me/dashboard",
@@ -1742,7 +1490,7 @@
       "note": ""
     },
     {
-      "index": 145,
+      "index": 124,
       "method": "GET",
       "route": "/authors/${authorId}/stats",
       "normalized": "/authors/{param}/stats",
@@ -1754,7 +1502,7 @@
       "note": ""
     },
     {
-      "index": 146,
+      "index": 125,
       "method": "GET",
       "route": "/authors/me/royalties",
       "normalized": "/authors/me/royalties",
@@ -1766,7 +1514,7 @@
       "note": ""
     },
     {
-      "index": 147,
+      "index": 126,
       "method": "GET",
       "route": "/authors/me/royalty-settlements",
       "normalized": "/authors/me/royalty-settlements",
@@ -1778,7 +1526,7 @@
       "note": ""
     },
     {
-      "index": 148,
+      "index": 127,
       "method": "POST",
       "route": "/uploads/publishing-image",
       "normalized": "/uploads/publishing-image",
@@ -1790,7 +1538,7 @@
       "note": ""
     },
     {
-      "index": 149,
+      "index": 128,
       "method": "POST",
       "route": "/authors/me/uploads/image",
       "normalized": "/authors/me/uploads/image",
@@ -1802,7 +1550,7 @@
       "note": ""
     },
     {
-      "index": 150,
+      "index": 129,
       "method": "PUT",
       "route": "/users/${authorId}",
       "normalized": "/users/{param}",
@@ -1814,7 +1562,7 @@
       "note": ""
     },
     {
-      "index": 151,
+      "index": 130,
       "method": "PUT",
       "route": "/authors/${authorId}",
       "normalized": "/authors/{param}",
@@ -1826,7 +1574,7 @@
       "note": "Backend update: all latest frontend audit endpoints are supported."
     },
     {
-      "index": 152,
+      "index": 131,
       "method": "GET",
       "route": "/authors/${authorId}",
       "normalized": "/authors/{param}",
@@ -1838,7 +1586,7 @@
       "note": ""
     },
     {
-      "index": 153,
+      "index": 132,
       "method": "GET",
       "route": "${API_URL}/authors/${id}",
       "normalized": "/authors/{param}",
@@ -1850,7 +1598,7 @@
       "note": ""
     },
     {
-      "index": 154,
+      "index": 133,
       "method": "GET",
       "route": "/users/${params.id}",
       "normalized": "/users/{param}",
@@ -1862,7 +1610,7 @@
       "note": "Backend update: all latest frontend audit endpoints are supported."
     },
     {
-      "index": 155,
+      "index": 134,
       "method": "GET",
       "route": "/authors",
       "normalized": "/authors",
@@ -1874,7 +1622,7 @@
       "note": ""
     },
     {
-      "index": 156,
+      "index": 135,
       "method": "GET",
       "route": "/authors/${params.id}/books",
       "normalized": "/authors/{param}/books",
@@ -1886,7 +1634,7 @@
       "note": ""
     },
     {
-      "index": 157,
+      "index": 136,
       "method": "GET",
       "route": "/books",
       "normalized": "/books",
@@ -1898,7 +1646,7 @@
       "note": ""
     },
     {
-      "index": 158,
+      "index": 137,
       "method": "GET",
       "route": "/authors",
       "normalized": "/authors",
@@ -1910,7 +1658,7 @@
       "note": ""
     },
     {
-      "index": 159,
+      "index": 138,
       "method": "GET",
       "route": "${API_URL}/books/${slug}",
       "normalized": "/books/{param}",
@@ -1922,7 +1670,7 @@
       "note": ""
     },
     {
-      "index": 160,
+      "index": 139,
       "method": "PUT",
       "route": "/books/${params.slug}/reviews/${editingReviewId}",
       "normalized": "/books/{param}/reviews/{param}",
@@ -1934,7 +1682,7 @@
       "note": ""
     },
     {
-      "index": 161,
+      "index": 140,
       "method": "POST",
       "route": "/books/${params.slug}/reviews",
       "normalized": "/books/{param}/reviews",
@@ -1946,7 +1694,7 @@
       "note": ""
     },
     {
-      "index": 162,
+      "index": 141,
       "method": "DELETE",
       "route": "/books/${params.slug}/reviews/${reviewId}",
       "normalized": "/books/{param}/reviews/{param}",
@@ -1958,7 +1706,7 @@
       "note": ""
     },
     {
-      "index": 163,
+      "index": 142,
       "method": "GET",
       "route": "/books/${params.slug}",
       "normalized": "/books/{param}",
@@ -1970,7 +1718,7 @@
       "note": ""
     },
     {
-      "index": 164,
+      "index": 143,
       "method": "GET",
       "route": "/books/${params.slug}/related?limit=4",
       "normalized": "/books/{param}/related",
@@ -1982,7 +1730,7 @@
       "note": ""
     },
     {
-      "index": 165,
+      "index": 144,
       "method": "GET",
       "route": "/books/${params.slug}/reviews?page=1&limit=20",
       "normalized": "/books/{param}/reviews",
@@ -1994,7 +1742,7 @@
       "note": ""
     },
     {
-      "index": 166,
+      "index": 145,
       "method": "GET",
       "route": "/users/me/orders",
       "normalized": "/users/me/orders",
@@ -2006,7 +1754,7 @@
       "note": "Backend report: supported reader order route."
     },
     {
-      "index": 167,
+      "index": 146,
       "method": "GET",
       "route": "/books/${params.slug}/reviews?page=1&limit=20",
       "normalized": "/books/{param}/reviews",
@@ -2018,7 +1766,7 @@
       "note": ""
     },
     {
-      "index": 168,
+      "index": 147,
       "method": "GET",
       "route": "/books",
       "normalized": "/books",
@@ -2030,7 +1778,7 @@
       "note": ""
     },
     {
-      "index": 169,
+      "index": 148,
       "method": "GET",
       "route": "${API_URL}/categories/${slug}",
       "normalized": "/categories/{param}",
@@ -2042,7 +1790,7 @@
       "note": ""
     },
     {
-      "index": 170,
+      "index": 149,
       "method": "GET",
       "route": "/categories/${slug}",
       "normalized": "/categories/{param}",
@@ -2054,7 +1802,7 @@
       "note": ""
     },
     {
-      "index": 171,
+      "index": 150,
       "method": "GET",
       "route": "/categories/${slug}/books",
       "normalized": "/categories/{param}/books",
@@ -2066,7 +1814,7 @@
       "note": ""
     },
     {
-      "index": 172,
+      "index": 151,
       "method": "GET",
       "route": "/books",
       "normalized": "/books",
@@ -2078,7 +1826,7 @@
       "note": ""
     },
     {
-      "index": 173,
+      "index": 152,
       "method": "GET",
       "route": "/categories",
       "normalized": "/categories",
@@ -2090,7 +1838,7 @@
       "note": ""
     },
     {
-      "index": 174,
+      "index": 153,
       "method": "POST",
       "route": "/orders",
       "normalized": "/orders",
@@ -2102,7 +1850,7 @@
       "note": ""
     },
     {
-      "index": 175,
+      "index": 154,
       "method": "PUT",
       "route": "/orders/${currentOrderId}/verify-payment",
       "normalized": "/orders/{param}/verify-payment",
@@ -2114,7 +1862,7 @@
       "note": ""
     },
     {
-      "index": 176,
+      "index": 155,
       "method": "POST",
       "route": "/contact",
       "normalized": "/contact",
@@ -2126,7 +1874,7 @@
       "note": "Backend update: contact form API is supported."
     },
     {
-      "index": 177,
+      "index": 156,
       "method": "POST",
       "route": "/contact-requests",
       "normalized": "/contact-requests",
@@ -2138,7 +1886,7 @@
       "note": "Backend update: contact request alias is supported."
     },
     {
-      "index": 178,
+      "index": 157,
       "method": "POST",
       "route": "/author-applications",
       "normalized": "/author-applications",
@@ -2150,7 +1898,7 @@
       "note": ""
     },
     {
-      "index": 179,
+      "index": 158,
       "method": "GET",
       "route": "/users/me/author-application",
       "normalized": "/users/me/author-application",
@@ -2162,7 +1910,7 @@
       "note": ""
     },
     {
-      "index": 180,
+      "index": 159,
       "method": "GET",
       "route": "/author-applications/me",
       "normalized": "/author-applications/me",
@@ -2174,7 +1922,7 @@
       "note": "Backend update: author application status alias is supported."
     },
     {
-      "index": 181,
+      "index": 160,
       "method": "GET",
       "route": "/users/${userId}/library",
       "normalized": "/users/{param}/library",
@@ -2186,7 +1934,7 @@
       "note": ""
     },
     {
-      "index": 182,
+      "index": 161,
       "method": "GET",
       "route": "/users/${userId}/orders",
       "normalized": "/users/{param}/orders",
@@ -2198,7 +1946,7 @@
       "note": ""
     },
     {
-      "index": 183,
+      "index": 162,
       "method": "GET",
       "route": "/users/${userId}/shipments",
       "normalized": "/users/{param}/shipments",
@@ -2210,7 +1958,7 @@
       "note": ""
     },
     {
-      "index": 184,
+      "index": 163,
       "method": "PUT",
       "route": "/orders/${orderId}/verify-payment",
       "normalized": "/orders/{param}/verify-payment",
@@ -2222,7 +1970,7 @@
       "note": ""
     },
     {
-      "index": 185,
+      "index": 164,
       "method": "GET",
       "route": "/users/${userId}/invoices",
       "normalized": "/users/{param}/invoices",
@@ -2234,7 +1982,7 @@
       "note": ""
     },
     {
-      "index": 186,
+      "index": 165,
       "method": "GET",
       "route": "/users/${userId}/invoices/${invoiceId}/download",
       "normalized": "/users/{param}/invoices/{param}/download",
@@ -2246,7 +1994,7 @@
       "note": ""
     },
     {
-      "index": 187,
+      "index": 166,
       "method": "GET",
       "route": "/users/${userId}/orders?limit=3&sort=-createdAt",
       "normalized": "/users/{param}/orders",
@@ -2258,7 +2006,7 @@
       "note": ""
     },
     {
-      "index": 188,
+      "index": 167,
       "method": "GET",
       "route": "/books?limit=4",
       "normalized": "/books",
@@ -2270,7 +2018,7 @@
       "note": ""
     },
     {
-      "index": 189,
+      "index": 168,
       "method": "GET",
       "route": "/users/${userId}/payments",
       "normalized": "/users/{param}/payments",
@@ -2282,7 +2030,7 @@
       "note": ""
     },
     {
-      "index": 190,
+      "index": 169,
       "method": "GET",
       "route": "/users/${userId}/orders",
       "normalized": "/users/{param}/orders",
@@ -2294,7 +2042,7 @@
       "note": ""
     },
     {
-      "index": 191,
+      "index": 170,
       "method": "GET",
       "route": "/users/${userId}/invoices",
       "normalized": "/users/{param}/invoices",
@@ -2306,7 +2054,7 @@
       "note": ""
     },
     {
-      "index": 192,
+      "index": 171,
       "method": "GET",
       "route": "/users/${userId}/invoices/${invoiceId}/download",
       "normalized": "/users/{param}/invoices/{param}/download",
@@ -2318,7 +2066,7 @@
       "note": ""
     },
     {
-      "index": 193,
+      "index": 172,
       "method": "PUT",
       "route": "/users/me",
       "normalized": "/users/me",
@@ -2330,7 +2078,7 @@
       "note": "Backend update: profile update alias is supported."
     },
     {
-      "index": 194,
+      "index": 173,
       "method": "PUT",
       "route": "/auth/me",
       "normalized": "/auth/me",
@@ -2342,7 +2090,7 @@
       "note": "Backend update: profile update alias is supported."
     },
     {
-      "index": 195,
+      "index": 174,
       "method": "GET",
       "route": "/auth/me",
       "normalized": "/auth/me",
@@ -2354,7 +2102,7 @@
       "note": ""
     },
     {
-      "index": 196,
+      "index": 175,
       "method": "GET",
       "route": "/users/me",
       "normalized": "/users/me",
@@ -2366,7 +2114,7 @@
       "note": ""
     },
     {
-      "index": 197,
+      "index": 176,
       "method": "GET",
       "route": "/users/${userId}/orders",
       "normalized": "/users/{param}/orders",
@@ -2378,7 +2126,7 @@
       "note": ""
     },
     {
-      "index": 198,
+      "index": 177,
       "method": "GET",
       "route": "/authors/me/dashboard-access",
       "normalized": "/authors/me/dashboard-access",
@@ -2390,7 +2138,7 @@
       "note": ""
     },
     {
-      "index": 199,
+      "index": 178,
       "method": "POST",
       "route": "/authors/me/dashboard-access/purchase",
       "normalized": "/authors/me/dashboard-access/purchase",
@@ -2402,7 +2150,7 @@
       "note": ""
     },
     {
-      "index": 200,
+      "index": 179,
       "method": "PUT",
       "route": "/authors/me/dashboard-access/purchases/${purchaseId}/verify-payment",
       "normalized": "/authors/me/dashboard-access/purchases/{param}/verify-payment",
@@ -2414,7 +2162,7 @@
       "note": ""
     },
     {
-      "index": 201,
+      "index": 180,
       "method": "GET",
       "route": "/users/${userId}/wishlist",
       "normalized": "/users/{param}/wishlist",
@@ -2426,7 +2174,7 @@
       "note": ""
     },
     {
-      "index": 202,
+      "index": 181,
       "method": "DELETE",
       "route": "/users/${userId}/wishlist/${id}",
       "normalized": "/users/{param}/wishlist/{param}",
@@ -2438,7 +2186,7 @@
       "note": ""
     },
     {
-      "index": 203,
+      "index": 182,
       "method": "GET",
       "route": "/content",
       "normalized": "/content",
@@ -2450,7 +2198,7 @@
       "note": ""
     },
     {
-      "index": 204,
+      "index": 183,
       "method": "GET",
       "route": "/books?featured=true&limit=8",
       "normalized": "/books",
@@ -2462,7 +2210,7 @@
       "note": ""
     },
     {
-      "index": 205,
+      "index": 184,
       "method": "GET",
       "route": "/books?isFeatured=true&limit=8",
       "normalized": "/books",
@@ -2474,7 +2222,7 @@
       "note": ""
     },
     {
-      "index": 206,
+      "index": 185,
       "method": "GET",
       "route": "/books?bestseller=true&limit=4",
       "normalized": "/books",
@@ -2486,7 +2234,7 @@
       "note": ""
     },
     {
-      "index": 207,
+      "index": 186,
       "method": "GET",
       "route": "/books?sort=rating&limit=4",
       "normalized": "/books",
@@ -2498,7 +2246,7 @@
       "note": ""
     },
     {
-      "index": 208,
+      "index": 187,
       "method": "GET",
       "route": "/categories?featured=true&limit=6",
       "normalized": "/categories",
@@ -2510,7 +2258,7 @@
       "note": ""
     },
     {
-      "index": 209,
+      "index": 188,
       "method": "GET",
       "route": "/categories?limit=6",
       "normalized": "/categories",
@@ -2522,7 +2270,7 @@
       "note": ""
     },
     {
-      "index": 210,
+      "index": 189,
       "method": "GET",
       "route": "/authors?limit=6",
       "normalized": "/authors",
@@ -2534,7 +2282,7 @@
       "note": ""
     },
     {
-      "index": 211,
+      "index": 190,
       "method": "GET",
       "route": "/books?limit=1",
       "normalized": "/books",
@@ -2546,7 +2294,7 @@
       "note": ""
     },
     {
-      "index": 212,
+      "index": 191,
       "method": "GET",
       "route": "/authors?limit=1",
       "normalized": "/authors",
@@ -2558,7 +2306,7 @@
       "note": ""
     },
     {
-      "index": 213,
+      "index": 192,
       "method": "GET",
       "route": "/authors?limit=1",
       "normalized": "/authors",
@@ -2570,7 +2318,7 @@
       "note": ""
     },
     {
-      "index": 214,
+      "index": 193,
       "method": "GET",
       "route": "/publish-packages",
       "normalized": "/publish-packages",
@@ -2582,7 +2330,7 @@
       "note": ""
     },
     {
-      "index": 215,
+      "index": 194,
       "method": "GET",
       "route": "/search",
       "normalized": "/search",
@@ -2594,7 +2342,7 @@
       "note": ""
     },
     {
-      "index": 216,
+      "index": 195,
       "method": "GET",
       "route": "${API_URL}/books?limit=1000",
       "normalized": "/books",
@@ -2606,7 +2354,7 @@
       "note": ""
     },
     {
-      "index": 217,
+      "index": 196,
       "method": "GET",
       "route": "${API_URL}/categories?limit=100",
       "normalized": "/categories",
@@ -2618,7 +2366,7 @@
       "note": ""
     },
     {
-      "index": 218,
+      "index": 197,
       "method": "GET",
       "route": "${API_URL}/authors?limit=1000",
       "normalized": "/authors",
@@ -2630,7 +2378,7 @@
       "note": ""
     },
     {
-      "index": 219,
+      "index": 198,
       "method": "POST",
       "route": "/auth/google",
       "normalized": "/auth/google",
@@ -2642,7 +2390,7 @@
       "note": ""
     },
     {
-      "index": 220,
+      "index": 199,
       "method": "POST",
       "route": "/users/${user._id || user.id}/wishlist",
       "normalized": "/users/{param}/wishlist",
@@ -2654,7 +2402,7 @@
       "note": ""
     },
     {
-      "index": 221,
+      "index": 200,
       "method": "GET",
       "route": "/users/me/orders",
       "normalized": "/users/me/orders",
@@ -2666,7 +2414,7 @@
       "note": "Backend report: supported reader order route."
     },
     {
-      "index": 222,
+      "index": 201,
       "method": "GET",
       "route": "/content",
       "normalized": "/content",
@@ -2678,7 +2426,7 @@
       "note": ""
     },
     {
-      "index": 223,
+      "index": 202,
       "method": "PUT",
       "route": "/admin/content",
       "normalized": "/admin/content",
@@ -2690,7 +2438,7 @@
       "note": ""
     },
     {
-      "index": 224,
+      "index": 203,
       "method": "POST",
       "route": "/admin/operations/payments/${paymentId}/cancel",
       "normalized": "/admin/operations/payments/{param}/cancel",
@@ -2702,7 +2450,7 @@
       "note": ""
     },
     {
-      "index": 225,
+      "index": 204,
       "method": "POST",
       "route": "/admin/operations/payments/${paymentId}/expire",
       "normalized": "/admin/operations/payments/{param}/expire",
@@ -2714,7 +2462,7 @@
       "note": ""
     },
     {
-      "index": 226,
+      "index": 205,
       "method": "POST",
       "route": "/admin/operations/payments/${paymentId}/retry-verification",
       "normalized": "/admin/operations/payments/{param}/retry-verification",
@@ -2726,7 +2474,7 @@
       "note": ""
     },
     {
-      "index": 227,
+      "index": 206,
       "method": "POST",
       "route": "/admin/operations/payments/${paymentId}/recreate-qr",
       "normalized": "/admin/operations/payments/{param}/recreate-qr",
@@ -2738,7 +2486,7 @@
       "note": ""
     },
     {
-      "index": 228,
+      "index": 207,
       "method": "GET",
       "route": "/admin/operations/payments",
       "normalized": "/admin/operations/payments",
@@ -2750,7 +2498,7 @@
       "note": ""
     },
     {
-      "index": 229,
+      "index": 208,
       "method": "GET",
       "route": "/admin/operations/payments/${paymentId}",
       "normalized": "/admin/operations/payments/{param}",
@@ -2762,7 +2510,7 @@
       "note": ""
     },
     {
-      "index": 230,
+      "index": 209,
       "method": "POST",
       "route": "/admin/operations/payments/${paymentId}/approve",
       "normalized": "/admin/operations/payments/{param}/approve",
@@ -2774,7 +2522,7 @@
       "note": ""
     },
     {
-      "index": 231,
+      "index": 210,
       "method": "POST",
       "route": "/admin/operations/payments/${paymentId}/reject",
       "normalized": "/admin/operations/payments/{param}/reject",
@@ -2786,43 +2534,43 @@
       "note": ""
     },
     {
-      "index": 232,
-      "method": "GET",
-      "route": "/users/me/context",
-      "normalized": "/users/me/context",
-      "client": "api",
-      "file": "lib/api.ts",
-      "line": 131,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:29549",
-      "note": ""
-    },
-    {
-      "index": 233,
-      "method": "GET",
-      "route": "/categories",
-      "normalized": "/categories",
-      "client": "api",
-      "file": "lib/api.ts",
-      "line": 158,
-      "status": "CONNECTED",
-      "source": "fulldetailedapi.md:3968",
-      "note": ""
-    },
-    {
-      "index": 234,
+      "index": 211,
       "method": "POST",
       "route": "${API_URL}/auth/refresh",
       "normalized": "/auth/refresh",
       "client": "axios",
       "file": "lib/api.ts",
-      "line": 82,
+      "line": 154,
       "status": "CONNECTED",
       "source": "fulldetailedapi.md:950",
       "note": ""
     },
     {
-      "index": 235,
+      "index": 212,
+      "method": "GET",
+      "route": "/users/me/context",
+      "normalized": "/users/me/context",
+      "client": "api",
+      "file": "lib/api.ts",
+      "line": 213,
+      "status": "CONNECTED",
+      "source": "fulldetailedapi.md:29549",
+      "note": ""
+    },
+    {
+      "index": 213,
+      "method": "GET",
+      "route": "/categories",
+      "normalized": "/categories",
+      "client": "api",
+      "file": "lib/api.ts",
+      "line": 240,
+      "status": "CONNECTED",
+      "source": "fulldetailedapi.md:3968",
+      "note": ""
+    },
+    {
+      "index": 214,
       "method": "PUT",
       "route": "/authors/me/books/${bookId}",
       "normalized": "/authors/me/books/{param}",
@@ -2834,7 +2582,7 @@
       "note": ""
     },
     {
-      "index": 236,
+      "index": 215,
       "method": "DELETE",
       "route": "/authors/me/books/${bookId}",
       "normalized": "/authors/me/books/{param}",
@@ -2846,7 +2594,7 @@
       "note": ""
     },
     {
-      "index": 237,
+      "index": 216,
       "method": "POST",
       "route": "/authors/me/books/${bookId}/submit",
       "normalized": "/authors/me/books/{param}/submit",
@@ -2858,7 +2606,7 @@
       "note": ""
     },
     {
-      "index": 238,
+      "index": 217,
       "method": "POST",
       "route": "/authors/me/uploads/image",
       "normalized": "/authors/me/uploads/image",
@@ -2870,7 +2618,7 @@
       "note": ""
     },
     {
-      "index": 239,
+      "index": 218,
       "method": "POST",
       "route": "/uploads/image",
       "normalized": "/uploads/image",
@@ -2882,7 +2630,7 @@
       "note": ""
     },
     {
-      "index": 240,
+      "index": 219,
       "method": "POST",
       "route": "/authors/me/uploads/document",
       "normalized": "/authors/me/uploads/document",
@@ -2894,7 +2642,7 @@
       "note": ""
     },
     {
-      "index": 241,
+      "index": 220,
       "method": "POST",
       "route": "/uploads/document",
       "normalized": "/uploads/document",
@@ -2906,7 +2654,7 @@
       "note": ""
     },
     {
-      "index": 242,
+      "index": 221,
       "method": "GET",
       "route": "/publish-packages",
       "normalized": "/publish-packages",
@@ -2918,7 +2666,7 @@
       "note": ""
     },
     {
-      "index": 243,
+      "index": 222,
       "method": "GET",
       "route": "/authors/me/dashboard-access",
       "normalized": "/authors/me/dashboard-access",
@@ -2930,7 +2678,7 @@
       "note": ""
     },
     {
-      "index": 244,
+      "index": 223,
       "method": "GET",
       "route": "/authors/me/dashboard",
       "normalized": "/authors/me/dashboard",
@@ -2942,7 +2690,7 @@
       "note": ""
     },
     {
-      "index": 245,
+      "index": 224,
       "method": "GET",
       "route": "/authors/me/analytics",
       "normalized": "/authors/me/analytics",
@@ -2954,7 +2702,7 @@
       "note": ""
     },
     {
-      "index": 246,
+      "index": 225,
       "method": "GET",
       "route": "/authors/me/books/performance",
       "normalized": "/authors/me/books/performance",
@@ -2966,7 +2714,7 @@
       "note": ""
     },
     {
-      "index": 247,
+      "index": 226,
       "method": "GET",
       "route": "/authors/me/royalties",
       "normalized": "/authors/me/royalties",
@@ -2978,7 +2726,7 @@
       "note": ""
     },
     {
-      "index": 248,
+      "index": 227,
       "method": "GET",
       "route": "/authors/me/royalty-settlements",
       "normalized": "/authors/me/royalty-settlements",
@@ -2990,7 +2738,7 @@
       "note": ""
     },
     {
-      "index": 249,
+      "index": 228,
       "method": "GET",
       "route": "/authors/me/royalty-settlements/${settlementId}",
       "normalized": "/authors/me/royalty-settlements/{param}",
@@ -3002,7 +2750,7 @@
       "note": ""
     },
     {
-      "index": 250,
+      "index": 229,
       "method": "GET",
       "route": "/users/me/context",
       "normalized": "/users/me/context",
@@ -3014,7 +2762,7 @@
       "note": ""
     },
     {
-      "index": 251,
+      "index": 230,
       "method": "GET",
       "route": "/users/me/author-application",
       "normalized": "/users/me/author-application",
@@ -3026,7 +2774,7 @@
       "note": ""
     },
     {
-      "index": 252,
+      "index": 231,
       "method": "POST",
       "route": "/author-applications",
       "normalized": "/author-applications",
@@ -3038,7 +2786,7 @@
       "note": ""
     },
     {
-      "index": 253,
+      "index": 232,
       "method": "GET",
       "route": "/authors/me/books",
       "normalized": "/authors/me/books",
@@ -3050,7 +2798,7 @@
       "note": ""
     },
     {
-      "index": 254,
+      "index": 233,
       "method": "POST",
       "route": "/authors/me/books",
       "normalized": "/authors/me/books",
@@ -3062,7 +2810,7 @@
       "note": ""
     },
     {
-      "index": 255,
+      "index": 234,
       "method": "GET",
       "route": "/authors/me/books/${bookId}",
       "normalized": "/authors/me/books/{param}",
@@ -3074,7 +2822,7 @@
       "note": ""
     },
     {
-      "index": 256,
+      "index": 235,
       "method": "POST",
       "route": "/admin/categories",
       "normalized": "/admin/categories",
@@ -3086,7 +2834,7 @@
       "note": ""
     },
     {
-      "index": 257,
+      "index": 236,
       "method": "GET",
       "route": "/categories",
       "normalized": "/categories",
@@ -3098,7 +2846,7 @@
       "note": ""
     },
     {
-      "index": 258,
+      "index": 237,
       "method": "GET",
       "route": "/admin/categories",
       "normalized": "/admin/categories",

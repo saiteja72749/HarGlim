@@ -111,7 +111,7 @@ export default function AdminLayout({
         >
           {/* Header Brand */}
           <div className="flex h-16 items-center justify-between border-b border-[#174C4D] px-5 bg-[#0F3D3E]">
-            <Link href="/admin" className="flex items-center gap-3">
+            <Link href="/admin" prefetch={false} className="flex items-center gap-3">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#D4AF37] text-[#0F3D3E] font-serif font-bold text-lg shadow-sm">
                 H
               </div>
@@ -172,6 +172,7 @@ export default function AdminLayout({
                     <Link
                       key={link.href}
                       href={link.href}
+                      prefetch={false}
                       className={cn(
                         "flex items-center justify-between rounded-xl px-3 py-2.5 text-xs font-medium transition-all duration-200 group relative",
                         isActive
@@ -199,7 +200,7 @@ export default function AdminLayout({
 
           {/* Bottom Actions */}
           <div className="border-t border-[#174C4D] p-4 space-y-2 bg-[#0F3D3E]">
-            <Link href="/" passHref>
+            <Link href="/" prefetch={false} passHref>
               <Button
                 variant="ghost"
                 className="w-full justify-start gap-3 text-white/70 hover:text-white hover:bg-[#174C4D] h-9 text-xs"

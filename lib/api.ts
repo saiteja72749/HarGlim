@@ -7,11 +7,73 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backe
 
 const api = axios.create({
   baseURL: API_URL,
-  timeout: 25000,
+  timeout: 45000,
+  validateStatus: (status) => (status >= 200 && status < 300) || status === 304,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+const GET_CACHE_MS = 30 * 1000;
+const inflightGetRequests = new Map<string, Promise<any>>();
+const responseCache = new Map<string, { response: any; expiresAt: number }>();
+
+const getCacheKey = (url?: string, params?: any) => {
+  const serializedParams = params ? JSON.stringify(params, Object.keys(params).sort()) : '';
+  return `${url || ''}?${serializedParams}`;
+};
+
+export function invalidateApiCache(match: string | RegExp) {
+  for (const key of responseCache.keys()) {
+    const matched = typeof match === 'string' ? key.includes(match) : match.test(key);
+    if (matched) {
+      responseCache.delete(key);
+      inflightGetRequests.delete(key);
+    }
+  }
+}
+
+const rawGet = api.get.bind(api);
+api.get = ((url: string, config: any = {}) => {
+  const noStore = config?.cache === 'no-store' || config?.headers?.['Cache-Control'] === 'no-store';
+  const cacheKey = getCacheKey(url, config?.params);
+
+  if (!noStore) {
+    const cached = responseCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return Promise.resolve(cached.response);
+    }
+
+    const inflight = inflightGetRequests.get(cacheKey);
+    if (inflight) {
+      return inflight;
+    }
+  }
+
+  const request = rawGet(url, {
+    ...config,
+    metadata: { ...(config?.metadata || {}), cacheKey },
+  })
+    .then((response) => {
+      if (response.status === 304) {
+        const cached = responseCache.get(cacheKey);
+        if (cached) return cached.response;
+      }
+      if (!noStore && response.status >= 200 && response.status < 300) {
+        responseCache.set(cacheKey, { response, expiresAt: Date.now() + GET_CACHE_MS });
+      }
+      return response;
+    })
+    .finally(() => {
+      inflightGetRequests.delete(cacheKey);
+    });
+
+  if (!noStore) {
+    inflightGetRequests.set(cacheKey, request);
+  }
+
+  return request;
+}) as typeof api.get;
 
 let isRefreshing = false;
 let failedQueue: Array<{ resolve: (token: string) => void; reject: (err: any) => void }> = [];
@@ -45,7 +107,17 @@ api.interceptors.request.use(
 
 // Response interceptor to handle 401 token refresh
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const method = response.config?.method?.toLowerCase();
+    const url = response.config?.url || '';
+
+    if (method && method !== 'get') {
+      const baseResource = url.split('?')[0].split('/').slice(0, 3).join('/');
+      if (baseResource) invalidateApiCache(baseResource);
+    }
+
+    return response;
+  },
   async (error) => {
     const originalRequest = error.config;
 
@@ -102,14 +174,24 @@ api.interceptors.response.use(
     }
 
     const status = error.response?.status;
+    const method = originalRequest?.method?.toUpperCase?.() || 'REQUEST';
+    const url = originalRequest?.url || 'unknown URL';
 
     if (typeof window !== 'undefined') {
-      if (status === 403) {
+      if (error.name === 'CanceledError' || error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
+        console.info(`[api] AbortError: frontend cancelled ${method} ${url}`);
+      } else if (status === 401) {
+        console.warn(`[api] 401 expired/missing token for ${method} ${url}`);
+      } else if (status === 403) {
+        console.warn(`[api] 403 insufficient permission for ${method} ${url}`);
         toast.error('Admin access required or permission denied.', { id: 'admin-access-required' });
       } else if (status === 429) {
+        console.warn(`[api] 429 too many requests for ${method} ${url}`);
         toast.error('Too many requests. Please wait a few seconds and try again.', {
           id: 'rate-limit-toast',
         });
+      } else if (status >= 500) {
+        console.error(`[api] ${status} backend/server failure for ${method} ${url}`);
       }
     }
 

@@ -315,7 +315,7 @@ export default function AdminManuscriptsPage() {
                               )}
                               {manuscript.status === "approved" && (
                                 <DropdownMenuItem asChild>
-                                  <Link href={`/admin/books/new?title=${encodeURIComponent(manuscript.title)}&author=${encodeURIComponent(manuscript.authorName || manuscript.author?.name || "")}`}>
+                                  <Link href={`/admin/books/new?title=${encodeURIComponent(manuscript.title)}&author=${encodeURIComponent(manuscript.authorName || manuscript.author?.name || "")}`} prefetch={false}>
                                     <BookOpen className="mr-2 h-4 w-4" />
                                     Publish as Book
                                   </Link>

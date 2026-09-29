@@ -43,11 +43,13 @@ export default function EditBookPage() {
 
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
+  const [fetchingAuthors, setFetchingAuthors] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
 
   // Author Mode & Details
   const [authorType, setAuthorType] = useState<AuthorType>("existing");
   const [authorsList, setAuthorsList] = useState<any[]>([]);
+  const [authorSearchQuery, setAuthorSearchQuery] = useState<string>("");
   const [selectedAuthorId, setSelectedAuthorId] = useState<string>("");
   const [selectedAuthorName, setSelectedAuthorName] = useState<string>("");
   const [externalAuthorName, setExternalAuthorName] = useState<string>("");
@@ -110,77 +112,49 @@ export default function EditBookPage() {
   };
 
   useEffect(() => {
-    const loadCategoriesAndAuthors = async () => {
+    const query = authorSearchQuery.trim();
+    if (authorType !== "existing" || query.length < 2) {
+      setFetchingAuthors(false);
+      setAuthorsList([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      setFetchingAuthors(true);
       try {
-        const [catRes, usersRes, authorsRes] = await Promise.allSettled([
-          api.get("/categories").catch(() => api.get("/admin/categories")),
-          api.get("/admin/users", { params: { limit: 100 } }),
-          api.get("/authors", { params: { limit: 100 } }),
-        ]);
-
-        if (catRes.status === "fulfilled" && catRes.value?.data) {
-          // Categories loaded
-        }
-
-        const authorsMap = new Map<string, any>();
-
-        if (usersRes.status === "fulfilled" && usersRes.value?.data) {
-          const uData = usersRes.value.data;
-          const uList = uData?.data?.users || (Array.isArray(uData?.data) ? uData.data : []) || (Array.isArray(uData) ? uData : []);
-          if (Array.isArray(uList)) {
-            uList.forEach((u: any) => {
-              const id = u._id || u.id;
-              if (id) {
-                authorsMap.set(String(id), {
-                  _id: String(id),
-                  name: u.name || u.fullName || u.email || "Registered User",
-                  email: u.email || "",
-                  role: u.role || "user",
-                });
-              }
-            });
-          }
-        }
-
-        if (authorsRes.status === "fulfilled" && authorsRes.value?.data) {
-          const aData = authorsRes.value.data;
-          const aList = aData?.data?.authors || aData?.authors || (Array.isArray(aData?.data) ? aData.data : []) || (Array.isArray(aData) ? aData : []);
-          if (Array.isArray(aList)) {
-            aList.forEach((a: any) => {
-              const userId = a.user?._id || a.user?.id || a.userId || a._id || a.id;
-              const aName = a.name || a.user?.name || a.fullName;
-              if (userId && aName) {
-                if (authorsMap.has(String(userId))) {
-                  const existing = authorsMap.get(String(userId));
-                  authorsMap.set(String(userId), { ...existing, name: aName, role: "author" });
-                } else {
-                  authorsMap.set(String(userId), {
-                    _id: String(userId),
-                    name: aName,
-                    email: a.email || a.user?.email || "",
-                    role: "author",
-                  });
-                }
-              }
-            });
-          }
-        }
-
-        const combined = Array.from(authorsMap.values());
-        combined.sort((a, b) => {
-          const aIsAuthor = a.role === "author" ? 0 : 1;
-          const bIsAuthor = b.role === "author" ? 0 : 1;
-          if (aIsAuthor !== bIsAuthor) return aIsAuthor - bIsAuthor;
-          return (a.name || "").localeCompare(b.name || "");
-        });
-
-        setAuthorsList(combined);
+        const { data } = await api.get("/admin/users", {
+          params: { role: "author", search: query, limit: 20 },
+          signal: controller.signal,
+        } as any);
+        const userList =
+          data?.data?.users ||
+          data?.users ||
+          (Array.isArray(data?.data) ? data.data : []) ||
+          (Array.isArray(data) ? data : []);
+        const authors = Array.isArray(userList)
+          ? userList.map((u: any) => ({
+              _id: String(u._id || u.id),
+              name: u.name || u.fullName || u.email || "Registered Author",
+              email: u.email || "",
+              role: "author",
+            }))
+          : [];
+        setAuthorsList(authors);
       } catch (err: any) {
-        console.warn("Failed to load categories and authors:", err);
+        if (err.name !== "CanceledError" && err.name !== "AbortError") {
+          console.warn("Failed to search authors:", err);
+        }
+      } finally {
+        setFetchingAuthors(false);
       }
+    }, 400);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
     };
-    loadCategoriesAndAuthors();
-  }, []);
+  }, [authorSearchQuery, authorType]);
 
   useEffect(() => {
     if (!bookId) return;
@@ -237,6 +211,7 @@ export default function EditBookPage() {
           } else {
             setAuthorType("existing");
             setSelectedAuthorName(resolvedAuthorName);
+            setAuthorSearchQuery(resolvedAuthorName);
           }
 
           let initialCatName = "";
@@ -512,7 +487,7 @@ export default function EditBookPage() {
     <div className="space-y-6 max-w-4xl mx-auto text-[#0F3D3E]">
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" asChild>
-          <Link href="/admin/books">
+          <Link href="/admin/books" prefetch={false}>
             <ArrowLeft className="h-5 w-5 text-[#0F3D3E]" />
           </Link>
         </Button>
@@ -632,9 +607,20 @@ export default function EditBookPage() {
                     Select Registered Author *
                   </Label>
                   <span className="text-[11px] text-[#5C6E6E]">
-                    {authorsList.length} authors / users available
+                    {authorSearchQuery.trim().length < 2 ? "Type 2+ characters" : `${authorsList.length} matches`}
                   </span>
                 </div>
+                <Input
+                  id="existingAuthorSearch"
+                  placeholder="Search author name or email..."
+                  value={authorSearchQuery}
+                  onChange={(e) => {
+                    setAuthorSearchQuery(e.target.value);
+                    setSelectedAuthorId("");
+                    setSelectedAuthorName("");
+                  }}
+                  className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl h-11 text-xs"
+                />
                 <Select
                   value={selectedAuthorId}
                   onValueChange={(val) => {
@@ -642,12 +628,24 @@ export default function EditBookPage() {
                     const found = authorsList.find((a) => (a._id || a.id) === val);
                     if (found) {
                       setSelectedAuthorName(found.name || "");
+                      setAuthorSearchQuery(found.email || found.name || authorSearchQuery);
                       setFormData((prev) => ({ ...prev, authorName: found.name || "" }));
                     }
                   }}
+                  disabled={authorSearchQuery.trim().length < 2 || fetchingAuthors || authorsList.length === 0}
                 >
                   <SelectTrigger className="w-full bg-[#F8F9F7] border-[#E2E6DF] rounded-xl h-11 text-xs font-serif font-bold">
-                    <SelectValue placeholder="Choose an author..." />
+                    <SelectValue
+                      placeholder={
+                        authorSearchQuery.trim().length < 2
+                          ? "Search before choosing an author"
+                          : fetchingAuthors
+                          ? "Searching authors..."
+                          : authorsList.length === 0
+                          ? "No matching authors found"
+                          : "Choose an author..."
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent className="bg-white border-[#E2E6DF] max-h-72">
                     {authorsList.map((a) => (

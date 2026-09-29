@@ -28,55 +28,22 @@ export default function AdminDashboard() {
     setLoading(true);
     setError(false);
     try {
-      const [dashRes, ordersRes, authorsRes, booksRes, paymentsRes] = await Promise.allSettled([
-        api.get("/admin/dashboard").catch(() => api.get("/admin/stats")),
-        api.get("/admin/orders?limit=100"),
-        api.get("/admin/author-applications"),
-        api.get("/books?limit=100"),
-        api.get("/admin/operations/payments?status=VERIFICATION_PENDING"),
-      ]);
-
-      const dashData = dashRes.status === "fulfilled" ? (dashRes.value.data?.data || dashRes.value.data) : {};
+      const dashRes = await api.get("/admin/dashboard", { cache: "no-store" } as any);
+      const dashData = dashRes.data?.data || dashRes.data || {};
       const opCounts = dashData.operationalCounts || {};
-      const ordersList = ordersRes.status === "fulfilled" ? (ordersRes.value.data?.data?.orders || ordersRes.value.data?.data || ordersRes.value.data) : [];
-      const authorsList = authorsRes.status === "fulfilled" ? (authorsRes.value.data?.data?.applications || authorsRes.value.data?.data || authorsRes.value.data) : [];
-      const booksList = booksRes.status === "fulfilled" ? (booksRes.value.data?.books || booksRes.value.data?.data || booksRes.value.data) : [];
-      
-      let realPaymentsCount = 0;
-      if (paymentsRes.status === "fulfilled") {
-        const pVal = paymentsRes.value.data;
-        const pItems = pVal?.data?.items || pVal?.items || (Array.isArray(pVal?.data) ? pVal.data : []);
-        const pTotal = pVal?.data?.pagination?.total ?? pVal?.pagination?.total;
-        realPaymentsCount = typeof pTotal === 'number' ? pTotal : (Array.isArray(pItems) ? pItems.length : 0);
-      }
-
-      const ordersArr = Array.isArray(ordersList) ? ordersList : [];
-      const authorsArr = Array.isArray(authorsList) ? authorsList : [];
-      const booksArr = Array.isArray(booksList) ? booksList : [];
-
-      // Calculate state machine metrics as resilient fallbacks
-      const calculatedPendingPayments = ordersArr.filter(
-        (o) => !o.isPaid && (o.paymentStatus === "PENDING" || o.paymentStatus === "VERIFICATION_PENDING" || o.utr)
-      ).length;
-
-      const calculatedProcessingOrders = ordersArr.filter(
-        (o) => (o.status || o.orderStatus) === "PROCESSING"
-      ).length;
-
-      const calculatedPendingAuthors = authorsArr.filter(
-        (a) => a.status?.toLowerCase() === "pending"
-      ).length;
+      const ordersArr = dashData.recentOrders || dashData.orders || [];
+      const authorsArr = dashData.recentAuthors || dashData.recentAuthorApplications || dashData.authorApplications || [];
 
       setDashboardData({
         ...dashData,
-        pendingPaymentsCount: opCounts.paymentsAwaitingVerification ?? (realPaymentsCount || (dashData.pendingPaymentsCount ?? dashData.pendingOrders ?? calculatedPendingPayments)),
-        processingOrdersCount: opCounts.ordersRequiringAction ?? (dashData.processingOrdersCount ?? dashData.processingOrders ?? calculatedProcessingOrders),
-        pendingAuthorsCount: opCounts.pendingAuthorApplications ?? (dashData.pendingAuthorsCount ?? dashData.pendingApplications ?? calculatedPendingAuthors),
+        pendingPaymentsCount: opCounts.paymentsAwaitingVerification ?? dashData.pendingPaymentsCount ?? dashData.pendingOrders ?? 0,
+        processingOrdersCount: opCounts.ordersRequiringAction ?? dashData.processingOrdersCount ?? dashData.processingOrders ?? 0,
+        pendingAuthorsCount: opCounts.pendingAuthorApplications ?? dashData.pendingAuthorsCount ?? dashData.pendingApplications ?? 0,
         pendingPublishRequests: opCounts.pendingPublishRequests ?? 0,
         activeAuthorsCount: opCounts.activeAuthors ?? 0,
-        totalBooks: opCounts.publishedBooks ?? (booksArr.length || dashData.totalBooks || dashData.booksCount || 0),
-        recentOrders: ordersArr.slice(0, 5),
-        recentAuthors: authorsArr.slice(0, 5),
+        totalBooks: opCounts.publishedBooks ?? dashData.totalBooks ?? dashData.booksCount ?? 0,
+        recentOrders: Array.isArray(ordersArr) ? ordersArr.slice(0, 5) : [],
+        recentAuthors: Array.isArray(authorsArr) ? authorsArr.slice(0, 5) : [],
       });
     } catch (err) {
       console.error("Failed to fetch admin dashboard data:", err);
@@ -134,7 +101,7 @@ export default function AdminDashboard() {
       {/* 1. TOP CARDS (Strictly matching prompt) */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {/* Pending Payments */}
-        <Link href="/admin/payments">
+        <Link href="/admin/payments" prefetch={false}>
           <Card className="bg-amber-500/10 border-2 border-amber-500/30 hover:border-amber-500/60 shadow-xs hover:shadow-md transition-all rounded-2xl cursor-pointer">
             <CardContent className="p-5 flex items-center justify-between">
               <div>
@@ -154,7 +121,7 @@ export default function AdminDashboard() {
         </Link>
 
         {/* Orders in Processing */}
-        <Link href="/admin/orders">
+        <Link href="/admin/orders" prefetch={false}>
           <Card className="bg-blue-500/10 border-2 border-blue-500/30 hover:border-blue-500/60 shadow-xs hover:shadow-md transition-all rounded-2xl cursor-pointer">
             <CardContent className="p-5 flex items-center justify-between">
               <div>
@@ -174,7 +141,7 @@ export default function AdminDashboard() {
         </Link>
 
         {/* Pending Author Requests */}
-        <Link href="/admin/author-applications">
+        <Link href="/admin/author-applications" prefetch={false}>
           <Card className="bg-purple-500/10 border-2 border-purple-500/30 hover:border-purple-500/60 shadow-xs hover:shadow-md transition-all rounded-2xl cursor-pointer">
             <CardContent className="p-5 flex items-center justify-between">
               <div>
@@ -194,7 +161,7 @@ export default function AdminDashboard() {
         </Link>
 
         {/* Total Books */}
-        <Link href="/admin/books">
+        <Link href="/admin/books" prefetch={false}>
           <Card className="bg-emerald-500/10 border-2 border-emerald-500/30 hover:border-emerald-500/60 shadow-xs hover:shadow-md transition-all rounded-2xl cursor-pointer">
             <CardContent className="p-5 flex items-center justify-between">
               <div>
@@ -222,7 +189,7 @@ export default function AdminDashboard() {
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Verify Payments */}
-          <Link href="/admin/payments">
+          <Link href="/admin/payments" prefetch={false}>
             <Card className="bg-white border-2 border-[#D4AF37]/50 hover:border-[#D4AF37] shadow-xs hover:shadow-md transition-all rounded-2xl cursor-pointer group">
               <CardContent className="p-5 flex items-center gap-4">
                 <div className="h-11 w-11 rounded-xl bg-[#D4AF37]/20 text-[#0F3D3E] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
@@ -237,7 +204,7 @@ export default function AdminDashboard() {
           </Link>
 
           {/* Add Book */}
-          <Link href="/admin/books/new">
+          <Link href="/admin/books/new" prefetch={false}>
             <Card className="bg-white border border-[#E2E6DF] hover:border-[#0F3D3E] shadow-xs hover:shadow-md transition-all rounded-2xl cursor-pointer group">
               <CardContent className="p-5 flex items-center gap-4">
                 <div className="h-11 w-11 rounded-xl bg-[#0F3D3E] text-[#D4AF37] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
@@ -252,7 +219,7 @@ export default function AdminDashboard() {
           </Link>
 
           {/* Review Author Requests */}
-          <Link href="/admin/author-applications">
+          <Link href="/admin/author-applications" prefetch={false}>
             <Card className="bg-white border border-[#E2E6DF] hover:border-[#0F3D3E] shadow-xs hover:shadow-md transition-all rounded-2xl cursor-pointer group">
               <CardContent className="p-5 flex items-center gap-4">
                 <div className="h-11 w-11 rounded-xl bg-[#F0F2ED] text-[#0F3D3E] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
@@ -267,7 +234,7 @@ export default function AdminDashboard() {
           </Link>
 
           {/* Enter Royalty */}
-          <Link href="/admin/royalties">
+          <Link href="/admin/royalties" prefetch={false}>
             <Card className="bg-white border border-[#E2E6DF] hover:border-[#0F3D3E] shadow-xs hover:shadow-md transition-all rounded-2xl cursor-pointer group">
               <CardContent className="p-5 flex items-center gap-4">
                 <div className="h-11 w-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
@@ -292,7 +259,7 @@ export default function AdminDashboard() {
               Recent Orders
             </CardTitle>
             <Button variant="ghost" size="sm" asChild className="text-xs font-bold text-[#0F3D3E]">
-              <Link href="/admin/orders" className="gap-1">
+              <Link href="/admin/orders" prefetch={false} className="gap-1">
                 View Orders <ArrowRight className="h-3.5 w-3.5" />
               </Link>
             </Button>
@@ -347,7 +314,7 @@ export default function AdminDashboard() {
               Recent Author Requests
             </CardTitle>
             <Button variant="ghost" size="sm" asChild className="text-xs font-bold text-[#0F3D3E]">
-              <Link href="/admin/author-applications" className="gap-1">
+              <Link href="/admin/author-applications" prefetch={false} className="gap-1">
                 View Requests <ArrowRight className="h-3.5 w-3.5" />
               </Link>
             </Button>
