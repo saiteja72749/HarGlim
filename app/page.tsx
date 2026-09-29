@@ -75,6 +75,23 @@ const defaultFaqs = [
   },
 ];
 
+const extractBooks = (data: any): Book[] => {
+  const items = data?.data?.books || data?.books || data?.data || data || [];
+  return Array.isArray(items) ? items : [];
+};
+
+const getOptimizedCoverImage = (src?: string) => {
+  if (!src || (!src.startsWith("http") && !src.startsWith("/"))) {
+    return "/logo.webp";
+  }
+
+  if (src.startsWith("https://res.cloudinary.com/") && src.includes("/upload/")) {
+    return src.replace("/upload/", "/upload/f_auto,q_auto,w_680,c_limit/");
+  }
+
+  return src;
+};
+
 export default function Home() {
   const { content } = useSiteContent();
   const [featuredBooks, setFeaturedBooks] = useState<Book[]>([]);
@@ -107,26 +124,25 @@ export default function Home() {
       setLoading(true);
       setError(false);
 
-      const [booksRes, bestsellersRes, categoriesRes, authorsRes] = await Promise.allSettled([
-        api.get("/books?featured=true&limit=8").catch(() => api.get("/books?isFeatured=true&limit=8")),
+      const featuredRes = await api
+        .get("/books?featured=true&limit=4")
+        .catch(() => api.get("/books?isFeatured=true&limit=4"));
+
+      const featuredList = extractBooks(featuredRes.data);
+      // Strictly enforce Feature on Home (isFeatured) flag; new release alone must not qualify
+      setFeaturedBooks(featuredList.filter((b: any) => b.isFeatured === true || b.featured === true));
+      setLoading(false);
+
+      const [bestsellersRes, categoriesRes, authorsRes, booksCountRes, authorsCountRes] = await Promise.allSettled([
         api.get("/books?sort=rating&limit=4").catch(() => api.get("/books?bestseller=true&limit=4")),
         api.get("/categories?featured=true&limit=6").catch(() => api.get("/categories?limit=6")),
         api.get("/authors?limit=6"),
+        api.get("/books?limit=1"),
+        api.get("/authors?limit=1"),
       ]);
 
-      if (booksRes.status === "fulfilled") {
-        const data = booksRes.value.data;
-        const items = data?.data?.books || data?.data || data || [];
-        const rawList = Array.isArray(items) ? items : [];
-        // Strictly enforce Feature on Home (isFeatured) flag; new release alone must not qualify
-        const strictlyFeatured = rawList.filter((b: any) => b.isFeatured === true || b.featured === true);
-        setFeaturedBooks(strictlyFeatured);
-      }
-
       if (bestsellersRes.status === "fulfilled") {
-        const data = bestsellersRes.value.data;
-        const items = data?.data?.books || data?.data || data || [];
-        setBestsellers(Array.isArray(items) ? items : []);
+        setBestsellers(extractBooks(bestsellersRes.value.data));
       }
 
       if (categoriesRes.status === "fulfilled") {
@@ -140,11 +156,6 @@ export default function Home() {
         const items = data?.data?.authors || data?.data || data || [];
         setAuthors(Array.isArray(items) ? items : []);
       }
-
-      const [booksCountRes, authorsCountRes] = await Promise.allSettled([
-        api.get("/books?limit=1"),
-        api.get("/authors?limit=1"),
-      ]);
 
       let booksCount = 0;
       let authorsCount = 0;
@@ -163,6 +174,7 @@ export default function Home() {
     } catch (error) {
       console.error("Failed to fetch home page data:", error);
       setError(true);
+      setLoading(false);
     } finally {
       setLoading(false);
     }
@@ -281,9 +293,7 @@ export default function Home() {
                   // Only feature a book on the homepage hero if "Feature on Home" is explicitly enabled
                   const heroBook = featuredBooks.find((b: any) => b.isFeatured === true || b.featured === true) || null;
                   const heroAuthor = heroBook ? getBookAuthorInfo(heroBook).name : "Harglim Publishers Catalog";
-                  const heroCover = heroBook?.coverImage && (heroBook.coverImage.startsWith("http") || heroBook.coverImage.startsWith("/"))
-                    ? heroBook.coverImage
-                    : "/logo.webp";
+                  const heroCover = getOptimizedCoverImage(heroBook?.coverImage);
                   const heroTitle = heroBook?.title || "Discover Inspiring Books";
                   const heroTag = heroBook ? "Featured on Home" : "Harglim Publishers";
 
@@ -304,7 +314,9 @@ export default function Home() {
                         alt={heroTitle}
                         fill
                         className="object-cover"
+                        sizes="(max-width: 1024px) 340px, 28vw"
                         priority
+                        unoptimized={heroCover.startsWith("https://res.cloudinary.com/")}
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-[#0F3D3E] via-[#0F3D3E]/40 to-transparent opacity-90" />
                       <div className="absolute bottom-6 left-6 right-6 space-y-1.5 text-white z-10">
