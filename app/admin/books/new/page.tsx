@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import api from "@/lib/api";
-import { ArrowLeft, Save, Upload, User, Plus } from "lucide-react";
+import { ArrowLeft, Save, Upload, User, Plus, Search, Check, Loader2, X, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +34,49 @@ import { isValidEmailAddress, normalizeEmailForStorage } from "@/lib/email";
 export const BISAC_CATEGORIES = EXACT_CATEGORIES;
 
 type AuthorType = "existing" | "new" | "external";
+
+const isObjectId = (value: unknown) => /^[0-9a-fA-F]{24}$/.test(String(value || ""));
+
+const getAuthorUserId = (item: any) => {
+  const linkedUser =
+    item?.user ||
+    item?.userId ||
+    item?.authorId ||
+    item?.account ||
+    item?.profile?.user ||
+    item?.profile?.userId;
+
+  if (typeof linkedUser === "object" && linkedUser !== null) {
+    return linkedUser._id || linkedUser.id || "";
+  }
+
+  return linkedUser || item?._id || item?.id || "";
+};
+
+const getAuthorName = (item: any) =>
+  item?.name ||
+  item?.fullName ||
+  item?.authorName ||
+  item?.penName ||
+  item?.user?.name ||
+  item?.userId?.name ||
+  item?.email ||
+  item?.user?.email ||
+  item?.userId?.email ||
+  "Registered Author";
+
+const getAuthorEmail = (item: any) =>
+  item?.email || item?.user?.email || item?.userId?.email || "";
+
+const normalizeBookStatus = (status: string) => {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "active" || normalized === "published") return "published";
+  if (normalized === "archived") return "archived";
+  return "draft";
+};
+
+const getCreatedBookFromResponse = (data: any) =>
+  data?.data?.book || data?.book || data?.data || data;
 
 export default function AddBookPage() {
   const router = useRouter();
@@ -85,7 +128,14 @@ export default function AddBookPage() {
   const [authorsList, setAuthorsList] = useState<any[]>([]);
   const [authorSearchQuery, setAuthorSearchQuery] = useState(initialAuthor);
   const [selectedAuthorId, setSelectedAuthorId] = useState<string>("");
-  const [, setSelectedAuthorName] = useState<string>("");
+  const [selectedAuthorName, setSelectedAuthorName] = useState<string>("");
+
+  // Quick Create Author Modal State
+  const [addAuthorModalOpen, setAddAuthorModalOpen] = useState(false);
+  const [quickAuthorName, setQuickAuthorName] = useState("");
+  const [quickAuthorEmail, setQuickAuthorEmail] = useState("");
+  const [quickAuthorBio, setQuickAuthorBio] = useState("");
+  const [isCreatingQuickAuthor, setIsCreatingQuickAuthor] = useState(false);
 
   // New Author State
   const [newAuthorName, setNewAuthorName] = useState<string>("");
@@ -128,21 +178,92 @@ export default function AddBookPage() {
     loadCategories();
   }, []);
 
-  // Search registered authors on demand.
+  // Fetch all registered & public authors immediately on mount
+  const loadAllAuthors = async () => {
+    setFetchingAuthors(true);
+    try {
+      // 1. Fetch from /admin/users (role=author) with fallback to /users
+      const resUsers = await api
+        .get("/admin/users", { params: { role: "author", limit: 100 }, cache: "no-store" } as any)
+        .catch(() => api.get("/users", { params: { role: "author", limit: 100 }, cache: "no-store" } as any))
+        .catch(() => null);
+
+      // 2. Fetch from /authors public catalog
+      const resAuthors = await api
+        .get("/authors", { params: { limit: 100 }, cache: "no-store" } as any)
+        .catch(() => null);
+
+      const list1 =
+        resUsers?.data?.data?.users ||
+        resUsers?.data?.users ||
+        (Array.isArray(resUsers?.data?.data) ? resUsers?.data?.data : []) ||
+        (Array.isArray(resUsers?.data) ? resUsers?.data : []);
+
+      const list2 =
+        resAuthors?.data?.data?.authors ||
+        resAuthors?.data?.authors ||
+        (Array.isArray(resAuthors?.data?.data) ? resAuthors?.data?.data : []) ||
+        (Array.isArray(resAuthors?.data) ? resAuthors?.data : []);
+
+      const combined = [
+        ...(Array.isArray(list1) ? list1 : []),
+        ...(Array.isArray(list2) ? list2 : []),
+      ];
+
+      const seen = new Set<string>();
+      const parsed: any[] = [];
+
+      for (const item of combined) {
+        if (!item) continue;
+        const id = String(getAuthorUserId(item) || "");
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+
+        parsed.push({
+          _id: id,
+          name: getAuthorName(item),
+          email: getAuthorEmail(item),
+          role: item.role || "author",
+          bio: item.bio || "",
+        });
+      }
+
+      parsed.sort((a, b) => a.name.localeCompare(b.name));
+      setAuthorsList(parsed);
+
+      if (initialAuthor && !selectedAuthorId) {
+        const found = parsed.find(
+          (a) =>
+            a.name.toLowerCase() === initialAuthor.toLowerCase() ||
+            (a.email && a.email.toLowerCase() === initialAuthor.toLowerCase())
+        );
+        if (found) {
+          setSelectedAuthorId(found._id);
+          setSelectedAuthorName(found.name);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to load authors:", err);
+    } finally {
+      setFetchingAuthors(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAllAuthors();
+  }, []);
+
+  // Background search to pull any authors matching query not in initial page
   useEffect(() => {
     const query = authorSearchQuery.trim();
-    if (authorType !== "existing" || query.length < 2) {
-      setFetchingAuthors(false);
-      setAuthorsList([]);
-      return;
-    }
+    if (authorType !== "existing" || query.length < 2) return;
 
     const controller = new AbortController();
     const timeoutId = window.setTimeout(async () => {
-      setFetchingAuthors(true);
       try {
         const { data } = await api.get("/admin/users", {
           params: { role: "author", search: query, limit: 20 },
+          cache: "no-store",
           signal: controller.signal,
         } as any);
         const userList =
@@ -150,21 +271,26 @@ export default function AddBookPage() {
           data?.users ||
           (Array.isArray(data?.data) ? data.data : []) ||
           (Array.isArray(data) ? data : []);
-        const authors = Array.isArray(userList)
-          ? userList.map((u: any) => ({
-              _id: String(u._id || u.id),
-              name: u.name || u.fullName || u.email || "Registered Author",
-              email: u.email || "",
-              role: "author",
-            }))
-          : [];
-        setAuthorsList(authors);
+
+        if (Array.isArray(userList) && userList.length > 0) {
+          setAuthorsList((prev) => {
+            const existingIds = new Set(prev.map((a) => a._id));
+            const newAuthors = userList
+              .filter((u: any) => !existingIds.has(String(u._id || u.id)))
+              .map((u: any) => ({
+                _id: String(u._id || u.id),
+                name: getAuthorName(u),
+                email: getAuthorEmail(u),
+                role: "author",
+              }));
+            if (newAuthors.length === 0) return prev;
+            return [...prev, ...newAuthors].sort((a, b) => a.name.localeCompare(b.name));
+          });
+        }
       } catch (err: any) {
         if (err.name !== "CanceledError" && err.name !== "AbortError") {
           console.warn("Failed to search authors:", err);
         }
-      } finally {
-        setFetchingAuthors(false);
       }
     }, 400);
 
@@ -173,6 +299,91 @@ export default function AddBookPage() {
       controller.abort();
     };
   }, [authorSearchQuery, authorType]);
+
+  // Quick Create Author Handler
+  const handleQuickCreateAuthor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickAuthorName.trim()) {
+      toast.error("Please enter the author's name.");
+      return;
+    }
+
+    setIsCreatingQuickAuthor(true);
+    try {
+      const cleanSlug = quickAuthorName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 15) || "writer";
+      const normalizedEmail = quickAuthorEmail.trim() ? normalizeEmailForStorage(quickAuthorEmail) : "";
+      if (normalizedEmail && !isValidEmailAddress(normalizedEmail)) {
+        toast.error("Please enter a valid author email address.");
+        setIsCreatingQuickAuthor(false);
+        return;
+      }
+
+      const emailToUse = normalizedEmail || `author.${cleanSlug}.${Date.now().toString().slice(-4)}@harglim.internal`;
+      const tempPassword = `Author#${Math.random().toString(36).slice(-6)}!Aa1`;
+
+      const adminUserRes = await api.post("/admin/users", {
+        name: quickAuthorName.trim(),
+        email: emailToUse,
+        password: tempPassword,
+        role: "author",
+        isActive: true,
+      });
+
+      const uData =
+        adminUserRes?.data?.data?.user ||
+        adminUserRes?.data?.user ||
+        adminUserRes?.data?.data ||
+        adminUserRes?.data;
+      const newId = uData?._id || uData?.id;
+
+      if (!newId) {
+        throw new Error("Could not retrieve account ID for newly created author.");
+      }
+
+      if (quickAuthorBio.trim()) {
+        await api.put(`/admin/users/${newId}`, {
+          name: quickAuthorName.trim(),
+          email: emailToUse,
+          bio: quickAuthorBio.trim(),
+        }).catch(() => null);
+      }
+
+      const newAuthorObj = {
+        _id: String(newId),
+        name: quickAuthorName.trim(),
+        email: emailToUse,
+        role: "author",
+        bio: quickAuthorBio.trim(),
+      };
+
+      setAuthorsList((prev) => [newAuthorObj, ...prev.filter((a) => a._id !== String(newId))]);
+      setSelectedAuthorId(String(newId));
+      setSelectedAuthorName(quickAuthorName.trim());
+      setAuthorType("existing");
+      setAuthorSearchQuery("");
+      setAddAuthorModalOpen(false);
+      setQuickAuthorName("");
+      setQuickAuthorEmail("");
+      setQuickAuthorBio("");
+
+      toast.success(`Author "${quickAuthorName.trim()}" created and selected! ✍️`);
+    } catch (err: any) {
+      console.error("Failed to create author:", err);
+      toast.error(err.response?.data?.message || err.message || "Failed to create author.");
+    } finally {
+      setIsCreatingQuickAuthor(false);
+    }
+  };
+
+  // Filtered authors list based on user search/filter
+  const filteredAuthors = authorsList.filter((a) => {
+    if (!authorSearchQuery.trim()) return true;
+    const q = authorSearchQuery.toLowerCase().trim();
+    return (
+      a.name.toLowerCase().includes(q) ||
+      (a.email && a.email.toLowerCase().includes(q))
+    );
+  });
 
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -268,7 +479,7 @@ export default function AddBookPage() {
           return nameMatches || emailMatches;
         });
 
-        if (existingByNameOrEmail && /^[0-9a-fA-F]{24}$/.test(existingByNameOrEmail._id)) {
+        if (existingByNameOrEmail && isObjectId(existingByNameOrEmail._id)) {
           finalAuthorId = existingByNameOrEmail._id;
           // Ensure role is author
           await api.patch(`/admin/users/${finalAuthorId}/role`, { role: "author" }).catch(() =>
@@ -349,7 +560,7 @@ export default function AddBookPage() {
         }
       }
 
-      if (!finalAuthorId || !/^[0-9a-fA-F]{24}$/.test(finalAuthorId)) {
+      if (!finalAuthorId || !isObjectId(finalAuthorId)) {
         toast.error("A valid author user ID could not be determined.");
         setLoading(false);
         return;
@@ -394,7 +605,7 @@ export default function AddBookPage() {
         price: numericPrice, // Synchronized compatibility alias matching mrp
         stock: Number(formData.stock) || 0,
         isbn: formData.isbn.trim() || undefined,
-        status: formData.status === "Active" ? "published" : formData.status,
+        status: normalizeBookStatus(formData.status),
         format: formData.format || "paperback",
         pages: formData.pages ? Number(formData.pages) : 250,
         language: formData.language || "English",
@@ -416,7 +627,15 @@ export default function AddBookPage() {
       const res = await api.post("/admin/books", jsonPayload);
       
       if (res.data?.success || res.status === 201 || res.status === 200) {
-        toast.success("Book created and published successfully to catalog! 📚");
+        const createdBook = getCreatedBookFromResponse(res.data);
+        const createdBookId = createdBook?._id || createdBook?.id;
+        const createdStatus = String(createdBook?.status || "").toLowerCase();
+
+        if (jsonPayload.status === "published" && createdBookId && createdStatus !== "published") {
+          await api.put(`/admin/books/${createdBookId}`, { status: "published" });
+        }
+
+        toast.success("Book created and published successfully to catalog.");
         router.push("/admin/books");
       } else {
         throw new Error(res.data?.message || "Backend catalog creation failed.");
@@ -538,26 +757,69 @@ export default function AddBookPage() {
 
             {/* Dynamic Input Views Based on Selection */}
             {authorType === "existing" && (
-              <div className="space-y-2 pt-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="existingAuthorSelect" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                    Select Registered Author *
-                  </Label>
-                  <span className="text-[11px] text-[#5C6E6E]">
-                    {authorSearchQuery.trim().length < 2 ? "Type 2+ characters" : `${authorsList.length} matches`}
-                  </span>
+              <div className="space-y-4 pt-2">
+                {/* Header with counter and Quick New Author action */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <Label htmlFor="existingAuthorSelect" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                      Select Registered Author *
+                    </Label>
+                    <p className="text-[11px] text-[#5C6E6E] mt-0.5">
+                      {fetchingAuthors
+                        ? "Loading authors catalog..."
+                        : `${authorsList.length} registered author${authorsList.length === 1 ? "" : "s"} available`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => loadAllAuthors()}
+                      disabled={fetchingAuthors}
+                      title="Reload authors list"
+                      className="h-8 px-2 text-[#5C6E6E] hover:text-[#0F3D3E]"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${fetchingAuthors ? "animate-spin" : ""}`} />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setQuickAuthorName(authorSearchQuery.trim());
+                        setAddAuthorModalOpen(true);
+                      }}
+                      className="h-8 border-[#0F3D3E]/30 text-[#0F3D3E] hover:bg-[#0F3D3E]/5 text-xs font-semibold rounded-lg flex items-center gap-1.5"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>+ New Author</span>
+                    </Button>
+                  </div>
                 </div>
-                <Input
-                  id="existingAuthorSearch"
-                  placeholder="Search author name or email..."
-                  value={authorSearchQuery}
-                  onChange={(e) => {
-                    setAuthorSearchQuery(e.target.value);
-                    setSelectedAuthorId("");
-                    setSelectedAuthorName("");
-                  }}
-                  className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl h-11 text-xs"
-                />
+
+                {/* Search / Filter Input */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#5C6E6E]" />
+                  <Input
+                    id="existingAuthorSearch"
+                    placeholder="Search or filter authors by name or email..."
+                    value={authorSearchQuery}
+                    onChange={(e) => setAuthorSearchQuery(e.target.value)}
+                    className="pl-9 pr-8 bg-[#F8F9F7] border-[#E2E6DF] rounded-xl h-10 text-xs"
+                  />
+                  {authorSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setAuthorSearchQuery("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#5C6E6E] hover:text-[#0F3D3E]"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Author Dropdown Selector */}
                 <Select
                   value={selectedAuthorId}
                   onValueChange={(val) => {
@@ -565,45 +827,102 @@ export default function AddBookPage() {
                     const found = authorsList.find((a) => (a._id || a.id) === val);
                     if (found) {
                       setSelectedAuthorName(found.name || "");
-                      setAuthorSearchQuery(found.email || found.name || authorSearchQuery);
                     }
                   }}
-                  disabled={authorSearchQuery.trim().length < 2 || fetchingAuthors || authorsList.length === 0}
+                  disabled={fetchingAuthors && authorsList.length === 0}
                 >
                   <SelectTrigger className="w-full bg-[#F8F9F7] border-[#E2E6DF] rounded-xl h-11 text-xs font-serif font-bold">
                     <SelectValue
                       placeholder={
-                        authorSearchQuery.trim().length < 2
-                          ? "Search before choosing an author"
-                          : fetchingAuthors
-                          ? "Searching authors..."
+                        fetchingAuthors && authorsList.length === 0
+                          ? "Loading authors..."
                           : authorsList.length === 0
-                          ? "No matching authors found"
-                          : "Choose an author..."
+                          ? "No authors found in system"
+                          : `Choose an author (${filteredAuthors.length} available)...`
                       }
                     />
                   </SelectTrigger>
                   <SelectContent className="bg-white border-[#E2E6DF] max-h-72">
-                    {authorsList.map((a) => (
-                      <SelectItem key={a._id || a.id} value={a._id || a.id} className="text-xs py-2">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-[#0F3D3E]">{a.name}</span>
-                          {a.email && <span className="text-[#5C6E6E] text-[11px]">({a.email})</span>}
-                          {a.role === "author" ? (
-                            <span className="px-1.5 py-0.5 text-[10px] bg-emerald-500/10 text-emerald-700 rounded-md font-semibold">
-                              Author
-                            </span>
-                          ) : (
-                            <span className="px-1.5 py-0.5 text-[10px] bg-slate-500/10 text-slate-600 rounded-md">
-                              {a.role || "User"}
-                            </span>
-                          )}
-                        </div>
-                      </SelectItem>
-                    ))}
+                    {filteredAuthors.length === 0 ? (
+                      <div className="p-3 text-center text-xs text-[#5C6E6E]">
+                        No matching authors found
+                      </div>
+                    ) : (
+                      filteredAuthors.map((a) => (
+                        <SelectItem key={a._id || a.id} value={a._id || a.id} className="text-xs py-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-[#0F3D3E]">{a.name}</span>
+                            {a.email && <span className="text-[#5C6E6E] text-[11px]">({a.email})</span>}
+                            {a.role === "author" ? (
+                              <span className="px-1.5 py-0.5 text-[10px] bg-emerald-500/10 text-emerald-700 rounded-md font-semibold">
+                                Author
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 text-[10px] bg-slate-500/10 text-slate-600 rounded-md">
+                                {a.role || "User"}
+                              </span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
-                <p className="text-[11px] text-[#5C6E6E] pt-1">
+
+                {/* If filtered list has no matches, offer quick creation */}
+                {authorSearchQuery.trim() && filteredAuthors.length === 0 && (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center justify-between gap-3 text-xs text-amber-900">
+                    <p>
+                      Author &ldquo;<strong>{authorSearchQuery}</strong>&rdquo; not found.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        setQuickAuthorName(authorSearchQuery.trim());
+                        setAddAuthorModalOpen(true);
+                      }}
+                      className="bg-[#0F3D3E] text-white hover:bg-[#0F3D3E]/90 text-xs shrink-0"
+                    >
+                      <Plus className="h-3.5 w-3.5 mr-1" />
+                      Create &ldquo;{authorSearchQuery.trim()}&rdquo;
+                    </Button>
+                  </div>
+                )}
+
+                {/* Selected Author Confirmation Badge */}
+                {selectedAuthorId && (
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <Check className="h-4 w-4 text-emerald-700 shrink-0" />
+                      <div>
+                        <span className="text-emerald-900 font-bold">Selected Author: </span>
+                        <span className="text-[#0F3D3E] font-medium font-serif font-bold">
+                          {authorsList.find((a) => (a._id || a.id) === selectedAuthorId)?.name || selectedAuthorName}
+                        </span>
+                        {authorsList.find((a) => (a._id || a.id) === selectedAuthorId)?.email && (
+                          <span className="text-[#5C6E6E] text-[11px] ml-1.5">
+                            ({authorsList.find((a) => (a._id || a.id) === selectedAuthorId)?.email})
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedAuthorId("");
+                        setSelectedAuthorName("");
+                      }}
+                      className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 px-2"
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                )}
+
+                <p className="text-[11px] text-[#5C6E6E]">
                   The book will be linked to this author profile and will display under their name in public catalogs and royalties.
                 </p>
               </div>
@@ -967,6 +1286,86 @@ export default function AddBookPage() {
           </CardContent>
         </Card>
       </form>
+
+      {/* Quick Create Author Modal */}
+      <Dialog open={addAuthorModalOpen} onOpenChange={setAddAuthorModalOpen}>
+        <DialogContent className="max-w-md bg-white border-[#E2E6DF] rounded-2xl shadow-xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-serif font-bold text-[#0F3D3E]">
+              Add New Author
+            </DialogTitle>
+            <DialogDescription className="text-xs text-[#5C6E6E]">
+              Create an author account and select it for this book. Email is optional.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleQuickCreateAuthor} className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="quickAuthorName" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                Author Name *
+              </Label>
+              <Input
+                id="quickAuthorName"
+                placeholder="e.g. Dr. A.P. Sharma"
+                value={quickAuthorName}
+                onChange={(e) => setQuickAuthorName(e.target.value)}
+                className="border-[#E2E6DF] rounded-xl text-sm"
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="quickAuthorEmail" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                Email (Optional)
+              </Label>
+              <Input
+                id="quickAuthorEmail"
+                type="email"
+                placeholder="author@example.com, or leave blank"
+                value={quickAuthorEmail}
+                onChange={(e) => setQuickAuthorEmail(e.target.value)}
+                className="border-[#E2E6DF] rounded-xl text-xs"
+              />
+              <p className="text-[11px] text-[#5C6E6E]">
+                If left blank, an internal placeholder email will be generated for the account.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="quickAuthorBio" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
+                Biography (Optional)
+              </Label>
+              <Textarea
+                id="quickAuthorBio"
+                rows={3}
+                placeholder="Short author biography"
+                value={quickAuthorBio}
+                onChange={(e) => setQuickAuthorBio(e.target.value)}
+                className="border-[#E2E6DF] rounded-xl text-xs"
+              />
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setAddAuthorModalOpen(false)}
+                className="border-[#E2E6DF]"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={isCreatingQuickAuthor || !quickAuthorName.trim()}
+                className="bg-[#0F3D3E] text-white hover:bg-[#174C4D] gap-2"
+              >
+                {isCreatingQuickAuthor && <Loader2 className="h-4 w-4 animate-spin" />}
+                {isCreatingQuickAuthor ? "Creating..." : "Create Author"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Create Category Modal */}
       <Dialog open={addCategoryModalOpen} onOpenChange={setAddCategoryModalOpen}>

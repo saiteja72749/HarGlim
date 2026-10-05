@@ -132,9 +132,9 @@ export default function AdminManuscriptsPage() {
   const updateStatus = async (id: string, newStatus: string) => {
     try {
       if (newStatus === "approved") {
-        await api.post(`/admin/publish-requests/${id}/approve`).catch(() =>
-          api.put(`/admin/publish-requests/${id}/status`, { status: "approved" })
-        );
+        await api.post(`/admin/publish-requests/${id}/approve`, {
+          notes: "Approved from admin manuscripts panel.",
+        });
       } else if (newStatus === "rejected") {
         const reason = prompt("Enter rejection reason (optional):", "Editorial standards mismatch");
         await api.post(`/admin/publish-requests/${id}/reject`, { reason }).catch(() =>
@@ -148,10 +148,12 @@ export default function AdminManuscriptsPage() {
         await api.put(`/admin/publish-requests/${id}/status`, { status: newStatus });
       }
 
-      setManuscripts(
-        manuscripts.map((m: any) => ((m.id || m._id) === id ? { ...m, status: newStatus } : m))
+      await fetchManuscripts();
+      toast.success(
+        newStatus === "approved"
+          ? "Manuscript approved and published as a book."
+          : `Manuscript status updated to ${newStatus}`
       );
-      toast.success(`Manuscript status updated to ${newStatus}`);
     } catch (err: any) {
       console.error("Failed to update manuscript status:", err);
       toast.error(err.response?.data?.message || "Failed to update manuscript status");
