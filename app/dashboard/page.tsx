@@ -22,51 +22,39 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthStore } from "@/store/auth-store";
+import { canOpenAuthorDashboard, getAuthorApplicationState } from "@/lib/author-access";
 import { ErrorState } from "@/components/ui/error-state";
 import api from "@/lib/api";
+import { extractList } from "@/lib/tracking";
+import {
+  FULFILMENT_META,
+  PAYMENT_STATE_META,
+  getFulfilmentStage,
+  getOrderTotal,
+  getPaymentState,
+} from "@/lib/order-status";
 
-const getStatusBadge = (status: string) => {
-  const s = (status || "").toUpperCase();
-  switch (s) {
-    case "DELIVERED":
-    case "COMPLETED":
-      return (
-        <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 font-medium">
-          Verified
-        </Badge>
-      );
-    case "SHIPPED":
-    case "IN TRANSIT":
-      return (
-        <Badge className="bg-blue-500/10 text-blue-700 border-blue-500/20 font-medium">
-          In Transit
-        </Badge>
-      );
-    case "PROCESSING":
-      return (
-        <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/20 font-medium">
-          Processing
-        </Badge>
-      );
-    case "CANCELLED":
-    case "REJECTED":
-    case "FAILED":
-      return (
-        <Badge className="bg-rose-500/10 text-rose-700 border-rose-500/20 font-medium">
-          Failed
-        </Badge>
-      );
-    default:
-      return (
-        <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/20 font-medium">
-          Pending
-        </Badge>
-      );
-  }
+// Unpaid orders show their payment state; paid orders show where the parcel is.
+const getStatusBadge = (order: any) => {
+  const payment = getPaymentState(order);
+  const meta =
+    payment === "paid" || getFulfilmentStage(order) === "cancelled"
+      ? FULFILMENT_META[getFulfilmentStage(order)]
+      : PAYMENT_STATE_META[payment];
+  return <Badge className={`${meta.tone} font-medium`}>{meta.label}</Badge>;
 };
 
 export default function DashboardPage() {
-  const { user } = useAuthStore();
+  const { user, userContext } = useAuthStore();
+  const isApprovedAuthor = canOpenAuthorDashboard(user, userContext);
+  const applicationState = getAuthorApplicationState(userContext);
+  const authorCard = isApprovedAuthor
+    ? { href: "/author", title: "Author Dashboard", subtitle: "Books, analytics & royalties" }
+    : applicationState === "pending"
+    ? { href: "/dashboard/become-author", title: "Application Pending", subtitle: "Under editorial review" }
+    : applicationState === "rejected"
+    ? { href: "/dashboard/become-author", title: "Application Rejected", subtitle: "Reapply to publish" }
+    : { href: "/dashboard/become-author", title: "Become Author", subtitle: "Publish your work" };
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
   const [recommendedBooks, setRecommendedBooks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,13 +68,16 @@ export default function DashboardPage() {
 
     try {
       const [ordersRes, booksRes] = await Promise.allSettled([
-        api.get(`/users/${userId}/orders?limit=3&sort=-createdAt`),
+        api.get(`/users/${userId}/orders`, { params: { limit: 20 }, cache: "no-store" } as any),
         api.get(`/books?limit=4`),
       ]);
 
       if (ordersRes.status === "fulfilled") {
-        const data = ordersRes.value.data?.data || ordersRes.value.data;
-        setRecentOrders(Array.isArray(data) ? data : []);
+        // Sort client-side: the backend's sort param isn't guaranteed.
+        const list = extractList(ordersRes.value.data, "orders").sort(
+          (a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
+        setRecentOrders(list.slice(0, 3));
       }
 
       if (booksRes.status === "fulfilled") {
@@ -230,8 +221,8 @@ export default function DashboardPage() {
             </Card>
           </Link>
 
-          {/* Become Author (Gold Accent for Emphasis) */}
-          <Link href="/dashboard/become-author">
+          {/* Become Author / application status / Author Dashboard (Gold Accent for Emphasis) */}
+          <Link href={authorCard.href}>
             <Card className="bg-white border-2 border-[#D4AF37]/50 hover:border-[#D4AF37] hover:shadow-md transition-all rounded-xl cursor-pointer group relative overflow-hidden">
               <div className="absolute top-0 right-0 w-2 h-full bg-[#D4AF37]" />
               <CardContent className="p-5 flex items-center gap-4">
@@ -240,10 +231,10 @@ export default function DashboardPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1">
-                    <h4 className="font-serif font-bold text-sm text-[#0F3D3E]">Become Author</h4>
+                    <h4 className="font-serif font-bold text-sm text-[#0F3D3E]">{authorCard.title}</h4>
                     <Sparkles className="h-3 w-3 text-[#D4AF37]" />
                   </div>
-                  <p className="text-xs text-[#5C6E6E] truncate">Publish your work</p>
+                  <p className="text-xs text-[#5C6E6E] truncate">{authorCard.subtitle}</p>
                 </div>
               </CardContent>
             </Card>
@@ -305,7 +296,6 @@ export default function DashboardPage() {
               <div className="space-y-3">
                 {recentOrders.map((order: any) => {
                   const orderId = order.orderNumber || order._id || order.id;
-                  const status = order.status || order.orderStatus || "PENDING";
 
                   return (
                     <div
@@ -331,9 +321,9 @@ export default function DashboardPage() {
                       </div>
                       <div className="text-right">
                         <p className="font-bold text-sm text-[#0F3D3E]">
-                          ₹{(order.totalPrice || order.subtotal || 0).toLocaleString()}
+                          ₹{getOrderTotal(order).toLocaleString("en-IN")}
                         </p>
-                        <div className="mt-1">{getStatusBadge(status)}</div>
+                        <div className="mt-1">{getStatusBadge(order)}</div>
                       </div>
                     </div>
                   );

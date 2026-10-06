@@ -16,6 +16,7 @@ import api, { bootstrapUserContext } from "@/lib/api";
 import { GoogleLoginButton } from "@/components/auth/google-login-button";
 import dynamic from "next/dynamic";
 import { getSafeRedirect } from "@/lib/utils";
+import { getHomeRouteForContext } from "@/lib/author-access";
 
 const AccountLinkDialog = dynamic(
   () => import("@/components/auth/account-link-dialog").then((m) => m.AccountLinkDialog),
@@ -48,8 +49,10 @@ function LoginFormContent() {
     email: undefined,
   });
 
-  const handleRouteByCapabilities = (_context?: any) => {
-    router.replace(getSafeRedirect(redirectUrl, "/"));
+  const handleRouteByCapabilities = (context?: any) => {
+    // No explicit ?redirect=: approved authors go straight to their dashboard, admins to /admin.
+    const home = getHomeRouteForContext(useAuthStore.getState().user, context || useAuthStore.getState().userContext);
+    router.replace(getSafeRedirect(redirectUrl, home));
   };
 
   const handleManualSubmit = async (e: React.FormEvent) => {

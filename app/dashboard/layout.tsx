@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth-store";
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { canOpenAuthorDashboard, getAuthorApplicationState } from "@/lib/author-access";
 
 const sidebarLinks = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
@@ -38,7 +39,14 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { user, logout } = useAuthStore();
+  const { user, logout, userContext } = useAuthStore();
+  const applicationState = getAuthorApplicationState(userContext);
+  const authorCta =
+    applicationState === "pending"
+      ? { title: "Application Pending", subtitle: "Under review by our editors" }
+      : applicationState === "rejected"
+      ? { title: "Application Rejected", subtitle: "Reapply to publish with Harglim" }
+      : { title: "Become Author", subtitle: "Publish with Harglim" };
   const pathname = usePathname();
   const router = useRouter();
 
@@ -127,7 +135,21 @@ export default function DashboardLayout({
                 })}
               </div>
 
-              {/* Become Author Highlight Section */}
+              {/* Approved authors reach their studio from here (the navbar hides on /author). */}
+              {canOpenAuthorDashboard(user, userContext) && (
+                <div className="pt-2 border-t border-[#174C4D]">
+                  <Link
+                    href="/author"
+                    className="flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium border border-[#D4AF37]/40 text-[#D4AF37] hover:bg-[#D4AF37]/10"
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    <PenTool className="h-5 w-5 shrink-0" />
+                    <p className="leading-none text-xs font-bold uppercase tracking-wide">Author Dashboard</p>
+                  </Link>
+                </div>
+              )}
+
+              {/* Become Author / application status (readers only; no author nav until role is author) */}
               {user?.role === "reader" && (
                 <div className="pt-2 border-t border-[#174C4D]">
                   <Link
@@ -142,8 +164,8 @@ export default function DashboardLayout({
                   >
                     <PenTool className="h-5 w-5 shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <p className="leading-none text-xs font-bold uppercase tracking-wide">Become Author</p>
-                      <p className="text-[10px] opacity-80 mt-1 font-sans">Publish with Harglim</p>
+                      <p className="leading-none text-xs font-bold uppercase tracking-wide">{authorCta.title}</p>
+                      <p className="text-[10px] opacity-80 mt-1 font-sans">{authorCta.subtitle}</p>
                     </div>
                     <Sparkles className="h-4 w-4 shrink-0 text-[#D4AF37]" />
                   </Link>

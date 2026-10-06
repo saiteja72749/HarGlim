@@ -14,6 +14,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import type { Book } from "@/types";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
+import { extractList } from "@/lib/tracking";
 import { useEffect } from "react";
 export default function WishlistPage() {
   const { user } = useAuthStore();
@@ -29,9 +30,14 @@ export default function WishlistPage() {
     setLoading(true);
     setError(false);
     try {
-      const { data } = await api.get(`/users/${userId}/wishlist`);
-      const wishlistData = data.data || data;
-      setItems(Array.isArray(wishlistData) ? wishlistData : []);
+      const { data } = await api.get(`/users/${userId}/wishlist`, { params: { limit: 100 }, cache: "no-store" } as any);
+      const wishlistData = extractList(data, "wishlist");
+      // Entries may be books or { book: {...} } join rows; DELETE needs the *book* id.
+      setItems(
+        wishlistData
+          .map((entry: any) => (entry?.book && typeof entry.book === "object" ? { ...entry.book } : entry))
+          .filter((book: any) => book && (book._id || book.id))
+      );
     } catch (err) {
       console.error("Failed to fetch wishlist:", err);
       setError(true);
@@ -57,17 +63,18 @@ export default function WishlistPage() {
   };
 
   const handleAddToCart = (item: any) => {
-    if (!item.inStock && item.stock !== undefined && item.stock <= 0) {
+    const available = typeof item.stock === "number" ? item.stock - Number(item.reservedStock || 0) : 1;
+    if (available <= 0) {
       toast.error("Item is out of stock");
       return;
     }
+    // Keep the full book (slug, mrp, stock) so the cart links and prices stay correct.
     const bookToAdd = {
+      ...item,
       _id: (item._id || item.id).toString(),
-      title: item.title,
-      author: typeof item.author === 'object' ? item.author : { name: item.author },
-      price: item.price,
+      author: typeof item.author === "object" ? item.author : { name: item.author },
+      price: item.price ?? item.mrp,
       coverImage: item.coverImage || item.cover,
-      format: item.format || (item.formats && item.formats[0]) || "Paperback",
     } as unknown as Book;
     addItem(bookToAdd, 1);
     toast.success("Added to cart");

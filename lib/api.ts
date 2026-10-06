@@ -183,8 +183,23 @@ api.interceptors.response.use(
       } else if (status === 401) {
         console.warn(`[api] 401 expired/missing token for ${method} ${url}`);
       } else if (status === 403) {
-        console.warn(`[api] 403 insufficient permission for ${method} ${url}`);
-        toast.error('Admin access required or permission denied.', { id: 'admin-access-required' });
+        const errorCode = error.response?.data?.error;
+        console.warn(`[api] 403 ${errorCode || 'insufficient permission'} for ${method} ${url}`);
+        if (errorCode === 'AUTHOR_DASHBOARD_ACCESS_REQUIRED') {
+          // Should not happen for an approved author while paid access is disabled:
+          // the cached context is stale, so refresh it instead of showing a paywall.
+          if (!url.includes('/users/me/context')) bootstrapUserContext();
+        } else if (errorCode === 'AUTHOR_ROLE_REQUIRED') {
+          toast.error('This area is for approved authors only.', { id: 'author-role-required' });
+        } else {
+          toast.error(
+            url.startsWith('/admin') ? 'Admin access required.' : 'You do not have permission to do that.',
+            { id: 'permission-denied' }
+          );
+        }
+      } else if (status === 409 && error.response?.data?.error === 'AUTHOR_DASHBOARD_PAID_ACCESS_DISABLED') {
+        // Expected configuration response, not a failure: the dashboard is free.
+        console.info(`[api] 409 paid author dashboard access disabled for ${method} ${url}`);
       } else if (status === 429) {
         console.warn(`[api] 429 too many requests for ${method} ${url}`);
         toast.error('Too many requests. Please wait a few seconds and try again.', {
@@ -203,25 +218,44 @@ api.interceptors.response.use(
  * Bootstrap / Sync User Context (Capabilities, States, User info)
  * Call this immediately after Google or Password login.
  */
-export async function bootstrapUserContext(overrideToken?: string): Promise<UserContextData | null> {
-  try {
-    const headers: Record<string, string> = {};
-    if (overrideToken) {
-      headers.Authorization = `Bearer ${overrideToken}`;
-    }
-    
-    const { data } = await api.get('/users/me/context', { headers });
-    const contextData: UserContextData = data?.data || data;
+let contextRequest: Promise<UserContextData | null> | null = null;
 
-    if (contextData && contextData.capabilities) {
-      useAuthStore.getState().setUserContext(contextData);
-      return contextData;
+export async function bootstrapUserContext(overrideToken?: string): Promise<UserContextData | null> {
+  // Collapse concurrent callers (layout mount + page action) into one request.
+  if (contextRequest && !overrideToken) return contextRequest;
+
+  const { setContextStatus } = useAuthStore.getState();
+  setContextStatus('loading');
+
+  const request = (async () => {
+    try {
+      const headers: Record<string, string> = {};
+      if (overrideToken) {
+        headers.Authorization = `Bearer ${overrideToken}`;
+      }
+
+      // no-store: role/capabilities change on admin approval and must never come from the GET cache.
+      const { data } = await api.get('/users/me/context', { headers, cache: 'no-store' } as any);
+      const contextData: UserContextData = data?.data || data;
+
+      if (contextData && contextData.capabilities) {
+        useAuthStore.getState().setUserContext(contextData);
+        setContextStatus('ready');
+        return contextData;
+      }
+      setContextStatus('error');
+      return null;
+    } catch (error) {
+      console.error('Failed to fetch user context:', error);
+      setContextStatus('error');
+      return null;
+    } finally {
+      contextRequest = null;
     }
-    return null;
-  } catch (error) {
-    console.error('Failed to fetch user context:', error);
-    return null;
-  }
+  })();
+
+  contextRequest = request;
+  return request;
 }
 
 /**

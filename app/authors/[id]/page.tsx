@@ -60,7 +60,6 @@ export default function AuthorDetailPage() {
       try {
         const authorRes = await api
           .get(`/authors/${params.id}`)
-          .catch(() => api.get(`/users/${params.id}`))
           .catch(async () => {
             const listRes = await api.get('/authors');
             const items =
@@ -82,24 +81,23 @@ export default function AuthorDetailPage() {
       // 2. Fetch Author's Books with multi-level fallbacks
       let fetchedBooks: Book[] = [];
       try {
-        const [authorBooksRes, allBooksRes] = await Promise.allSettled([
-          api.get(`/authors/${params.id}/books`).catch(() => null),
-          api.get('/books', { params: { limit: 100 } }).catch(() => null),
-        ]);
-
-        if (authorBooksRes.status === 'fulfilled' && authorBooksRes.value?.data) {
-          const bData = authorBooksRes.value.data?.data || authorBooksRes.value.data;
-          if (Array.isArray(bData)) {
-            fetchedBooks = bData;
-          }
+        // GET /authors/{id}/books is the real per-author list (GET /books ignores ?author=).
+        const authorBooksRes = await api.get(`/authors/${params.id}/books`, { params: { limit: 100 } }).catch(() => null);
+        const bData = authorBooksRes?.data?.data || authorBooksRes?.data;
+        if (Array.isArray(bData)) {
+          fetchedBooks = bData;
         }
 
-        if (fetchedBooks.length === 0 && allBooksRes.status === 'fulfilled' && allBooksRes.value?.data) {
+        // Fallback only: scan the catalog and match by author id/name.
+        const allBooksRes = fetchedBooks.length === 0
+          ? await api.get('/books', { params: { limit: 100 } }).catch(() => null)
+          : null;
+        if (fetchedBooks.length === 0 && allBooksRes?.data) {
           const allRaw =
-            allBooksRes.value.data?.data?.books ||
-            allBooksRes.value.data?.data ||
-            allBooksRes.value.data?.books ||
-            allBooksRes.value.data ||
+            allBooksRes.data?.data?.books ||
+            allBooksRes.data?.data ||
+            allBooksRes.data?.books ||
+            allBooksRes.data ||
             [];
           const allList: Book[] = Array.isArray(allRaw) ? allRaw : [];
           const targetId = String(params.id || '').toLowerCase();

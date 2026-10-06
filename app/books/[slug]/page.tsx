@@ -202,17 +202,20 @@ export default function BookDetailPage() {
 
     async function checkUserOrder() {
       try {
-        const { data } = await api.get("/users/me/orders");
+        // Documented route is /users/{id}/orders ("me" is not accepted as an id there).
+        const userId = user?._id || user?.id;
+        const { data } = await api.get(`/users/${userId}/orders`, { params: { limit: 100 } });
         const ordersData = data?.data?.orders || data?.orders || data?.data || data || [];
         if (Array.isArray(ordersData) && book) {
           const matchingOrder = ordersData.find((ord: any) =>
             (ord.items || []).some((item: any) => {
-              const b = item.book || {};
+              // item.book may be populated or just the book id
+              const b = typeof item.book === "string" ? { _id: item.book } : item.book || {};
               return (
                 b._id === book._id ||
                 b.id === book._id ||
-                b.slug === book.slug ||
-                item.title === book.title
+                (b.slug && b.slug === book.slug) ||
+                (item.title && item.title === book.title)
               );
             })
           );
@@ -300,13 +303,27 @@ export default function BookDetailPage() {
     return new Date(b.createdAt || b.date || 0).getTime() - new Date(a.createdAt || a.date || 0).getTime();
   });
 
+  // Sellable stock = stock minus copies reserved by unpaid orders (Book.reservedStock).
+  const availableStock =
+    typeof book.stock === "number" ? Math.max(0, book.stock - Number((book as any).reservedStock || 0)) : Infinity;
+  const isOutOfStock = availableStock <= 0;
+
   const handleAddToCart = () => {
-    addItem(book, quantity);
-    toast.success(`Added ${quantity} ${quantity > 1 ? "copies" : "copy"} of "${book.title}" to cart! 🛒`);
+    if (isOutOfStock) {
+      toast.error("This book is out of stock right now.");
+      return;
+    }
+    const qty = Math.min(quantity, availableStock);
+    addItem(book, qty);
+    toast.success(`Added ${qty} ${qty > 1 ? "copies" : "copy"} of "${book.title}" to cart! 🛒`);
   };
 
   const handleBuyNow = () => {
-    addItem(book, quantity);
+    if (isOutOfStock) {
+      toast.error("This book is out of stock right now.");
+      return;
+    }
+    addItem(book, Math.min(quantity, availableStock));
     router.push("/checkout/cart");
   };
 
@@ -612,7 +629,8 @@ export default function BookDetailPage() {
                     type="button"
                     variant="ghost"
                     size="icon"
-                    onClick={() => setQuantity(quantity + 1)}
+                    onClick={() => setQuantity(Math.min(quantity + 1, availableStock))}
+                    disabled={quantity >= availableStock}
                     className="h-10 w-10 text-[#0F3D3E] rounded-r-xl"
                   >
                     <Plus className="h-3.5 w-3.5" />
@@ -628,14 +646,16 @@ export default function BookDetailPage() {
               <div className="space-y-3 pt-2">
                 <Button
                   onClick={handleAddToCart}
+                  disabled={isOutOfStock}
                   className="w-full bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-medium h-12 rounded-xl shadow-xs gap-2 text-sm"
                 >
                   <ShoppingCart className="h-4 w-4" />
-                  <span>Add to Cart</span>
+                  <span>{isOutOfStock ? "Out of Stock" : "Add to Cart"}</span>
                 </Button>
 
                 <Button
                   onClick={handleBuyNow}
+                  disabled={isOutOfStock}
                   className="w-full bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold h-12 rounded-xl shadow-xs gap-2 text-sm"
                 >
                   <span>Buy Now</span>
@@ -647,7 +667,7 @@ export default function BookDetailPage() {
               <div className="border-t border-[#E2E6DF] pt-4 space-y-2.5 text-xs text-[#5C6E6E]">
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
-                  <span><strong>100% Secure Payment</strong> (UPI, Cards, NetBanking)</span>
+                  <span><strong>Secure UPI Payment</strong> (Google Pay, PhonePe, Paytm and any UPI app)</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Truck className="h-4 w-4 text-[#0F3D3E] shrink-0" />
@@ -1052,11 +1072,11 @@ export default function BookDetailPage() {
         </div>
         <Button
           onClick={handleAddToCart}
-          disabled={(book.stock ?? 1) <= 0}
+          disabled={isOutOfStock}
           className="bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] font-serif font-bold text-xs h-10 px-5 rounded-xl shadow-xs shrink-0"
         >
           <ShoppingCart className="h-4 w-4 mr-1.5" />
-          <span>{(book.stock ?? 1) <= 0 ? "Out of Stock" : "Add to Cart"}</span>
+          <span>{isOutOfStock ? "Out of Stock" : "Add to Cart"}</span>
         </Button>
       </div>
     </div>

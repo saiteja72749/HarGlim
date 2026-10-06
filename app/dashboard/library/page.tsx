@@ -19,6 +19,7 @@ import {
 import { ErrorState } from "@/components/ui/error-state";
 import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
+import { extractList } from "@/lib/tracking";
 
 export default function LibraryPage() {
   const { user } = useAuthStore();
@@ -34,9 +35,18 @@ export default function LibraryPage() {
     setLoading(true);
     setError(false);
     try {
-      const { data } = await api.get(`/users/${userId}/library`);
-      const booksData = data.data || data;
-      setLibraryBooks(Array.isArray(booksData) ? booksData : []);
+      const { data } = await api.get(`/users/${userId}/library`, { params: { limit: 100 }, cache: "no-store" } as any);
+      const booksData = extractList(data, "library").length ? extractList(data, "library") : extractList(data, "books");
+      // Entries may be books or { book, purchasedAt, order } rows.
+      setLibraryBooks(
+        booksData
+          .map((entry: any) =>
+            entry?.book && typeof entry.book === "object"
+              ? { ...entry.book, purchasedAt: entry.purchasedAt || entry.createdAt, orderNumber: entry.order?.orderNumber || entry.orderNumber }
+              : entry
+          )
+          .filter((book: any) => book && (book._id || book.id || book.title))
+      );
     } catch (err) {
       console.error("Failed to fetch library:", err);
       setError(true);
@@ -55,7 +65,8 @@ export default function LibraryPage() {
     const query = searchQuery.toLowerCase();
 
     const matchesSearch = title.includes(query) || author.includes(query);
-    const matchesFormat = formatFilter === "all" || book.format === formatFilter;
+    // Backend formats are lowercase enums (paperback / hardcover / ebook / audiobook).
+    const matchesFormat = formatFilter === "all" || String(book.format || "").toLowerCase() === formatFilter.toLowerCase();
     return matchesSearch && matchesFormat;
   });
 

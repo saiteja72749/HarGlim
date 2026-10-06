@@ -132,12 +132,35 @@ function BooksContent() {
       else if (sortBy === "newest") params.sort = "newest";
       else if (sortBy === "featured") params.sort = "featured";
 
-      const { data } = await api.get("/books", { params });
+      // Live backend: GET /books ignores `search`/`q` (returns the unfiltered list),
+      // so text queries go to GET /search?q=, which does full-text matching.
+      const query = searchQuery.trim();
+      const { data } = query
+        ? await api.get("/search", { params: { q: query, page: currentPage, limit: 12 } })
+        : await api.get("/books", { params });
 
       const items = data.data?.books || (Array.isArray(data.data) ? data.data : []) || (Array.isArray(data) ? data : []);
       const pagination = data.pagination || data.data?.pagination || {};
 
       let result = Array.isArray(items) ? items : [];
+
+      // Filters the backend ignores (newRelease) or that /search doesn't take are applied here.
+      if (quickTagFilter === "newRelease") result = result.filter((b: any) => b.isNewRelease);
+      if (query) {
+        if (quickTagFilter === "featured") result = result.filter((b: any) => b.isFeatured);
+        if (quickTagFilter === "bestseller") result = result.filter((b: any) => b.isBestseller);
+        if (params.category) {
+          result = result.filter(
+            (b: any) => b.category?.slug === params.category || b.category?._id === selectedCategories[0]
+          );
+        }
+        if (params.minPrice !== undefined) {
+          result = result.filter((b: any) => {
+            const price = Number(b.price ?? b.mrp ?? 0);
+            return price >= params.minPrice && (params.maxPrice === undefined || price <= params.maxPrice);
+          });
+        }
+      }
 
       // Filter by selected format
       if (selectedFormats.length > 0) {
@@ -151,6 +174,15 @@ function BooksContent() {
       // Filter by min rating
       if (minRatingFilter) {
         result = result.filter((b) => (b.rating || b.ratings || 0) >= minRatingFilter);
+      }
+
+      // Backend ignores sort=rating / sort=newest; order the returned page here.
+      if (sortBy === "rating") {
+        result = [...result].sort((a: any, b: any) => (b.ratings ?? b.rating ?? 0) - (a.ratings ?? a.rating ?? 0));
+      } else if (sortBy === "newest") {
+        result = [...result].sort(
+          (a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
       }
 
       setBooks(result);

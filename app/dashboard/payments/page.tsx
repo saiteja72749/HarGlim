@@ -35,6 +35,23 @@ import {
 import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
+import { extractList } from "@/lib/tracking";
+import { PAYMENT_STATE_META, getPaymentOrderId, mapPaymentStatus, type PaymentState } from "@/lib/order-status";
+
+const FILTERS: { value: "ALL" | PaymentState; label: string }[] = [
+  { value: "ALL", label: "All Statuses" },
+  { value: "awaiting_payment", label: "Awaiting Payment" },
+  { value: "verification_pending", label: "Verification Pending" },
+  { value: "paid", label: "Verified / Paid" },
+  { value: "failed", label: "Rejected / Failed" },
+  { value: "expired", label: "Expired" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
+const PURPOSE_LABEL: Record<string, string> = {
+  ORDER_PURCHASE: "Book order",
+  AUTHOR_ACCESS: "Author dashboard plan",
+};
 
 const getStatusColor = (status: string) => {
   const s = (status || "").toUpperCase();
@@ -135,8 +152,9 @@ export default function PaymentsPage() {
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | PaymentState>("ALL");
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [orderNumbers, setOrderNumbers] = useState<Record<string, string>>({});
 
   const fetchPayments = useCallback(async () => {
     if (!user?._id && !user?.id) return;
@@ -144,18 +162,23 @@ export default function PaymentsPage() {
 
     setLoading(true);
     try {
-      const params: Record<string, any> = {
-        page: 1,
-        limit: 50,
-      };
-      if (statusFilter !== "ALL") {
-        params.status = statusFilter;
-      }
+      // Filtering happens client-side: the backend status values (PAYMENT_VERIFIED, QR_GENERATED...)
+      // don't match the old filter values (VERIFIED, INTENT_CREATED...), so server filtering returned nothing.
+      const [res, ordersRes] = await Promise.all([
+        api.get(`/users/${userId}/payments`, { params: { page: 1, limit: 100 }, cache: "no-store" } as any),
+        api.get(`/users/${userId}/orders`, { params: { limit: 100 } }).catch(() => null),
+      ]);
+      const list = extractList(res.data, "payments").sort(
+        (a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+      setPayments(list);
 
-      const res = await api.get(`/users/${userId}/payments`, { params });
-      const rawData = res.data?.data || res.data;
-      const list = rawData?.items || rawData?.payments || (Array.isArray(rawData) ? rawData : []);
-      setPayments(Array.isArray(list) ? list : []);
+      // Payment.order is an id; show the human order number instead.
+      const numbers: Record<string, string> = {};
+      extractList(ordersRes?.data, "orders").forEach((o: any) => {
+        if (o._id && o.orderNumber) numbers[String(o._id)] = o.orderNumber;
+      });
+      setOrderNumbers(numbers);
     } catch (err: any) {
       console.warn("Failed to fetch user payments:", err);
       // Fallback: if payments list fails, try extracting from user orders
@@ -183,7 +206,7 @@ export default function PaymentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [user, statusFilter]);
+  }, [user]);
 
   useEffect(() => {
     fetchPayments();
@@ -201,21 +224,19 @@ export default function PaymentsPage() {
     const utr = (payment.utr || payment.transactionReference || "").toLowerCase();
     const query = searchQuery.toLowerCase().trim();
 
-    return !query || payId.includes(query) || orderRef.includes(query) || utr.includes(query);
+    const mappedNumber = (orderNumbers[getPaymentOrderId(payment)] || "").toLowerCase();
+    const matchesQuery =
+      !query || payId.includes(query) || orderRef.includes(query) || mappedNumber.includes(query) || utr.includes(query);
+    const matchesStatus = statusFilter === "ALL" || mapPaymentStatus(payment.status) === statusFilter;
+    return matchesQuery && matchesStatus;
   });
 
   const totalSpent = payments
-    .filter((p) => {
-      const s = (p.status || "").toUpperCase();
-      return s === "COMPLETED" || s === "VERIFIED" || s === "PAID" || s === "PAYMENT_VERIFIED";
-    })
+    .filter((p) => mapPaymentStatus(p.status) === "paid")
     .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
   const pendingAmount = payments
-    .filter((p) => {
-      const s = (p.status || "").toUpperCase();
-      return s === "PENDING" || s === "VERIFICATION_PENDING" || s === "PAYMENT_SUBMITTED" || s === "INTENT_CREATED";
-    })
+    .filter((p) => mapPaymentStatus(p.status) === "verification_pending")
     .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
   const handleDownloadReceipt = async (payment: any) => {
@@ -229,11 +250,13 @@ export default function PaymentsPage() {
 
     setDownloadingId(payment._id);
     try {
-      const { data } = await api.get(`/users/${userId}/invoices`);
-      const invoices = data?.data || data || [];
-      const matchingInvoice = Array.isArray(invoices)
-        ? invoices.find((inv: any) => (inv.order?._id || inv.order) === orderId || inv.payment === payment._id)
-        : null;
+      const { data } = await api.get(`/users/${userId}/invoices`, { params: { limit: 100 } });
+      const invoices = extractList(data, "invoices");
+      const matchingInvoice = invoices.find(
+        (inv: any) =>
+          String(inv.order?._id || inv.order) === String(orderId) ||
+          String(inv.payment?._id || inv.payment) === String(payment._id)
+      );
 
       const invoiceId = matchingInvoice?._id || matchingInvoice?.id;
       if (invoiceId) {
@@ -338,17 +361,17 @@ export default function PaymentsPage() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "ALL" | PaymentState)}>
               <SelectTrigger className="w-full sm:w-56">
                 <Filter className="mr-2 h-4 w-4" />
                 <SelectValue placeholder="Filter by status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ALL">All Statuses</SelectItem>
-                <SelectItem value="VERIFICATION_PENDING">Verification Pending</SelectItem>
-                <SelectItem value="VERIFIED">Verified / Paid</SelectItem>
-                <SelectItem value="INTENT_CREATED">Awaiting Payment</SelectItem>
-                <SelectItem value="FAILED">Failed / Rejected</SelectItem>
+                {FILTERS.map((f) => (
+                  <SelectItem key={f.value} value={f.value}>
+                    {f.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -384,10 +407,13 @@ export default function PaymentsPage() {
                 <TableBody>
                   {filteredPayments.map((payment) => {
                     const StatusIcon = getStatusIcon(payment.status);
+                    const state = mapPaymentStatus(payment.status);
+                    const purpose = PURPOSE_LABEL[String(payment.purpose || "").toUpperCase()];
                     const orderNo =
                       payment.order?.orderNumber ||
                       payment.orderNumber ||
-                      (typeof payment.order === "string" ? payment.order.slice(0, 10) : "N/A");
+                      orderNumbers[getPaymentOrderId(payment)] ||
+                      (purpose && payment.purpose !== "ORDER_PURCHASE" ? purpose : "—");
                     const dateStr = payment.createdAt
                       ? new Date(payment.createdAt).toLocaleDateString("en-IN", {
                           day: "numeric",
@@ -415,22 +441,30 @@ export default function PaymentsPage() {
                           ₹{(Number(payment.amount) || 0).toLocaleString()}
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline" className={`gap-1 font-semibold text-xs ${getStatusColor(payment.status)}`}>
+                          <Badge variant="outline" className={`gap-1 font-semibold text-xs ${state ? PAYMENT_STATE_META[state].tone : getStatusColor(payment.status)}`}>
                             <StatusIcon className="h-3 w-3" />
-                            {getFriendlyStatus(payment.status)}
+                            {state ? PAYMENT_STATE_META[state].label : getFriendlyStatus(payment.status)}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="gap-1 text-xs"
-                            disabled={downloadingId === payment._id}
-                            onClick={() => handleDownloadReceipt(payment)}
-                          >
-                            <Download className="h-3.5 w-3.5" />
-                            {downloadingId === payment._id ? "..." : "Receipt"}
-                          </Button>
+                          {state === "paid" && payment.purpose !== "AUTHOR_ACCESS" ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="gap-1 text-xs"
+                              disabled={downloadingId === payment._id}
+                              onClick={() => handleDownloadReceipt(payment)}
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                              {downloadingId === payment._id ? "..." : "Invoice"}
+                            </Button>
+                          ) : state === "awaiting_payment" || state === "failed" ? (
+                            <Button variant="ghost" size="sm" className="text-xs" asChild>
+                              <a href="/dashboard/orders">Pay in My Orders</a>
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     );

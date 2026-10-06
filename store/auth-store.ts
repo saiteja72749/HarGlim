@@ -16,6 +16,7 @@ export interface User {
 }
 
 export type AuthStatus = 'idle' | 'authenticating' | 'context-loading' | 'authenticated' | 'error';
+export type ContextStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 interface AuthState {
   user: User | null;
@@ -26,11 +27,14 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   authStatus: AuthStatus;
+  /** Freshness of userContext in THIS page load (not persisted). The cached role can be stale until "ready". */
+  contextStatus: ContextStatus;
   
   // Actions
   login: (user: User, token: string, refreshToken?: string, refreshTokenExpiresAt?: string) => void;
   setUserContext: (context: UserContextData) => void;
   setAuthStatus: (status: AuthStatus) => void;
+  setContextStatus: (status: ContextStatus) => void;
   setUser: (user: User) => void;
   setLoading: (isLoading: boolean) => void;
   logout: () => void;
@@ -47,6 +51,7 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
       isLoading: false,
       authStatus: 'idle',
+      contextStatus: 'idle',
       
       login: (user: User, token: string, refreshToken?: string, refreshTokenExpiresAt?: string) => 
         set({ 
@@ -72,6 +77,9 @@ export const useAuthStore = create<AuthState>()(
       setAuthStatus: (authStatus: AuthStatus) =>
         set({ authStatus }),
 
+      setContextStatus: (contextStatus: ContextStatus) =>
+        set({ contextStatus }),
+
       setUser: (user: User) => 
         set({ user }),
         
@@ -91,6 +99,7 @@ export const useAuthStore = create<AuthState>()(
           userContext: null,
           isAuthenticated: false,
           authStatus: 'idle',
+          contextStatus: 'idle',
         });
       },
     }),

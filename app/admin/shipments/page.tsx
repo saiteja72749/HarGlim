@@ -35,6 +35,16 @@ import {
 } from "@/components/ui/table";
 import toast from "react-hot-toast";
 import { DELIVERY_PLANS, resolveCourierTrackingUrl } from "@/lib/couriers";
+import {
+  SHIPMENT_LABELS,
+  canAssignCourier,
+  canCancelShipment,
+  extractList,
+  extractTrackingInfo,
+  getNextShipmentStatuses,
+  getShipmentLabel,
+  normalizeShipmentStatus,
+} from "@/lib/tracking";
 import { getSafeExternalUrl } from "@/lib/utils";
 
 export default function AdminShipmentsPage() {
@@ -63,6 +73,7 @@ export default function AdminShipmentsPage() {
   const [selectedShipmentForStatus, setSelectedShipmentForStatus] = useState<any | null>(null);
   const [newStatus, setNewStatus] = useState("IN_TRANSIT");
   const [statusDescription, setStatusDescription] = useState("Package dispatched via courier");
+  const [statusLocation, setStatusLocation] = useState("");
   const [submittingStatus, setSubmittingStatus] = useState(false);
 
   const fetchShipments = useCallback(async () => {
@@ -80,12 +91,7 @@ export default function AdminShipmentsPage() {
         res = await api.get("/admin/shipments", { params });
       }
 
-      const items =
-        res?.data?.data?.shipments ||
-        res?.data?.shipments ||
-        (Array.isArray(res?.data?.data) ? res.data.data : []) ||
-        (Array.isArray(res?.data) ? res.data : []);
-      setShipments(Array.isArray(items) ? items : []);
+      setShipments(extractList(res?.data, "shipments"));
     } catch (err) {
       console.warn("Shipments fetch notice:", err);
       // If shipments endpoint not yet seeded, set empty gracefully
@@ -102,9 +108,10 @@ export default function AdminShipmentsPage() {
   // Open Assign Courier
   const openAssignModal = (shipment: any, defaultCourier?: string) => {
     setSelectedShipmentForCourier(shipment);
-    const existingCourier = defaultCourier || shipment.courierName || shipment.carrier || shipment.serviceName || "India Post";
-    const existingTracking = shipment.trackingNumber || shipment.trackingId || "";
-    const existingUrl = getSafeExternalUrl(shipment.trackingUrl) || resolveCourierTrackingUrl(existingCourier, existingTracking);
+    const existing = extractTrackingInfo(shipment);
+    const existingCourier = defaultCourier || existing.courierName || "India Post";
+    const existingTracking = existing.trackingNumber;
+    const existingUrl = existing.trackingUrl || resolveCourierTrackingUrl(existingCourier, existingTracking);
 
     setCourierForm({
       provider: "manual",
@@ -157,22 +164,33 @@ export default function AdminShipmentsPage() {
     setSubmittingCourier(true);
 
     try {
-      const finalTrackingNumber = courierForm.trackingNumber.trim() || (isDigital ? "DIGITAL-FULFILLMENT" : "");
+      // Tracking numbers must be unique, so digital deliveries get a per-order reference.
+      const orderRef =
+        selectedShipmentForCourier.order?.orderNumber || selectedShipmentForCourier.orderNumber || String(shipmentId).slice(-8);
+      const finalTrackingNumber = courierForm.trackingNumber.trim() || (isDigital ? `DIGITAL-${orderRef}` : "");
       const payload = {
-        provider: courierForm.provider,
-        serviceName: courierForm.serviceName,
+        // Courier adapters are placeholders on the backend: "manual" is required for every courier.
+        provider: "manual",
         courierName: courierForm.serviceName,
+        serviceName: courierForm.serviceName,
         trackingNumber: finalTrackingNumber,
         trackingUrl: getSafeExternalUrl(enteredTrackingUrl) || undefined,
         estimatedDelivery: courierForm.estimatedDelivery ? new Date(courierForm.estimatedDelivery).toISOString() : undefined,
       };
 
+      // Admin shipment actions take shipment._id only (never orderNumber / shipmentId UUID / AWB).
       await api.post(`/admin/shipments/${shipmentId}/assign-courier`, payload);
-      toast.success(`Assigned ${courierForm.serviceName} and tracking URL updated! 🚚`);
+      toast.success(`Assigned ${courierForm.serviceName} (${finalTrackingNumber.toUpperCase()}).`);
       setSelectedShipmentForCourier(null);
       fetchShipments();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || "Failed to assign courier.");
+      const status = err.response?.status;
+      toast.error(
+        status === 409
+          ? "That tracking number is already used on another shipment. Check the AWB and enter a different one."
+          : err.response?.data?.message || "Failed to assign courier."
+      );
+      if (status === 400 || status === 409) fetchShipments();
     } finally {
       setSubmittingCourier(false);
     }
@@ -185,15 +203,21 @@ export default function AdminShipmentsPage() {
     const shipmentId = selectedShipmentForStatus._id || selectedShipmentForStatus.id;
     setSubmittingStatus(true);
     try {
+      // Order status follows automatically (PICKED_UP/IN_TRANSIT -> SHIPPED, DELIVERED -> DELIVERED);
+      // don't update the order separately.
       await api.post(`/admin/shipments/${shipmentId}/update-status`, {
         status: newStatus,
-        description: statusDescription,
+        description: statusDescription.trim() || undefined,
+        location: statusLocation.trim() || undefined,
+        occurredAt: new Date().toISOString(),
+        metadata: { source: "admin-dashboard" },
       });
-      toast.success(`Shipment updated to ${newStatus}! ✅`);
+      toast.success(`Shipment updated: ${getShipmentLabel(newStatus)}`);
       setSelectedShipmentForStatus(null);
       fetchShipments();
     } catch (err: any) {
       toast.error(err.response?.data?.message || "Failed to update shipment status.");
+      if (err.response?.status === 400) fetchShipments();
     } finally {
       setSubmittingStatus(false);
     }
@@ -214,17 +238,16 @@ export default function AdminShipmentsPage() {
   };
 
   const getShipmentBadge = (status: string) => {
-    switch (status?.toUpperCase()) {
-      case "DELIVERED":
-        return <Badge className="bg-emerald-500/15 text-emerald-800 border-emerald-300 text-[11px]">DELIVERED</Badge>;
-      case "IN_TRANSIT":
-      case "DISPATCHED":
-        return <Badge className="bg-blue-500/15 text-blue-800 border-blue-300 text-[11px]">IN TRANSIT</Badge>;
-      case "CANCELLED":
-        return <Badge className="bg-rose-500/15 text-rose-800 border-rose-300 text-[11px]">CANCELLED</Badge>;
-      default:
-        return <Badge className="bg-amber-500/15 text-amber-800 border-amber-300 text-[11px]">{status || "CREATED"}</Badge>;
-    }
+    const s = normalizeShipmentStatus(status);
+    const tone =
+      s === "DELIVERED" || s === "COMPLETED"
+        ? "bg-emerald-500/15 text-emerald-800 border-emerald-300"
+        : ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY"].includes(s)
+        ? "bg-blue-500/15 text-blue-800 border-blue-300"
+        : s === "CANCELLED" || s === "RETURNED"
+        ? "bg-rose-500/15 text-rose-800 border-rose-300"
+        : "bg-amber-500/15 text-amber-800 border-amber-300";
+    return <Badge className={`${tone} text-[11px]`}>{getShipmentLabel(s)}</Badge>;
   };
 
   // Filter Delivery Plans
@@ -339,7 +362,7 @@ export default function AdminShipmentsPage() {
                 />
               </div>
               <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-                {["ALL", "CREATED", "IN_TRANSIT", "DELIVERED"].map((st) => (
+                {["ALL", "CREATED", "COURIER_ASSIGNED", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED"].map((st) => (
                   <Button
                     key={st}
                     variant={statusFilter === st ? "default" : "outline"}
@@ -351,7 +374,7 @@ export default function AdminShipmentsPage() {
                         : "text-xs border-[#E2E6DF]"
                     }
                   >
-                    {st}
+                    {st === "ALL" ? "All" : SHIPMENT_LABELS[st]}
                   </Button>
                 ))}
               </div>
@@ -393,9 +416,10 @@ export default function AdminShipmentsPage() {
                   ) : (
                     shipments.map((s) => {
                       const sId = s._id || s.id;
-                      const cName = s.serviceName || s.courierName || s.carrier || "Courier Unassigned";
-                      const trackingNum = s.trackingNumber || s.trackingId || s.awb;
-                      const trackingUrl = getSafeExternalUrl(s.trackingUrl) || resolveCourierTrackingUrl(cName, trackingNum);
+                      const tracking = extractTrackingInfo(s);
+                      const cName = tracking.courierName || "Courier Unassigned";
+                      const trackingNum = tracking.trackingNumber;
+                      const trackingUrl = tracking.trackingUrl;
 
                       return (
                         <TableRow key={sId} className="hover:bg-[#F8F9F7]/60 text-xs">
@@ -411,7 +435,7 @@ export default function AdminShipmentsPage() {
                                 <span>{cName}</span>
                               </p>
                               <span className="text-[10px] text-[#5C6E6E] font-mono bg-[#F8F9F7] px-1.5 py-0.5 rounded border border-[#E2E6DF]/80">
-                                {s.provider || "Manual Courier"}
+                                {s.courier?.provider || s.provider || "Manual Courier"}
                               </span>
                             </div>
                           </TableCell>
@@ -447,33 +471,42 @@ export default function AdminShipmentsPage() {
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => openAssignModal(s)}
-                                className="h-8 text-xs font-bold text-[#0F3D3E] border-[#0F3D3E]/30 hover:bg-[#0F3D3E]/5"
-                              >
-                                <span>{trackingNum ? "Edit Plan" : "Assign Plan"}</span>
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  setSelectedShipmentForStatus(s);
-                                  setNewStatus(s.status || "IN_TRANSIT");
-                                }}
-                                className="h-8 text-xs text-blue-700 border-blue-200 hover:bg-blue-50"
-                              >
-                                Status
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleCancelShipment(s)}
-                                className="h-8 text-rose-600 hover:bg-rose-50"
-                              >
-                                Cancel
-                              </Button>
+                              {/* Only actions valid for the current shipment status are shown. */}
+                              {canAssignCourier(s.status) && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openAssignModal(s)}
+                                  className="h-8 text-xs font-bold text-[#0F3D3E] border-[#0F3D3E]/30 hover:bg-[#0F3D3E]/5"
+                                >
+                                  <span>{trackingNum ? "Edit Courier" : "Assign Courier"}</span>
+                                </Button>
+                              )}
+                              {getNextShipmentStatuses(s.status).length > 0 && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setSelectedShipmentForStatus(s);
+                                    setNewStatus(getNextShipmentStatuses(s.status)[0]);
+                                    setStatusDescription("");
+                                    setStatusLocation("");
+                                  }}
+                                  className="h-8 text-xs text-blue-700 border-blue-200 hover:bg-blue-50"
+                                >
+                                  Update Status
+                                </Button>
+                              )}
+                              {canCancelShipment(s.status) && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleCancelShipment(s)}
+                                  className="h-8 text-rose-600 hover:bg-rose-50"
+                                >
+                                  Cancel
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -810,18 +843,32 @@ export default function AdminShipmentsPage() {
 
             <form onSubmit={handleStatusUpdateSubmit} className="p-6 space-y-4 text-xs">
               <div className="space-y-1.5">
+                <p className="text-[#5C6E6E]">
+                  Current: <strong className="text-[#0F3D3E]">{getShipmentLabel(selectedShipmentForStatus?.status)}</strong>
+                </p>
                 <label className="font-bold uppercase tracking-wider text-[#5C6E6E] block">New Status</label>
                 <Select value={newStatus} onValueChange={setNewStatus}>
                   <SelectTrigger className="bg-[#F8F9F7]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="CREATED">CREATED</SelectItem>
-                    <SelectItem value="IN_TRANSIT">IN_TRANSIT (Dispatched)</SelectItem>
-                    <SelectItem value="OUT_FOR_DELIVERY">OUT_FOR_DELIVERY</SelectItem>
-                    <SelectItem value="DELIVERED">DELIVERED</SelectItem>
+                    {getNextShipmentStatuses(selectedShipmentForStatus?.status).map((st) => (
+                      <SelectItem key={st} value={st}>
+                        {SHIPMENT_LABELS[st]}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold uppercase tracking-wider text-[#5C6E6E] block">Location (optional)</label>
+                <Input
+                  value={statusLocation}
+                  onChange={(e) => setStatusLocation(e.target.value)}
+                  placeholder="e.g. Hyderabad Distribution Hub"
+                  className="bg-[#F8F9F7]"
+                />
               </div>
 
               <div className="space-y-1.5">
@@ -829,6 +876,7 @@ export default function AdminShipmentsPage() {
                 <Input
                   value={statusDescription}
                   onChange={(e) => setStatusDescription(e.target.value)}
+                  placeholder="Shown to the customer in their tracking timeline"
                   className="bg-[#F8F9F7]"
                 />
               </div>

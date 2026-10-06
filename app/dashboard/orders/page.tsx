@@ -43,59 +43,28 @@ import api from "@/lib/api";
 import { ErrorState } from "@/components/ui/error-state";
 import toast from "react-hot-toast";
 import { normalizeEmailForStorage } from "@/lib/email";
-import { resolveCourierTrackingUrl } from "@/lib/couriers";
-import { getSafeExternalUrl } from "@/lib/utils";
+import {
+  extractList,
+  extractTrackingInfo,
+  getShipmentLabel,
+  getTrackingHistory,
+  mergeShipmentsIntoOrders,
+  normalizeShipmentStatus,
+} from "@/lib/tracking";
+import {
+  FULFILMENT_META,
+  PAYMENT_STATE_META,
+  getFulfilmentStage,
+  getOrderTotal,
+  getPaymentState,
+  indexPaymentsByOrder,
+  type PaymentState,
+} from "@/lib/order-status";
 
-// Status Badge mapping for Order Status (Placed / Printed / Shipped / Delivered)
-const getOrderStatusBadge = (status: string) => {
-  const s = (status || "").toUpperCase().replace(/[-_]/g, " ");
-  if (s.includes("DELIVER")) {
-    return (
-      <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 font-semibold px-2.5 py-0.5">
-        Delivered
-      </Badge>
-    );
-  }
-  if (s.includes("SHIP") || s.includes("TRANSIT") || s.includes("DISPATCH")) {
-    return (
-      <Badge className="bg-blue-500/10 text-blue-700 border-blue-500/20 font-semibold px-2.5 py-0.5">
-        Shipped
-      </Badge>
-    );
-  }
-  if (s.includes("PRINT")) {
-    return (
-      <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/20 font-semibold px-2.5 py-0.5">
-        Printed
-      </Badge>
-    );
-  }
-  if (s.includes("CANCEL") || s.includes("REJECT")) {
-    return (
-      <Badge className="bg-rose-500/10 text-rose-700 border-rose-500/20 font-semibold px-2.5 py-0.5">
-        Cancelled
-      </Badge>
-    );
-  }
-  return (
-    <Badge className="bg-indigo-500/10 text-indigo-700 border-indigo-500/20 font-semibold px-2.5 py-0.5">
-      Order Placed
-    </Badge>
-  );
+const getOrderStatusBadge = (order: any) => {
+  const meta = FULFILMENT_META[getFulfilmentStage(order)];
+  return <Badge className={`${meta.tone} font-semibold px-2.5 py-0.5`}>{meta.label}</Badge>;
 };
-
-const PAID_STATUSES = ["PAID", "VERIFIED", "SUCCESS", "COMPLETED", "APPROVED", "CONFIRMED", "PAYMENT_APPROVED"];
-
-const getOrderPaymentStatus = (order: any) =>
-  (
-    order.payment_status ||
-    order.paymentStatus ||
-    order.paymentState ||
-    (typeof order.payment === "object" ? order.payment?.status : "") ||
-    ""
-  ).toUpperCase();
-
-const isOrderPaid = (order: any) => Boolean(order.isPaid || PAID_STATUSES.includes(getOrderPaymentStatus(order)));
 
 const getOrderAddress = (order: any) =>
   order?.orderFormData?.shippingAddress ||
@@ -153,157 +122,36 @@ const getOrderContact = (order: any) => {
   };
 };
 
-const firstString = (...values: any[]) =>
-  values.find((value) => typeof value === "string" && value.trim())?.trim() || "";
-
-const getShipmentCandidates = (order: any) =>
-  [
-    order.shipment,
-    order.shipmentDetails,
-    order.shipping,
-    order.fulfillment,
-    order.delivery,
-    ...(Array.isArray(order.shipments) ? order.shipments : []),
-  ].filter(Boolean);
-
-const getLatestTrackingEvent = (shipment: any) => {
-  const trackingEvents = Array.isArray(shipment?.tracking) ? shipment.tracking : [];
-  return trackingEvents[trackingEvents.length - 1] || {};
+const PAYMENT_ICON: Record<PaymentState, typeof Clock> = {
+  awaiting_payment: AlertTriangle,
+  verification_pending: Clock,
+  paid: ShieldCheck,
+  failed: XCircle,
+  expired: Clock,
+  cancelled: XCircle,
 };
 
-const getOrderTrackingInfo = (order: any) => {
-  const shipment = getShipmentCandidates(order)[0] || {};
-  const courier = shipment.courier || order.courierDetails || {};
-  const trackingEvent = getLatestTrackingEvent(shipment);
-
-  const trackingNumber = firstString(
-    order.tracking_id,
-    order.trackingId,
-    order.trackingNumber,
-    order.awbNumber,
-    order.awb,
-    order.consignmentNumber,
-    shipment.trackingNumber,
-    shipment.trackingId,
-    shipment.awb,
-    shipment.awbNumber,
-    shipment.consignmentNumber,
-    courier.trackingNumber,
-    courier.trackingId,
-    courier.awb,
-    courier.awbNumber,
-    trackingEvent.trackingNumber,
-    trackingEvent.trackingId,
-    trackingEvent.awb,
-    trackingEvent.awbNumber
-  );
-
-  const courierName = firstString(
-    order.courier_name,
-    order.courierName,
-    order.courier,
-    order.carrier,
-    shipment.serviceName,
-    shipment.courierName,
-    shipment.carrier,
-    courier.serviceName,
-    courier.courierName,
-    courier.name,
-    courier.provider,
-    trackingEvent.courierName,
-    trackingEvent.serviceName
-  );
-
-  const directTrackingUrl = getSafeExternalUrl(
-    firstString(
-      order.tracking_url,
-      order.trackingUrl,
-      order.trackingLink,
-      shipment.trackingUrl,
-      shipment.tracking_url,
-      shipment.trackingLink,
-      courier.trackingUrl,
-      courier.tracking_url,
-      courier.trackingLink,
-      trackingEvent.trackingUrl,
-      trackingEvent.tracking_url,
-      trackingEvent.trackingLink
-    )
-  );
-
-  return {
-    trackingNumber,
-    courierName,
-    trackingUrl: directTrackingUrl || resolveCourierTrackingUrl(courierName, trackingNumber),
-  };
-};
-
-const getOrderMatchKeys = (order: any) =>
-  [
-    order._id,
-    order.id,
-    order.order,
-    order.orderId,
-    order.orderNumber,
-    typeof order.order === "object" ? order.order?._id : "",
-    typeof order.order === "object" ? order.order?.id : "",
-    typeof order.order === "object" ? order.order?.orderNumber : "",
-  ]
-    .filter(Boolean)
-    .map((value) => String(value));
-
-const mergeShipmentsIntoOrders = (orders: any[], shipments: any[]) => {
-  if (!shipments.length) return orders;
-
-  const shipmentsByOrderKey = new Map<string, any>();
-  shipments.forEach((shipment) => {
-    getOrderMatchKeys(shipment).forEach((key) => shipmentsByOrderKey.set(key, shipment));
-  });
-
-  return orders.map((order) => {
-    const shipment = getOrderMatchKeys(order).map((key) => shipmentsByOrderKey.get(key)).find(Boolean);
-    return shipment ? { ...order, shipment } : order;
-  });
-};
-
-// Payment Status Badge mapping
-const getPaymentStatusBadge = (isPaid: boolean, paymentStatus?: string, payment_status?: string) => {
-  const ps = (payment_status || paymentStatus || "").toUpperCase();
-  const isApprovedOrPaid =
-    isPaid === true ||
-    ["PAID", "VERIFIED", "SUCCESS", "COMPLETED", "APPROVED", "CONFIRMED", "PAYMENT_APPROVED"].includes(ps);
-
-  if (isApprovedOrPaid) {
-    return (
-      <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/30 font-semibold flex items-center gap-1">
-        <ShieldCheck className="h-3 w-3 text-emerald-600" />
-        <span>Payment Confirmed</span>
-      </Badge>
-    );
-  }
-  if (ps === "REJECTED" || ps === "FAILED") {
-    return (
-      <Badge className="bg-rose-500/10 text-rose-700 border-rose-500/30 font-semibold flex items-center gap-1">
-        <XCircle className="h-3 w-3 text-rose-600" />
-        <span>Payment Rejected</span>
-      </Badge>
-    );
-  }
-  if (ps === "SUBMITTED" || ps === "VERIFICATION_PENDING") {
-    return (
-      <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/30 font-semibold flex items-center gap-1">
-        <Clock className="h-3 w-3 text-amber-600" />
-        <span>Verification Pending</span>
-      </Badge>
-    );
-  }
+const getPaymentStatusBadge = (state: PaymentState) => {
+  const meta = PAYMENT_STATE_META[state];
+  const Icon = PAYMENT_ICON[state];
   return (
-    <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/30 font-semibold flex items-center gap-1">
-      <AlertTriangle className="h-3 w-3 text-amber-600" />
-      <span>Pending Payment</span>
+    <Badge className={`${meta.tone} font-semibold flex items-center gap-1`}>
+      <Icon className="h-3 w-3" />
+      <span>{meta.label}</span>
     </Badge>
   );
 };
+
+// Filter values group backend states the way readers think about them.
+const ORDER_FILTERS: { value: string; label: string; match: (order: any, payment: PaymentState) => boolean }[] = [
+  { value: "all", label: "All Orders", match: () => true },
+  { value: "awaiting", label: "Awaiting Payment", match: (_o, p) => p === "awaiting_payment" || p === "failed" },
+  { value: "verifying", label: "Verification Pending", match: (_o, p) => p === "verification_pending" },
+  { value: "processing", label: "Processing / Printing", match: (o, p) => p === "paid" && ["placed", "processing", "printed"].includes(getFulfilmentStage(o)) },
+  { value: "shipped", label: "Shipped", match: (o) => getFulfilmentStage(o) === "shipped" },
+  { value: "delivered", label: "Delivered", match: (o) => getFulfilmentStage(o) === "delivered" },
+  { value: "cancelled", label: "Cancelled / Expired", match: (o, p) => getFulfilmentStage(o) === "cancelled" || p === "cancelled" || p === "expired" },
+];
 
 export default function OrdersPage() {
   const { user } = useAuthStore();
@@ -319,6 +167,8 @@ export default function OrdersPage() {
   const [submittingUtrMap, setSubmittingUtrMap] = useState<Record<string, boolean>>({});
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
   const [copiedAwbMap, setCopiedAwbMap] = useState<Record<string, boolean>>({});
+  const [paymentsByOrder, setPaymentsByOrder] = useState<Map<string, any>>(new Map());
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const copyAwbToClipboard = (orderId: string, awbText: string) => {
     navigator.clipboard.writeText(awbText);
@@ -334,32 +184,28 @@ export default function OrdersPage() {
     setError(false);
 
     try {
-      const [ordersRes, shipmentsRes] = await Promise.allSettled([
-        api.get(`/users/${userId}/orders`),
-        api.get(`/users/${userId}/shipments`),
+      // Backend paginates both lists (default limit 10). Without an explicit limit,
+      // shipments for older orders were never returned, so their tracking ID was missing.
+      // no-store: tracking is assigned by admin at any time; skip the 30s GET cache.
+      const listConfig = { params: { limit: 100 }, cache: "no-store" } as any;
+      const [ordersRes, shipmentsRes, paymentsRes] = await Promise.allSettled([
+        api.get(`/users/${userId}/orders`, listConfig),
+        api.get(`/users/${userId}/shipments`, listConfig),
+        // The Order only stores isPaid/utr; the Payment record has the real state
+        // (rejected, expired, cancelled) and the active QR.
+        api.get(`/users/${userId}/payments`, listConfig),
       ]);
 
       if (ordersRes.status !== "fulfilled") {
         throw ordersRes.reason;
       }
 
-      const ordersPayload = ordersRes.value.data;
-      const ordersData =
-        ordersPayload?.data?.orders ||
-        ordersPayload?.orders ||
-        ordersPayload?.data ||
-        ordersPayload ||
-        [];
-      const shipmentsPayload = shipmentsRes.status === "fulfilled" ? shipmentsRes.value.data : null;
-      const shipmentsData =
-        shipmentsPayload?.data?.shipments ||
-        shipmentsPayload?.shipments ||
-        shipmentsPayload?.data ||
-        shipmentsPayload ||
-        [];
-
-      const list = Array.isArray(ordersData) ? ordersData : [];
-      const shipments = Array.isArray(shipmentsData) ? shipmentsData : [];
+      const list = extractList(ordersRes.value.data, "orders").sort(
+        (a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+      const shipments = shipmentsRes.status === "fulfilled" ? extractList(shipmentsRes.value.data, "shipments") : [];
+      const payments = paymentsRes.status === "fulfilled" ? extractList(paymentsRes.value.data, "payments") : [];
+      setPaymentsByOrder(indexPaymentsByOrder(payments));
       setOrders(mergeShipmentsIntoOrders(list, shipments));
     } catch (err) {
       console.error("Failed to fetch user orders:", err);
@@ -373,18 +219,60 @@ export default function OrdersPage() {
     fetchOrders();
   }, [user]);
 
+  // On expand: GET /orders/{_id}/tracking returns { shipment, trackingHistory }.
+  // 404 just means the shipment isn't created yet (before payment verification + invoice).
+  const [trackingByOrder, setTrackingByOrder] = useState<
+    Record<string, { state: "loading" | "ready" | "none"; history: ReturnType<typeof getTrackingHistory> }>
+  >({});
+  const loadOrderShipment = async (order: any) => {
+    const orderMongoId = String(order._id || order.id || "");
+    if (!orderMongoId || trackingByOrder[orderMongoId]?.state === "loading") return;
+    setTrackingByOrder((prev) => ({ ...prev, [orderMongoId]: { state: "loading", history: prev[orderMongoId]?.history || [] } }));
+
+    try {
+      const { data } = await api.get(`/orders/${orderMongoId}/tracking`, { cache: "no-store" } as any);
+      const payload = data?.data || data;
+      const shipment = payload?.shipment;
+      if (shipment && typeof shipment === "object") {
+        setOrders((prev) => prev.map((o) => (String(o._id || o.id) === orderMongoId ? { ...o, shipment } : o)));
+      }
+      setTrackingByOrder((prev) => ({
+        ...prev,
+        [orderMongoId]: { state: shipment ? "ready" : "none", history: getTrackingHistory(payload) },
+      }));
+    } catch {
+      setTrackingByOrder((prev) => ({ ...prev, [orderMongoId]: { state: "none", history: [] } }));
+    }
+  };
+
+  // DELETE /orders/{id}: documented "cancel order where allowed" (unpaid orders).
+  const handleCancelOrder = async (orderMongoId: string, orderNumber: string) => {
+    if (!window.confirm(`Cancel order ${orderNumber}? This releases the reserved stock and cannot be undone.`)) return;
+    setCancellingId(orderMongoId);
+    try {
+      await api.delete(`/orders/${orderMongoId}`);
+      toast.success(`Order ${orderNumber} cancelled.`);
+      fetchOrders();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "This order can no longer be cancelled.");
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
   // Submit UTR Number API Handler
-  const handleSubmitUtr = async (orderId: string) => {
-    const utr = (utrInputMap[orderId] || "").trim();
-    if (!utr || utr.length < 6) {
-      toast.error("Please enter a valid UTR / Transaction Reference Number (min 6 digits).");
+  const handleSubmitUtr = async (orderId: string, orderMongoId: string) => {
+    const utr = (utrInputMap[orderId] || "").trim().toUpperCase();
+    // Backend pattern: ^[A-Z0-9-]{6,64}$
+    if (!/^[A-Z0-9-]{6,64}$/.test(utr)) {
+      toast.error("Enter the UTR exactly as shown in your UPI app (6–64 letters, digits or hyphens).");
       return;
     }
 
     setSubmittingUtrMap((prev) => ({ ...prev, [orderId]: true }));
 
     try {
-      await api.put(`/orders/${orderId}/verify-payment`, { utr });
+      await api.put(`/orders/${orderMongoId}/verify-payment`, { utr });
 
       toast.success("UTR submitted successfully! Waiting for admin verification.");
       setUtrInputMap((prev) => ({ ...prev, [orderId]: "" }));
@@ -402,11 +290,14 @@ export default function OrdersPage() {
     setDownloadingInvoiceId(orderId);
 
     try {
-      const { data } = await api.get(`/users/${userId}/invoices`);
-      const invoices = data?.data || data || [];
-      const matchingInvoice = Array.isArray(invoices)
-        ? invoices.find((inv: any) => (inv.order?._id || inv.order) === orderId || inv.payment === order.payment)
-        : null;
+      const { data } = await api.get(`/users/${userId}/invoices`, { params: { limit: 100 } });
+      const invoices = extractList(data, "invoices");
+      const paymentId = typeof order.payment === "object" ? order.payment?._id : order.payment;
+      const matchingInvoice = invoices.find(
+        (inv: any) =>
+          String(inv.order?._id || inv.order) === String(orderId) ||
+          (paymentId && String(inv.payment?._id || inv.payment) === String(paymentId))
+      );
 
       const invoiceId = matchingInvoice?._id || matchingInvoice?.id;
       if (invoiceId) {
@@ -437,12 +328,12 @@ export default function OrdersPage() {
   const filteredOrders = orders.filter((order) => {
     const orderNum = (order.orderNumber || order._id || order.id || "").toLowerCase();
     const utrNum = (order.utr || "").toLowerCase();
-    const status = (order.status || order.orderStatus || "").toUpperCase();
-    const query = searchQuery.toLowerCase();
+    const query = searchQuery.toLowerCase().trim();
+    const paymentState = getPaymentState(order, paymentsByOrder.get(String(order._id || order.id)));
 
-    const matchesSearch = orderNum.includes(query) || utrNum.includes(query);
-    const matchesStatus = statusFilter === "all" || status === statusFilter.toUpperCase();
-    return matchesSearch && matchesStatus;
+    const matchesSearch = !query || orderNum.includes(query) || utrNum.includes(query);
+    const filter = ORDER_FILTERS.find((f) => f.value === statusFilter) || ORDER_FILTERS[0];
+    return matchesSearch && filter.match(order, paymentState);
   });
 
   return (
@@ -476,12 +367,11 @@ export default function OrdersPage() {
                 <SelectValue placeholder="Filter by status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Orders</SelectItem>
-                <SelectItem value="PENDING">Payment Pending</SelectItem>
-                <SelectItem value="PROCESSING">Processing</SelectItem>
-                <SelectItem value="SHIPPED">In Transit / Shipped</SelectItem>
-                <SelectItem value="DELIVERED">Completed</SelectItem>
-                <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                {ORDER_FILTERS.map((f) => (
+                  <SelectItem key={f.value} value={f.value}>
+                    {f.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -524,15 +414,18 @@ export default function OrdersPage() {
           {filteredOrders.map((order, index) => {
             const status = order.status || order.orderStatus || "PENDING";
             const id = order.orderNumber || order._id || order.id;
+            // API paths take the Mongo ObjectId, never the human-readable orderNumber.
+            const orderMongoId = order._id || order.id;
             const isExpanded = expandedOrder === id;
-            const isPaid = isOrderPaid(order);
-            const rawPaymentStatus = getOrderPaymentStatus(order);
-            const paymentStatus = rawPaymentStatus || (order.utr ? "VERIFICATION_PENDING" : "PENDING");
+            const paymentRecord = paymentsByOrder.get(String(orderMongoId));
+            const paymentState = getPaymentState(order, paymentRecord);
+            const isPaid = paymentState === "paid";
+            const isOrderCancelled = getFulfilmentStage(order) === "cancelled";
 
-            const subtotal = order.subtotal ?? (order.totalPrice ? order.totalPrice - (order.shippingPrice || 0) : order.items?.reduce((acc: number, item: any) => acc + (item.price || item.book?.price || 0) * (item.quantity || 1), 0) || 0);
-            const shippingPrice = order.shippingPrice ?? order.shippingFee ?? 0;
-            const totalPrice = order.totalPrice ?? order.totalAmount ?? order.amount ?? (subtotal + shippingPrice);
-            const { trackingNumber, courierName, trackingUrl } = getOrderTrackingInfo(order);
+            const totalPrice = getOrderTotal(order);
+            const shippingPrice = Number(order.shippingPrice ?? order.shippingFee ?? 0) || 0;
+            const subtotal = Number(order.subtotal ?? order.itemsPrice ?? totalPrice - shippingPrice) || 0;
+            const { trackingNumber, courierName, trackingUrl } = extractTrackingInfo(order);
             const orderContact = getOrderContact(order);
 
             return (
@@ -553,7 +446,7 @@ export default function OrdersPage() {
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-mono font-bold text-base text-[#0F3D3E]">{id}</span>
-                            {getOrderStatusBadge(status)}
+                            {getOrderStatusBadge(order)}
                             {trackingNumber && (
                               <Badge variant="outline" className="bg-blue-50 text-blue-800 border-blue-200 text-[11px] font-mono font-semibold flex items-center gap-1">
                                 <Truck className="h-3 w-3" />
@@ -577,10 +470,10 @@ export default function OrdersPage() {
 
                       <div className="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 pt-3 sm:pt-0 border-[#E2E6DF]">
                         <div className="text-left sm:text-right">
-                          <p className="text-xs text-[#5C6E6E]">Amount Payable</p>
-                          <p className="text-xl font-serif font-bold text-[#0F3D3E]">₹{totalPrice.toLocaleString()}</p>
+                          <p className="text-xs text-[#5C6E6E]">{isPaid ? "Amount Paid" : "Amount Payable"}</p>
+                          <p className="text-xl font-serif font-bold text-[#0F3D3E]">₹{totalPrice.toLocaleString("en-IN")}</p>
                         </div>
-                        {getPaymentStatusBadge(isPaid, paymentStatus, order.payment_status)}
+                        {getPaymentStatusBadge(paymentState)}
                       </div>
                     </div>
                   </CardHeader>
@@ -634,7 +527,10 @@ export default function OrdersPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => setExpandedOrder(isExpanded ? null : id)}
+                          onClick={() => {
+                            setExpandedOrder(isExpanded ? null : id);
+                            if (!isExpanded) loadOrderShipment(order);
+                          }}
                           className="gap-1.5 text-xs text-[#0F3D3E] hover:text-[#0F3D3E] font-medium shrink-0"
                         >
                           <span>{isExpanded ? "Hide Details" : "View Order Details"}</span>
@@ -657,29 +553,30 @@ export default function OrdersPage() {
                         </Badge>
                       </div>
 
-                      {/* STATE 1: PAYMENT_PENDING (No UTR submitted yet) */}
-                      {!isPaid && (!paymentStatus || paymentStatus === "PENDING") && !order.utr && (
+                      {/* Order cancelled: no payment actions */}
+                      {isOrderCancelled && !isPaid && (
+                        <div className="p-4 rounded-xl border border-gray-300 bg-gray-50 text-gray-700 text-xs">
+                          This order was cancelled. No payment is needed.
+                        </div>
+                      )}
+
+                      {/* STATE 1: awaiting payment (no UTR yet) */}
+                      {!isOrderCancelled && paymentState === "awaiting_payment" && (
                         <div className="space-y-4 pt-1">
                           <div className="p-4 rounded-xl border-2 border-[#D4AF37] bg-[#D4AF37]/5 flex flex-col md:flex-row items-center gap-6">
-                            {/* QR Code Container with Gold Highlight */}
-                            <div className="flex flex-col items-center bg-white p-3 rounded-xl border-2 border-[#D4AF37] shadow-sm">
-                              <QrCode className="h-24 w-24 text-[#0F3D3E]" />
-                              <span className="text-[10px] font-bold text-[#0F3D3E] mt-1 uppercase tracking-wider">
-                                Scan & Pay UPI
-                              </span>
-                            </div>
+                            <OrderPaymentQr userId={String(user?._id || user?.id || "")} order={order} payment={paymentRecord} />
                             <div className="flex-1 text-center md:text-left space-y-2">
                               <div className="flex items-center justify-between md:justify-start gap-3">
                                 <Badge className="bg-[#D4AF37] text-[#0F3D3E] font-bold text-xs">
-                                  PAYMENT_PENDING
+                                  Awaiting payment
                                 </Badge>
                                 <span className="text-lg font-serif font-bold text-[#0F3D3E]">
-                                  Amount: ₹{totalPrice.toLocaleString()}
+                                  Amount: ₹{totalPrice.toLocaleString("en-IN")}
                                 </span>
                               </div>
                               <p className="text-xs text-[#5C6E6E] leading-relaxed">
-                                Scan the UPI QR Code with Google Pay, PhonePe, or Paytm to pay{" "}
-                                <strong className="text-[#0F3D3E]">₹{totalPrice.toLocaleString()}</strong>. After completing payment, enter your 12-digit UTR transaction reference below.
+                                Scan the QR with Google Pay, PhonePe or Paytm and pay exactly{" "}
+                                <strong className="text-[#0F3D3E]">₹{totalPrice.toLocaleString("en-IN")}</strong>. Then enter the UTR / transaction reference from your UPI app below.
                               </p>
 
                               {/* UTR Input Form */}
@@ -695,7 +592,7 @@ export default function OrdersPage() {
                                   />
                                 </div>
                                 <Button
-                                  onClick={() => handleSubmitUtr(id)}
+                                  onClick={() => handleSubmitUtr(id, orderMongoId)}
                                   disabled={submittingUtrMap[id]}
                                   className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-medium h-10 px-5 gap-2 shrink-0"
                                 >
@@ -712,13 +609,21 @@ export default function OrdersPage() {
                                   )}
                                 </Button>
                               </div>
+                              <button
+                                type="button"
+                                onClick={() => handleCancelOrder(String(orderMongoId), String(id))}
+                                disabled={cancellingId === orderMongoId}
+                                className="text-[11px] text-rose-700 hover:underline disabled:opacity-50"
+                              >
+                                {cancellingId === orderMongoId ? "Cancelling..." : "Cancel this order"}
+                              </button>
                             </div>
                           </div>
                         </div>
                       )}
 
                       {/* STATE 2: VERIFICATION_PENDING (UTR Submitted, Waiting for Admin) */}
-                      {!isPaid && (paymentStatus === "VERIFICATION_PENDING" || (order.utr && !["REJECTED", "FAILED"].includes(paymentStatus.toUpperCase()))) && (
+                      {!isOrderCancelled && paymentState === "verification_pending" && (
                         <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 space-y-2">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
@@ -726,19 +631,24 @@ export default function OrdersPage() {
                               <h5 className="font-bold text-sm font-serif">VERIFICATION_PENDING</h5>
                             </div>
                             <span className="font-mono text-xs font-semibold bg-white/80 px-2 py-0.5 rounded text-amber-900 border border-amber-300">
-                              UTR: {order.utr}
+                              UTR: {order.utr || paymentRecord?.utr || "submitted"}
                             </span>
                           </div>
                           <p className="text-xs text-amber-800 font-medium">
-                            Waiting for admin verification. Your payment reference was received and is being verified by our finance team.
+                            We received your payment reference and our team is verifying it. This page updates once it is confirmed.
                           </p>
-                          <div className="pt-1">
-                            <Input
-                              value={order.utr || ""}
-                              disabled
-                              className="bg-white/60 text-xs font-mono border-amber-300 cursor-not-allowed opacity-70"
-                            />
-                          </div>
+                        </div>
+                      )}
+
+                      {/* Expired / cancelled payment intent */}
+                      {!isOrderCancelled && (paymentState === "expired" || paymentState === "cancelled") && (
+                        <div className="p-4 rounded-xl border border-gray-300 bg-gray-50 text-gray-800 space-y-1">
+                          <h5 className="font-bold text-sm font-serif">{PAYMENT_STATE_META[paymentState].label}</h5>
+                          <p className="text-xs">
+                            This payment request is no longer active. If you already paid, contact us with your UTR and order number{" "}
+                            <span className="font-mono">{id}</span>; otherwise place a new order.
+                          </p>
+                          <Link href="/contact" className="text-xs font-semibold text-[#0F3D3E] underline">Contact support</Link>
                         </div>
                       )}
 
@@ -770,7 +680,7 @@ export default function OrdersPage() {
                       )}
 
                       {/* STATE 4: FAILED / REJECTED */}
-                      {paymentStatus === "REJECTED" && (
+                      {!isOrderCancelled && paymentState === "failed" && (
                         <div className="p-4 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-900 space-y-3">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
@@ -779,7 +689,7 @@ export default function OrdersPage() {
                             </div>
                           </div>
                           <p className="text-xs text-rose-800">
-                            Payment verification failed or UTR reference could not be matched. Please re-check your UTR and resubmit.
+                            We could not match your payment reference{paymentRecord?.rejectionReason || paymentRecord?.reason ? `: ${paymentRecord.rejectionReason || paymentRecord.reason}` : "."} Check the UTR in your UPI app and submit the correct one (a previously rejected UTR can&apos;t be reused).
                           </p>
 
                           <div className="flex flex-col sm:flex-row gap-2 pt-1">
@@ -792,7 +702,7 @@ export default function OrdersPage() {
                               }
                             />
                             <Button
-                              onClick={() => handleSubmitUtr(id)}
+                              onClick={() => handleSubmitUtr(id, orderMongoId)}
                               disabled={submittingUtrMap[id]}
                               size="sm"
                               className="bg-rose-700 hover:bg-rose-800 text-white text-xs gap-1.5 font-medium shrink-0"
@@ -937,11 +847,23 @@ export default function OrdersPage() {
                                     <h4 className="font-serif font-bold text-sm text-[#0F3D3E]">
                                       Shipment & Tracking
                                     </h4>
-                                    {getOrderStatusBadge(status)}
+                                    {getOrderStatusBadge(order)}
                                   </div>
                                   <p className="text-xs text-[#5C6E6E] mt-0.5">
                                     Courier Partner: <strong className="text-[#0F3D3E]">{courierName || "To be assigned upon dispatch"}</strong>
                                   </p>
+                                  {order.shipment?.status && (
+                                    <p className="text-xs text-[#5C6E6E] mt-0.5">
+                                      Shipment: <strong className="text-[#0F3D3E]">{getShipmentLabel(order.shipment.status)}</strong>
+                                      {(() => {
+                                        const eta = extractTrackingInfo(order).estimatedDelivery;
+                                        const done = ["DELIVERED", "COMPLETED"].includes(normalizeShipmentStatus(order.shipment.status));
+                                        return eta && !done ? (
+                                          <> · Expected by <strong className="text-[#0F3D3E]">{new Date(eta).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</strong></>
+                                        ) : null;
+                                      })()}
+                                    </p>
+                                  )}
                                 </div>
                               </div>
 
@@ -1038,15 +960,54 @@ export default function OrdersPage() {
                               </div>
                             ) : (
                               /* Neither trackingUrl nor trackingNumber yet */
-                              <div className="p-3.5 rounded-xl bg-white border border-[#E2E6DF] flex items-center gap-3">
-                                <Clock className="h-4 w-4 text-[#5C6E6E] shrink-0" />
-                                <p className="text-xs text-[#5C6E6E]">
-                                  {status.toUpperCase().includes("PRINT")
-                                    ? "Book printing is physically in progress. Courier Tracking link & ID will appear once shipped."
-                                    : "Order placed. Printing will be processed shortly and shipment details will be updated here."}
-                                </p>
+                              <div className="p-3.5 rounded-xl bg-white border border-[#E2E6DF] flex items-start gap-3">
+                                <Clock className="h-4 w-4 text-[#5C6E6E] shrink-0 mt-0.5" />
+                                <div className="text-xs text-[#5C6E6E]">
+                                  {!order.shipment ? (
+                                    <>
+                                      <p className="font-semibold text-[#0F3D3E]">Preparing your shipment</p>
+                                      <p>Tracking information will be available after payment verification.</p>
+                                    </>
+                                  ) : (
+                                    <p>
+                                      {status.toUpperCase().includes("PRINT")
+                                        ? "Your book is being printed. The courier and tracking ID will appear here once it ships."
+                                        : "Your shipment is being prepared. The courier and tracking ID will appear here once it ships."}
+                                    </p>
+                                  )}
+                                </div>
                               </div>
                             )}
+
+                            {/* Tracking timeline from GET /orders/{id}/tracking */}
+                            {(() => {
+                              const tracking = trackingByOrder[String(orderMongoId)];
+                              if (tracking?.state === "loading" && !tracking.history.length) {
+                                return <p className="text-xs text-[#5C6E6E]">Loading tracking history...</p>;
+                              }
+                              if (!tracking?.history.length) return null;
+                              return (
+                                <ol className="relative border-l-2 border-[#0F3D3E]/15 ml-2 space-y-3">
+                                  {[...tracking.history].reverse().map((event, i) => (
+                                    <li key={`${event.status}-${event.occurredAt}-${i}`} className="ml-4">
+                                      <span
+                                        className={`absolute -left-[7px] mt-1 h-3 w-3 rounded-full border-2 border-white ${i === 0 ? "bg-[#0F3D3E]" : "bg-[#0F3D3E]/30"}`}
+                                      />
+                                      <p className="text-xs font-semibold text-[#0F3D3E]">
+                                        {getShipmentLabel(event.status)}
+                                        {event.location && <span className="font-normal text-[#5C6E6E]"> · {event.location}</span>}
+                                      </p>
+                                      {event.description && <p className="text-xs text-[#5C6E6E]">{event.description}</p>}
+                                      {event.occurredAt && (
+                                        <p className="text-[10px] text-[#5C6E6E]">
+                                          {new Date(event.occurredAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                                        </p>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ol>
+                              );
+                            })()}
                           </div>
 
                           {/* Action Footer */}
@@ -1088,6 +1049,68 @@ export default function OrdersPage() {
             );
           })}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Real UPI QR for an unpaid order. Order list rows usually omit the (large) QR, so it is
+ * read from the payment record: GET /users/{id}/payments/{paymentId} includes active QR metadata.
+ */
+function OrderPaymentQr({ userId, order, payment }: { userId: string; order: any; payment?: any }) {
+  const paymentId = String(
+    payment?._id || (typeof order.payment === "object" ? order.payment?._id : order.payment) || ""
+  );
+  const initialQr = payment?.qrCodeDataUrl || order.qrCodeDataUrl || "";
+  const [qr, setQr] = useState<string>(initialQr);
+  const [upiUrl, setUpiUrl] = useState<string>(payment?.upiUrl || "");
+  const [state, setState] = useState<"loading" | "ready" | "missing">(initialQr ? "ready" : "loading");
+
+  useEffect(() => {
+    if (initialQr || !paymentId || !userId) {
+      if (!initialQr) setState("missing");
+      return;
+    }
+    let cancelled = false;
+    api
+      .get(`/users/${userId}/payments/${paymentId}`, { cache: "no-store" } as any)
+      .then(({ data }) => {
+        if (cancelled) return;
+        const detail = data?.data?.payment || data?.data || data;
+        let raw = detail?.qrCodeDataUrl || detail?.qr?.dataUrl || detail?.qrCode || "";
+        if (raw && !raw.startsWith("data:") && !raw.startsWith("http")) raw = `data:image/png;base64,${raw}`;
+        setQr(raw);
+        setUpiUrl(detail?.upiUrl || detail?.qr?.upiUrl || "");
+        setState(raw ? "ready" : "missing");
+      })
+      .catch(() => !cancelled && setState("missing"));
+    return () => {
+      cancelled = true;
+    };
+  }, [initialQr, paymentId, userId]);
+
+  return (
+    <div className="flex flex-col items-center bg-white p-3 rounded-xl border-2 border-[#D4AF37] shadow-sm w-40 shrink-0">
+      {state === "ready" ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={qr} alt={`UPI QR for order ${order.orderNumber || ""}`} className="h-32 w-32 object-contain" />
+      ) : state === "loading" ? (
+        <div className="h-32 w-32 flex items-center justify-center">
+          <span className="h-6 w-6 border-2 border-[#0F3D3E] border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : (
+        <div className="h-32 w-32 flex flex-col items-center justify-center text-center gap-1">
+          <QrCode className="h-12 w-12 text-[#5C6E6E]/50" />
+          <span className="text-[10px] text-[#5C6E6E]">QR unavailable. Contact support to pay this order.</span>
+        </div>
+      )}
+      {upiUrl ? (
+        <a href={upiUrl} className="text-[10px] font-bold text-[#0F3D3E] mt-1 uppercase tracking-wider underline md:hidden">
+          Open in UPI app
+        </a>
+      ) : (
+        <span className="text-[10px] font-bold text-[#0F3D3E] mt-1 uppercase tracking-wider">Scan & Pay UPI</span>
       )}
     </div>
   );

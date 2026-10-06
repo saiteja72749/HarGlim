@@ -24,9 +24,10 @@ import { useAuthStore } from "@/store/auth-store";
 import toast from "react-hot-toast";
 import { ErrorState } from "@/components/ui/error-state";
 import api from "@/lib/api";
+import { loadSavedAddress, saveAddress } from "@/lib/saved-address";
 
 export default function ProfilePage() {
-  const { user } = useAuthStore();
+  const { user, setUser } = useAuthStore();
   const [isLoading, setIsLoading] = useState(false);
   const [isFetching, setIsFetching] = useState(true);
   const [error, setError] = useState(false);
@@ -50,25 +51,26 @@ export default function ProfilePage() {
     try {
       const userId = user?._id || user?.id;
       const [res, ordersRes] = await Promise.allSettled([
-        api
-          .get(`/users/${userId}`)
-          .catch(() => api.get("/auth/me"))
-          .catch(() => api.get("/users/me")),
-        api.get(`/users/${userId}/orders`),
+        // GET /users/me is the documented "current user profile" endpoint.
+        api.get("/users/me", { cache: "no-store" } as any),
+        api.get(`/users/${userId}/orders`, { params: { limit: 100 } }),
       ]);
 
+      // Phone/address are not part of the backend user profile; they live on this device.
+      const saved = loadSavedAddress(userId);
+
       if (res.status === "fulfilled") {
-        const userData = res.value.data?.data || res.value.data?.user || res.value.data;
+        const userData = res.value.data?.data?.user || res.value.data?.data || res.value.data?.user || res.value.data;
         if (userData) {
           setFormData({
             name: userData.name || user?.name || "",
             email: userData.email || user?.email || "",
-            phone: userData.phone || "",
+            phone: saved?.phone || userData.phone || "",
             bio: userData.bio || "",
-            address: userData.address || "",
-            city: userData.city || "",
-            state: userData.state || "",
-            pincode: userData.pincode || "",
+            address: saved?.addressLine1 || userData.address || "",
+            city: saved?.city || userData.city || "",
+            state: saved?.state || userData.state || "",
+            pincode: saved?.postalCode || userData.pincode || "",
           });
         }
       } else if (user) {
@@ -80,10 +82,9 @@ export default function ProfilePage() {
       }
 
       if (ordersRes.status === "fulfilled") {
+        const total = ordersRes.value.data?.pagination?.total;
         const oData = ordersRes.value.data?.data || ordersRes.value.data;
-        if (Array.isArray(oData)) {
-          setTotalOrders(oData.length);
-        }
+        setTotalOrders(typeof total === "number" ? total : Array.isArray(oData) ? oData.length : 0);
       }
     } catch (err) {
       console.warn("Could not fetch remote profile details, using session data:", err);
@@ -120,14 +121,33 @@ export default function ProfilePage() {
     e.preventDefault();
     const userId = user?._id || user?.id;
 
+    if (!formData.name.trim()) {
+      toast.error("Please enter your name.");
+      return;
+    }
+
     setIsLoading(true);
     try {
-      await api
-        .put(`/users/${userId}`, formData)
-        .catch(() => api.put("/users/me", formData))
-        .catch(() => api.put("/auth/me", formData));
+      // Backend UserUpdateRequest only accepts name, bio and profilePicture.
+      await api.put(`/users/${userId}`, { name: formData.name.trim(), bio: formData.bio });
+      if (user) setUser({ ...user, name: formData.name.trim() });
 
-      toast.success("Profile updated successfully ✅");
+      const savedLocally = saveAddress(userId, {
+        fullName: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        addressLine1: formData.address,
+        city: formData.city,
+        state: formData.state,
+        postalCode: formData.pincode,
+        country: "India",
+      });
+
+      toast.success(
+        savedLocally
+          ? "Profile saved. Your delivery address is saved on this device and will pre-fill checkout."
+          : "Profile saved."
+      );
     } catch (err: any) {
       console.error("Failed to update profile", err);
       toast.error(err.response?.data?.message || "Failed to update profile. Please try again.");

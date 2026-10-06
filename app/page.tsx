@@ -134,7 +134,8 @@ export default function Home() {
       setLoading(false);
 
       const [bestsellersRes, categoriesRes, authorsRes, booksCountRes, authorsCountRes] = await Promise.allSettled([
-        api.get("/books?sort=rating&limit=4").catch(() => api.get("/books?bestseller=true&limit=4")),
+        // Live backend honours `bestseller=true`; `sort=rating` is ignored (returns default order).
+        api.get("/books?bestseller=true&limit=4"),
         api.get("/categories?featured=true&limit=6").catch(() => api.get("/categories?limit=6")),
         api.get("/authors?limit=6"),
         api.get("/books?limit=1"),

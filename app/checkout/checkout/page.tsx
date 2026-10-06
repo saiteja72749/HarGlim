@@ -9,6 +9,8 @@ import { useCartStore } from '@/store/cart-store';
 import { AnimatePresence, motion } from 'framer-motion';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
+import { useAuthStore } from '@/store/auth-store';
+import { loadSavedAddress, saveAddress } from '@/lib/saved-address';
 
 const defaultAddress = {
   fullName: '',
@@ -34,6 +36,20 @@ export default function CheckoutStepPage() {
   const clearCart = useCartStore((state) => state.clearCart);
 
   const [address, setAddress] = useState(defaultAddress);
+  const authUser = useAuthStore((state) => state.user);
+  const authUserId = authUser?._id || authUser?.id;
+
+  // Pre-fill from the address saved on Profile / the last order, then the account name/email.
+  useEffect(() => {
+    const saved = loadSavedAddress(authUserId);
+    setAddress((prev) => ({
+      ...prev,
+      ...Object.fromEntries(Object.entries(saved || {}).filter(([, v]) => typeof v === 'string' && v)),
+      fullName: prev.fullName || saved?.fullName || authUser?.name || '',
+      email: prev.email || saved?.email || authUser?.email || '',
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUserId]);
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'upi' | 'cod'>('upi');
   const [submitting, setSubmitting] = useState(false);
   const [showUpiModal, setShowUpiModal] = useState(false);
@@ -63,10 +79,11 @@ export default function CheckoutStepPage() {
   const [upiUrl, setUpiUrl] = useState('');
 
   useEffect(() => {
-    if (!items.length) {
+    // Once an order exists the cart is cleared on purpose; don't bounce to the cart then.
+    if (!items.length && !currentOrderId) {
       router.push('/checkout/cart');
     }
-  }, [items.length, router]);
+  }, [items.length, router, currentOrderId]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -161,6 +178,7 @@ export default function CheckoutStepPage() {
 
         setCurrentOrderId(orderId);
         setCurrentOrderNumber(orderNum);
+        saveAddress(authUserId, address);
 
         let rawQr = responseData.qrCodeDataUrl || data.qrCodeDataUrl || paymentObj?.qrCodeDataUrl || orderObj?.qrCodeDataUrl || '';
         if (rawQr && !rawQr.startsWith('data:') && !rawQr.startsWith('http')) {
@@ -413,6 +431,13 @@ export default function CheckoutStepPage() {
                   onClick={() => {
                     setShowUpiModal(false);
                     setUpiStatus('waiting');
+                    if (currentOrderId) {
+                      // The order (and its stock reservation) already exists. Keeping the cart
+                      // would let "Place Order" create a duplicate, so finish it from My Orders.
+                      clearCart();
+                      toast.success(`Order ${currentOrderNumber} saved. Pay and submit your UTR anytime from My Orders.`, { duration: 6000 });
+                      router.push('/dashboard/orders');
+                    }
                   }}
                   disabled={upiStatus === 'success'}
                   aria-label="Close payment dialog"

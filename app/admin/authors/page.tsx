@@ -3,6 +3,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import api from "@/lib/api";
+import { normalizeAuthorDashboard, type AuthorDashboardSummary } from "@/lib/author-dashboard";
+import { AuthorSalesPanel } from "@/components/authors/author-sales-panel";
+import { useAuthStore } from "@/store/auth-store";
+import { isPaidAuthorDashboardEnabled } from "@/lib/author-access";
 import { ErrorState } from "@/components/ui/error-state";
 import {
   Feather,
@@ -29,6 +33,7 @@ import {
 import Link from "next/link";
 
 export default function AdminAuthorsPage() {
+  const paidAccessEnabled = isPaidAuthorDashboardEnabled(useAuthStore((state) => state.userContext));
   const [authors, setAuthors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -39,6 +44,7 @@ export default function AdminAuthorsPage() {
   // Detail Drawer State (GET /api/admin/authors/:authorId)
   const [selectedAuthorId, setSelectedAuthorId] = useState<string | null>(null);
   const [authorDetail, setAuthorDetail] = useState<any | null>(null);
+  const [authorSales, setAuthorSales] = useState<AuthorDashboardSummary | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   // Fetch Authors List via GET /api/admin/users?role=author
@@ -80,10 +86,15 @@ export default function AdminAuthorsPage() {
     setSelectedAuthorId(aId);
     setLoadingDetail(true);
     setAuthorDetail(null);
+    setAuthorSales(null);
 
     try {
-      // 1. Fetch rich admin author detail
-      const res = await api.get(`/admin/authors/${aId}`).catch(() => null);
+      // 1. Rich admin author detail + 2. sales dashboard (which books sold, in which orders)
+      const [res, dashRes] = await Promise.all([
+        api.get(`/admin/authors/${aId}`).catch(() => null),
+        api.get(`/admin/authors/${aId}/dashboard`, { cache: "no-store" } as any).catch(() => null),
+      ]);
+      if (dashRes?.data) setAuthorSales(normalizeAuthorDashboard(dashRes.data));
       if (res?.data?.data) {
         setAuthorDetail(res.data.data);
       } else {
@@ -297,7 +308,7 @@ export default function AdminAuthorsPage() {
                     <div className="p-3.5 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF] text-center">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E]">Published Books</p>
                       <p className="text-xl font-serif font-bold text-[#0F3D3E] mt-1">
-                        {authorDetail?.bookCounts?.published ?? 0}
+                        {authorDetail?.bookCounts?.published ?? authorSales?.books.published ?? 0}
                       </p>
                     </div>
                     <div className="p-3.5 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF] text-center">
@@ -309,9 +320,19 @@ export default function AdminAuthorsPage() {
                     <div className="p-3.5 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF] text-center">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E]">Total Catalog</p>
                       <p className="text-xl font-serif font-bold text-[#0F3D3E] mt-1">
-                        {authorDetail?.bookCounts?.total ?? 0}
+                        {authorDetail?.bookCounts?.total || authorSales?.books.total || 0}
                       </p>
                     </div>
+                  </div>
+
+                  {/* Book sales: which books were ordered (GET /admin/authors/{id}/dashboard) */}
+                  <div className="space-y-3">
+                    <h4 className="font-bold uppercase tracking-wider text-[#5C6E6E]">Book Sales & Royalties</h4>
+                    {authorSales ? (
+                      <AuthorSalesPanel summary={authorSales} bookHref={(id) => `/admin/books/${id}`} compact />
+                    ) : (
+                      <p className="text-[#5C6E6E]">Sales data is unavailable for this author right now.</p>
+                    )}
                   </div>
 
                   {/* Application & Entitlement Info */}
@@ -327,17 +348,21 @@ export default function AdminAuthorsPage() {
                         </Badge>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-[#5C6E6E]">Author Dashboard Entitlement:</span>
+                        <span className="text-[#5C6E6E]">Author Dashboard Access:</span>
                         <Badge className="bg-blue-500/15 text-blue-800 border-blue-300 text-[11px]">
-                          {authorDetail?.entitlement?.status || "ACTIVE"}
+                          {paidAccessEnabled
+                            ? authorDetail?.entitlement?.status || "NO ENTITLEMENT"
+                            : "FREE (APPROVED AUTHOR)"}
                         </Badge>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-[#5C6E6E]">Entitlement Source:</span>
-                        <span className="font-mono font-semibold text-[#0F3D3E]">
-                          {authorDetail?.entitlement?.source || "ADMIN_GRANT"}
-                        </span>
-                      </div>
+                      {paidAccessEnabled && authorDetail?.entitlement?.source && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[#5C6E6E]">Entitlement Source:</span>
+                          <span className="font-mono font-semibold text-[#0F3D3E]">
+                            {authorDetail.entitlement.source}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
 

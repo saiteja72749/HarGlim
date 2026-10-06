@@ -127,6 +127,11 @@ export interface UserStates {
   publishingStatus: string;
 }
 
+export interface UserFeatures {
+  /** Backend flag AUTHOR_DASHBOARD_PAID_ACCESS_ENABLED. When false, approval alone grants the author dashboard. */
+  paidAuthorDashboardAccess?: boolean;
+}
+
 export interface UserContextData {
   user: {
     id: string;
@@ -140,5 +145,6 @@ export interface UserContextData {
   };
   capabilities: UserCapabilities;
   states: UserStates;
+  features?: UserFeatures;
 }
 

@@ -22,7 +22,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuthStore } from "@/store/auth-store";
 import toast from "react-hot-toast";
-import api from "@/lib/api";
+import api, { bootstrapUserContext } from "@/lib/api";
 import { useRouter } from "next/navigation";
 
 export default function BecomeAuthorPage() {
@@ -64,6 +64,11 @@ export default function BecomeAuthorPage() {
       const app = data?.data || data?.application || (Array.isArray(data) ? data[0] : data);
       if (app && (app.status || app.state)) {
         const rawStatus = (app.status || app.state || "").toLowerCase();
+        if (rawStatus === "approved" || rawStatus === "accepted") {
+          // Role is cached in the auth store from login; pull the upgraded "author" role
+          // now so AuthGuard on /author doesn't bounce the user back to /dashboard.
+          bootstrapUserContext();
+        }
         setApplicationStatus(
           rawStatus === "approved" || rawStatus === "accepted"
             ? "approved"
@@ -96,17 +101,30 @@ export default function BecomeAuthorPage() {
       return;
     }
 
+    // AuthorApplicationRequest: penName, bio, portfolioUrl (format=uri), experience.
+    // An empty portfolioUrl "" fails URI validation, so only send it when it's a real URL.
+    let portfolioUrl = formData.portfolioUrl.trim();
+    if (portfolioUrl && !/^https?:\/\//i.test(portfolioUrl)) portfolioUrl = `https://${portfolioUrl}`;
+    if (portfolioUrl) {
+      try {
+        new URL(portfolioUrl);
+      } catch {
+        toast.error("Portfolio link doesn't look like a valid web address.");
+        return;
+      }
+    }
+
     setIsSubmitting(true);
 
-    const payload = {
-      penName: formData.penName || formData.fullName,
-      fullName: formData.fullName,
-      email: formData.email,
-      phone: formData.phone,
-      bio: formData.bio,
-      portfolioUrl: formData.portfolioUrl,
-      experience: formData.experience,
+    const payload: Record<string, string> = {
+      penName: (formData.penName || formData.fullName).trim(),
+      fullName: formData.fullName.trim(),
+      email: formData.email.trim(),
+      phone: formData.phone.trim(),
     };
+    if (formData.bio.trim()) payload.bio = formData.bio.trim();
+    if (formData.experience.trim()) payload.experience = formData.experience.trim();
+    if (portfolioUrl) payload.portfolioUrl = portfolioUrl;
 
     try {
       await api.post("/author-applications", payload);
@@ -147,7 +165,10 @@ export default function BecomeAuthorPage() {
           </p>
         </div>
         <Button
-          onClick={() => router.push("/author")}
+          onClick={async () => {
+            await bootstrapUserContext();
+            router.push("/author");
+          }}
           className="bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] font-serif font-bold h-12 px-8 shadow-sm gap-2"
         >
           <span>Go to Author Dashboard</span>

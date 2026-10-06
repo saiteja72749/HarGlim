@@ -25,10 +25,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useHashSection } from "@/hooks/use-hash-section";
+
+// PUT /authors/{id}/payment-details is live but undocumented in the handover (verified:
+// it requires auth, while unknown /authors/* routes return 404). Set to false to hide
+// payout editing if the backend ever removes it.
+const PAYOUT_DETAILS_API_AVAILABLE = true;
 
 export default function AuthorSettingsPage() {
   const { user, setUser } = useAuthStore();
   const [loading, setLoading] = useState(false);
+  useHashSection(!loading);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>("");
   const [imgError, setImgError] = useState(false);
@@ -76,9 +83,15 @@ export default function AuthorSettingsPage() {
       if (!user?._id && !user?.id) return;
       try {
         const authorId = user._id || user.id;
-        const res = await api.get(`/authors/${authorId}`).catch(() => null);
-        if (res?.data) {
-          const authObj = res.data.data || res.data;
+        // Public GET /authors/{id} never includes payout details; the authenticated
+        // GET /users/me returns the owner's own document, so read them from there.
+        const [res, meRes] = await Promise.all([
+          api.get(`/authors/${authorId}`, { cache: "no-store" } as any).catch(() => null),
+          api.get("/users/me", { cache: "no-store" } as any).catch(() => null),
+        ]);
+        const me = meRes?.data?.data?.user || meRes?.data?.data || meRes?.data?.user || {};
+        if (res?.data || me?._id) {
+          const authObj = { ...(res?.data?.data || res?.data || {}), paymentDetails: me.paymentDetails || (res?.data?.data || res?.data || {}).paymentDetails };
           const imgUrl =
             authObj.profileImage ||
             authObj.profilePicture ||
@@ -158,39 +171,33 @@ export default function AuthorSettingsPage() {
           const uploadFormData = new FormData();
           uploadFormData.append("image", imageFile);
 
-          const uploadRes = await api
-            .post("/uploads/image", uploadFormData, {
-              headers: { "Content-Type": undefined },
-            })
-            .catch(() =>
-              api.post("/uploads/publishing-image", uploadFormData, {
-                headers: { "Content-Type": undefined },
-              })
-            )
-            .catch(() =>
-              api.post("/authors/me/uploads/image", uploadFormData, {
-                headers: { "Content-Type": undefined },
-              })
-            );
-
+          const uploadRes = await api.post("/uploads/image", uploadFormData);
           const uploadedUrl = uploadRes?.data?.data?.url || uploadRes?.data?.url;
-          if (uploadedUrl) {
-            finalImage = uploadedUrl;
-          }
-        } catch (imgErr) {
-          console.warn("Failed to upload author profile image:", imgErr);
+          if (!uploadedUrl) throw new Error("no url");
+          finalImage = uploadedUrl;
+        } catch (imgErr: any) {
+          // Don't save a base64 preview as the profile photo; tell the author instead.
+          toast.error(imgErr?.response?.data?.message || "Photo upload failed. Other changes were not saved.");
+          return;
         }
       }
 
-      const payload = {
-        name: profileForm.name,
+      // PUT /authors/{id} is live (undocumented); PUT /users/{id} is the documented
+      // UserUpdateRequest (name, bio, profilePicture). Send both photo field names, since
+      // the documented one is profilePicture and the old code only sent profileImage.
+      const payload: Record<string, string> = {
+        name: profileForm.name.trim(),
         bio: profileForm.bio,
-        profileImage: finalImage,
       };
+      if (finalImage && /^https?:\/\//.test(finalImage)) {
+        payload.profilePicture = finalImage;
+        payload.profileImage = finalImage;
+      }
 
-      await api
-        .put(`/authors/${authorId}`, payload)
-        .catch(() => api.put(`/users/${authorId}`, payload));
+      await api.put(`/authors/${authorId}`, payload).catch((err) => {
+        if (err?.response?.status === 404) return api.put(`/users/${authorId}`, payload);
+        throw err;
+      });
 
       if (user) {
         setUser({
@@ -276,7 +283,7 @@ export default function AuthorSettingsPage() {
 
       <div className="grid grid-cols-1 gap-8">
         {/* 1. Author Profile Card */}
-        <Card className="bg-white border border-[#E2E6DF] shadow-xs rounded-2xl overflow-hidden">
+        <Card id="profile" className="bg-white border border-[#E2E6DF] shadow-xs rounded-2xl overflow-hidden scroll-mt-20">
           <CardHeader className="p-6 bg-[#F8F9F7] border-b border-[#E2E6DF] flex flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2.5">
               <User className="h-5 w-5 text-[#D4AF37]" />
@@ -541,7 +548,7 @@ export default function AuthorSettingsPage() {
         </Card>
 
         {/* 2. Royalty Payout & Bank Details Card */}
-        <Card className="bg-white border border-[#E2E6DF] shadow-xs rounded-2xl overflow-hidden">
+        <Card id="payout" className="bg-white border border-[#E2E6DF] shadow-xs rounded-2xl overflow-hidden scroll-mt-20">
           <CardHeader className="p-6 bg-[#F8F9F7] border-b border-[#E2E6DF] flex flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2.5">
               <CreditCard className="h-5 w-5 text-[#D4AF37]" />
@@ -552,13 +559,13 @@ export default function AuthorSettingsPage() {
                 <p className="text-xs text-[#5C6E6E]">
                   {isEditingPayment
                     ? "Update your bank or UPI details for royalty disbursements."
-                    : "Encrypted details used for automatic book royalty payouts."}
+                    : "Royalties are paid by manual bank/UPI transfer after each settlement."}
                 </p>
               </div>
             </div>
 
-            {/* Toggle Edit Button */}
-            {!isEditingPayment ? (
+            {/* Toggle Edit Button: hidden until the backend exposes a payout-details endpoint. */}
+            {!PAYOUT_DETAILS_API_AVAILABLE ? null : !isEditingPayment ? (
               <Button
                 type="button"
                 onClick={() => setIsEditingPayment(true)}
@@ -582,6 +589,14 @@ export default function AuthorSettingsPage() {
           </CardHeader>
 
           <CardContent className="p-6">
+            {!PAYOUT_DETAILS_API_AVAILABLE && (
+              <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-900">
+                Payout details can&apos;t be saved online yet. Please send your account holder name, bank name,
+                account number, IFSC and/or UPI ID to the Harglim team from the{" "}
+                <a href="/contact" className="underline font-semibold">contact page</a>. Settlements are paid manually to
+                these details.
+              </div>
+            )}
             {!isEditingPayment ? (
               /* ================= READ-ONLY VIEW MODE ================= */
               <div className="space-y-6">

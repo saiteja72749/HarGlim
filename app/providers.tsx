@@ -2,10 +2,12 @@
 
 import { Toaster } from 'react-hot-toast';
 import { SiteContentProvider } from '@/context/site-content-context';
+import { SessionBootstrap } from '@/components/auth/session-bootstrap';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <SiteContentProvider>
+      <SessionBootstrap />
       {children}
       <Toaster
         position="top-right"

@@ -25,22 +25,11 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import toast from "react-hot-toast";
-import api from "@/lib/api";
+import Link from "next/link";
+import api, { getCachedCategories } from "@/lib/api";
 
-const categories = [
-  "Fiction",
-  "Non-Fiction",
-  "Technology",
-  "Business",
-  "Self-Help",
-  "Literature",
-  "Finance",
-  "Science",
-  "History",
-  "Biography",
-  "Poetry",
-  "Children",
-];
+// Backend default upload limit (UPLOAD_MAX_BYTES) is 25MB.
+const MAX_MANUSCRIPT_BYTES = 25 * 1024 * 1024;
 
 export default function NewManuscriptPage() {
   const router = useRouter();
@@ -49,6 +38,17 @@ export default function NewManuscriptPage() {
   const [packages, setPackages] = useState<any[]>([]);
   const [selectedPackageId, setSelectedPackageId] = useState<string>("");
   const [loadingPackages, setLoadingPackages] = useState(true);
+  const [categories, setCategories] = useState<{ _id: string; name: string }[]>([]);
+  // If the draft was created but the submit step failed, retry only the submit (no duplicate drafts).
+  const [draftBookId, setDraftBookId] = useState<string | null>(null);
+  const [uploadedFileUrl, setUploadedFileUrl] = useState<string>("");
+
+  useEffect(() => {
+    // Category must be a real Category ObjectId for POST /authors/me/books.
+    getCachedCategories()
+      .then((list) => setCategories(list.filter((c: any) => c.isActive !== false && c.active !== false)))
+      .catch(() => setCategories([]));
+  }, []);
 
   const [formData, setFormData] = useState({
     title: "",
@@ -98,11 +98,12 @@ export default function NewManuscriptPage() {
         toast.error("Please upload a PDF or Word document");
         return;
       }
-      if (selectedFile.size > 50 * 1024 * 1024) {
-        toast.error("File size must be less than 50MB");
+      if (selectedFile.size > MAX_MANUSCRIPT_BYTES) {
+        toast.error("File size must be less than 25MB");
         return;
       }
       setFile(selectedFile);
+      setUploadedFileUrl("");
     }
   };
 
@@ -111,6 +112,12 @@ export default function NewManuscriptPage() {
 
     if (!formData.title.trim() || !formData.category || !formData.synopsis.trim()) {
       toast.error("Please fill in all required fields");
+      return;
+    }
+
+    const wordCount = Math.floor(Number(formData.estimatedWordCount));
+    if (!Number.isFinite(wordCount) || wordCount < 1) {
+      toast.error("Please enter the manuscript's word count.");
       return;
     }
 
@@ -131,64 +138,66 @@ export default function NewManuscriptPage() {
 
     setIsLoading(true);
 
+    // Documented author publishing flow (handover sections 39-45):
+    //   upload document -> POST /authors/me/books (draft) -> POST /authors/me/books/{id}/submit
+    // The legacy POST /publish-requests is NOT used: it creates a request the author can
+    // never list, so submissions vanished from the Manuscripts page.
     try {
-      // 1. Upload manuscript file (Single file field named 'document')
-      let fileUrl = "";
-      try {
+      // 1. Upload manuscript (field name "document"; response data.url)
+      let fileUrl = uploadedFileUrl;
+      if (!fileUrl) {
         const formDataUpload = new FormData();
         formDataUpload.append("document", file);
-
-        const uploadRes = await api
-          .post("/uploads/document", formDataUpload, {
-            headers: { "Content-Type": "multipart/form-data" },
-          })
-          .catch(() =>
-            api.post("/authors/me/uploads/document", formDataUpload, {
-              headers: { "Content-Type": "multipart/form-data" },
-            })
-          );
-
+        const uploadRes = await api.post("/authors/me/uploads/document", formDataUpload).catch((err) => {
+          throw new Error(err?.response?.data?.message || "Failed to upload manuscript document file.");
+        });
         fileUrl =
           uploadRes?.data?.data?.url ||
           uploadRes?.data?.url ||
           uploadRes?.data?.data?.fileUrl ||
           uploadRes?.data?.fileUrl ||
           "";
-
-        if (!fileUrl) {
-          throw new Error("Could not retrieve file URL from manuscript upload.");
-        }
-      } catch (uploadErr: any) {
-        console.error("Document file upload error:", uploadErr);
-        throw new Error(
-          uploadErr?.response?.data?.message || "Failed to upload manuscript document file."
-        );
+        if (!fileUrl) throw new Error("Upload finished but the server did not return a file URL.");
+        setUploadedFileUrl(fileUrl);
       }
 
-      // 2. Submit Publish Request (POST /api/publish-requests with real package ObjectId)
-      const numericWordCount = formData.estimatedWordCount
-        ? Math.max(1, Number(formData.estimatedWordCount))
-        : 50000;
+      const category = categories.find((c) => c._id === formData.category);
 
-      const publishPayload = {
-        title: formData.title.trim(),
-        genre: formData.category,
-        wordCount: numericWordCount,
-        packageId: selectedPackageId,
+      // 2. Create the draft once. Fields outside the backend schema go into the
+      //    description so the editorial team still sees them.
+      let bookId = draftBookId;
+      if (!bookId) {
+        const extraLines = [
+          formData.targetAudience.trim() && `Target audience: ${formData.targetAudience.trim()}`,
+          formData.previouslyPublished && "Previously published: yes",
+        ].filter(Boolean);
+        const description = [formData.synopsis.trim(), ...extraLines].join("\n\n");
+
+        const createRes = await api.post("/authors/me/books", {
+          title: formData.title.trim(),
+          description,
+          category: formData.category,
+        });
+        const created = createRes.data?.data?.book || createRes.data?.data || createRes.data?.book || createRes.data;
+        bookId = created?._id || created?.id || null;
+        if (!bookId) throw new Error("Draft was created but no book id was returned. Check Manuscripts before retrying.");
+        setDraftBookId(bookId);
+      }
+
+      // 3. Submit the draft for editorial review
+      await api.post(`/authors/me/books/${bookId}/submit`, {
         fileUrl,
-      };
+        genre: category?.name || "General",
+        wordCount,
+        packageId: selectedPackageId,
+      });
 
-      const publishRes = await api.post("/publish-requests", publishPayload);
-
-      if (publishRes.data?.success || publishRes.status === 201 || publishRes.status === 200) {
-        toast.success("Manuscript submitted successfully for editorial review! 📚");
-        router.push("/author/manuscripts");
-      } else {
-        throw new Error(publishRes.data?.message || "Failed to submit publish request.");
-      }
+      toast.success("Manuscript submitted for editorial review! 📚");
+      router.push("/author/manuscripts");
     } catch (error: any) {
       console.error("Manuscript submission failed:", error);
-      toast.error(error?.response?.data?.message || error?.message || "Failed to submit manuscript request.");
+      const message = error?.response?.data?.message || error?.message || "Failed to submit manuscript request.";
+      toast.error(draftBookId ? `${message} Your draft is saved. Press Submit again to retry.` : message);
     } finally {
       setIsLoading(false);
     }
@@ -247,8 +256,8 @@ export default function NewManuscriptPage() {
                       </SelectTrigger>
                       <SelectContent>
                         {categories.map((cat) => (
-                          <SelectItem key={cat} value={cat}>
-                            {cat}
+                          <SelectItem key={cat._id} value={cat._id}>
+                            {cat.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -312,12 +321,13 @@ export default function NewManuscriptPage() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="estimatedWordCount">
-                        Estimated Word Count
+                        Estimated Word Count <span className="text-destructive">*</span>
                       </Label>
                       <Input
                         id="estimatedWordCount"
                         name="estimatedWordCount"
                         type="number"
+                        min={1}
                         value={formData.estimatedWordCount}
                         onChange={handleChange}
                         placeholder="e.g., 50000"
@@ -353,7 +363,7 @@ export default function NewManuscriptPage() {
                 <CardHeader>
                   <CardTitle>Upload Manuscript</CardTitle>
                   <CardDescription>
-                    Upload your manuscript file (PDF or Word document, max 50MB)
+                    Upload your manuscript file (PDF or Word document, max 25MB)
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -369,7 +379,7 @@ export default function NewManuscriptPage() {
                           or drag and drop
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          PDF or Word document (max 50MB)
+                          PDF or Word document (max 25MB)
                         </p>
                       </div>
                       <input
@@ -471,9 +481,9 @@ export default function NewManuscriptPage() {
                     >
                       <span>
                         I agree to the{" "}
-                        <a href="#" className="text-primary hover:underline">
+                        <Link href="/terms" target="_blank" className="text-primary hover:underline">
                           Terms and Conditions
-                        </a>{" "}
+                        </Link>{" "}
                         and confirm this is my original work
                       </span>
                     </Label>

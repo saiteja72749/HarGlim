@@ -8,10 +8,45 @@ import { Sparkles, CheckCircle2, ShieldCheck, QrCode, ArrowRight, Loader2, Clock
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import api from "@/lib/api";
+import api, { bootstrapUserContext } from "@/lib/api";
+import { useAuthStore } from "@/store/auth-store";
+import { canOpenAuthorDashboard, isPaidAuthorDashboardEnabled } from "@/lib/author-access";
 import toast from "react-hot-toast";
 
+/**
+ * Paid author dashboard access is switched off on the backend
+ * (AUTHOR_DASHBOARD_PAID_ACCESS_ENABLED=false). The purchase / QR / UTR flow is
+ * only mounted when /users/me/context reports features.paidAuthorDashboardAccess === true;
+ * otherwise nothing here calls the purchase endpoints and the user is sent on.
+ */
 export default function PurchaseDashboardAccessPage() {
+  const router = useRouter();
+  const { user, userContext, contextStatus } = useAuthStore();
+  const contextSettled = contextStatus === "ready" || contextStatus === "error";
+  const paidEnabled = isPaidAuthorDashboardEnabled(userContext);
+
+  useEffect(() => {
+    if (!contextSettled || paidEnabled) return;
+    router.replace(canOpenAuthorDashboard(user, userContext) ? "/author" : "/dashboard/become-author");
+  }, [contextSettled, paidEnabled, user, userContext, router]);
+
+  if (!contextSettled || !paidEnabled) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center gap-3 text-center px-4">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">
+          {contextSettled
+            ? "The author dashboard is free for approved authors. Redirecting..."
+            : "Checking your author access..."}
+        </p>
+      </div>
+    );
+  }
+
+  return <PaidDashboardAccessPurchase />;
+}
+
+function PaidDashboardAccessPurchase() {
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);
@@ -63,6 +98,13 @@ export default function PurchaseDashboardAccessPage() {
       toast.success("Payment intent created! Please complete UPI payment.");
       loadAccessState();
     } catch (err: any) {
+      if (err.response?.status === 409 && err.response?.data?.error === "AUTHOR_DASHBOARD_PAID_ACCESS_DISABLED") {
+        // Flag was switched off after this page loaded: the dashboard is free now.
+        toast.success("The author dashboard is now free for approved authors.");
+        await bootstrapUserContext();
+        router.replace("/author");
+        return;
+      }
       toast.error(err.response?.data?.message || "Failed to initiate purchase.");
     } finally {
       setPurchasing(false);

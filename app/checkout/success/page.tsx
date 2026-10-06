@@ -10,7 +10,8 @@ import { useCartStore } from "@/store/cart-store";
 
 function SuccessContent() {
   const searchParams = useSearchParams();
-  const orderId = searchParams?.get("orderId") || `ORD-${Date.now().toString().slice(-6)}`;
+  // Never invent an order number: a fake one can't be tracked or matched by support.
+  const orderId = searchParams?.get("orderId") || "";
   const [_copied, setCopied] = useState(false);
   const clearCart = useCartStore((state) => state.clearCart);
 
@@ -45,7 +46,7 @@ function SuccessContent() {
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-[#5C6E6E] mb-1">Order Number</p>
               <div className="flex items-center justify-between bg-muted/50 p-3 rounded-xl border border-border/50">
-                <span className="font-mono font-bold text-sm text-[#0F3D3E]">{orderId}</span>
+                <span className="font-mono font-bold text-sm text-[#0F3D3E]">{orderId || "See My Orders"}</span>
                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => copyToClipboard(orderId)}>
                   <Copy className="h-4 w-4" />
                 </Button>
@@ -67,7 +68,7 @@ function SuccessContent() {
             <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-800 space-y-1">
               <p className="font-bold">Payment Status: Pending Admin Verification</p>
               <p className="text-[11px] text-amber-700 leading-relaxed font-sans">
-                Your order is registered under <strong>Order Number {orderId}</strong>. Shipment tracking details will be assigned by admin after payment approval & dispatch.
+                Your order is registered under <strong>Order Number {orderId || "(see My Orders)"}</strong>. Shipment tracking details will be assigned by admin after payment approval & dispatch.
               </p>
             </div>
           </div>
@@ -88,16 +89,18 @@ function SuccessContent() {
               Continue Shopping
             </Button>
           </Link>
-          <Link href="/books">
-            <Button
-              variant="ghost"
-              size="lg"
-              className="w-full sm:w-auto flex items-center justify-center gap-2 text-[#5C6E6E]"
-            >
-              Continue Shopping
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
+          {orderId && (
+            <Link href={`/track-order?orderNumber=${encodeURIComponent(orderId)}`}>
+              <Button
+                variant="ghost"
+                size="lg"
+                className="w-full sm:w-auto flex items-center justify-center gap-2 text-[#5C6E6E]"
+              >
+                Track this order
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
     </div>

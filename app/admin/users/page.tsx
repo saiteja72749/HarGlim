@@ -306,12 +306,14 @@ export default function AdminUsersPage() {
     const isSuspending = currentStatus === "Active";
     const newStatus = isSuspending ? "Suspended" : "Active";
     try {
-      await api.put(`/admin/users/${id}/status`, {
-        isActive: !isSuspending,
-        status: newStatus.toLowerCase(),
-      }).catch(() =>
-        api.put(`/admin/users/${id}`, { status: newStatus, isActive: !isSuspending })
-      );
+      // Documented: PATCH /admin/users/{id}/status with UserStatusRequest { isActive }.
+      // (Suspending is how admins block an author now that dashboard entitlements don't gate access.)
+      await api.patch(`/admin/users/${id}/status`, { isActive: !isSuspending }).catch((err) => {
+        if (err?.response?.status === 404 || err?.response?.status === 405) {
+          return api.put(`/admin/users/${id}`, { isActive: !isSuspending });
+        }
+        throw err;
+      });
 
       toast.success(`User status updated to ${newStatus}`);
       await fetchUsers();

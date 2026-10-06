@@ -4,6 +4,13 @@ import { cn, getSafeExternalUrl } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import api from "@/lib/api";
 import { DELIVERY_PLANS, resolveCourierTrackingUrl } from "@/lib/couriers";
+import {
+  canAssignCourier,
+  extractList,
+  extractTrackingInfo,
+  getShipmentLabel,
+  shipmentBelongsToOrder,
+} from "@/lib/tracking";
 import { ErrorState } from "@/components/ui/error-state";
 import {
   Search,
@@ -80,22 +87,87 @@ const getMongoId = (value?: unknown) => {
   return MONGO_ID_REGEX.test(value) ? value : undefined;
 };
 
-const getOrderStatusBadge = (status: string) => {
-  const s = (status || "").toUpperCase().replace(/[-_]/g, " ");
-  if (s.includes("DELIVER")) {
-    return <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 text-xs font-semibold">Delivered</Badge>;
-  }
-  if (s.includes("SHIP") || s.includes("TRANSIT")) {
-    return <Badge className="bg-blue-500/10 text-blue-700 border-blue-500/20 text-xs font-semibold">Shipped</Badge>;
-  }
-  if (s.includes("PRINT")) {
-    return <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/20 text-xs font-semibold">Printed</Badge>;
-  }
-  if (s.includes("CANCEL") || s.includes("REJECT")) {
-    return <Badge className="bg-rose-500/10 text-rose-700 border-rose-500/20 text-xs font-semibold">Cancelled</Badge>;
-  }
-  return <Badge className="bg-indigo-500/10 text-indigo-700 border-indigo-500/20 text-xs font-semibold">Order Placed</Badge>;
+// Backend order statuses (admin orders handover): PENDING, PROCESSING, SHIPPED, DELIVERED, CANCELLED.
+const ORDER_STATUS_LABELS: Record<string, { label: string; tone: string }> = {
+  PENDING: { label: "Payment Pending", tone: "bg-indigo-500/10 text-indigo-700 border-indigo-500/20" },
+  PROCESSING: { label: "Processing", tone: "bg-amber-500/10 text-amber-700 border-amber-500/20" },
+  SHIPPED: { label: "Shipped", tone: "bg-blue-500/10 text-blue-700 border-blue-500/20" },
+  DELIVERED: { label: "Delivered", tone: "bg-emerald-500/10 text-emerald-700 border-emerald-500/20" },
+  CANCELLED: { label: "Cancelled", tone: "bg-rose-500/10 text-rose-700 border-rose-500/20" },
 };
+
+const normalizeOrderStatus = (status: string) => {
+  const s = (status || "").toUpperCase().replace(/[-\s]/g, "_");
+  if (s.includes("DELIVER")) return "DELIVERED";
+  if (s.includes("SHIP") || s.includes("TRANSIT")) return "SHIPPED";
+  if (s.includes("CANCEL")) return "CANCELLED";
+  if (s.includes("PROCESS") || s.includes("PRINT")) return "PROCESSING";
+  return "PENDING";
+};
+
+const getOrderStatusBadge = (status: string) => {
+  const raw = (status || "").toUpperCase();
+  const meta = ORDER_STATUS_LABELS[normalizeOrderStatus(status)];
+  // Legacy "Printed" values are shown as such so admins can still tell them apart.
+  const label = raw.includes("PRINT") ? "Printed" : meta.label;
+  return <Badge className={`${meta.tone} text-xs font-semibold`}>{label}</Badge>;
+};
+
+/**
+ * items[].book is a populated Book (or null if the book was deleted).
+ * Money always comes from item.price (price paid per unit at purchase time), never the
+ * book's current mrp, which can change after the order.
+ */
+function OrderItemsCell({ items }: { items: any[] }) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return <span className="text-[11px] italic text-[#5C6E6E]">No items</span>;
+  }
+  return (
+    <div className="space-y-2 min-w-[220px]">
+      {items.map((item, idx) => {
+        const book = item.book && typeof item.book === "object" ? item.book : null;
+        const title = book?.title ?? item.title ?? "Book no longer available";
+        const unitPrice = Number(item.price ?? 0) || 0;
+        const qty = Number(item.quantity ?? 1) || 1;
+        return (
+          <div key={item._id ?? `${book?._id ?? "deleted"}-${idx}`} className="flex items-center gap-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={book?.coverImage || "/placeholder-book.svg"}
+              alt=""
+              className="h-10 w-7 rounded object-cover border border-[#E2E6DF] shrink-0 bg-[#F8F9F7]"
+            />
+            <div className="min-w-0">
+              {book?._id ? (
+                <a
+                  href={`/admin/books/${book._id}`}
+                  className="block font-semibold text-[#0F3D3E] hover:underline truncate max-w-[200px]"
+                  title={title}
+                >
+                  {title}
+                </a>
+              ) : (
+                <span className="block font-semibold italic text-[#5C6E6E] truncate max-w-[200px]">{title}</span>
+              )}
+              <span className="text-[10px] text-[#5C6E6E] font-mono">
+                {qty} × ₹{unitPrice.toLocaleString("en-IN")} = ₹{(unitPrice * qty).toLocaleString("en-IN")}
+                {book?.format ? ` · ${book.format}` : ""}
+                {book?.slug && (
+                  <>
+                    {" · "}
+                    <a href={`/books/${book.slug}`} target="_blank" rel="noopener noreferrer" className="underline">
+                      store
+                    </a>
+                  </>
+                )}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 const getCustomerAddress = (order: any) =>
   order?.orderFormData?.shippingAddress ||
@@ -186,6 +258,7 @@ export default function AdminOrdersPage() {
   const [courierInput, setCourierInput] = useState("India Post");
   const [trackingUrlInput, setTrackingUrlInput] = useState("");
   const [isSubmittingTracking, setIsSubmittingTracking] = useState(false);
+  const [markDispatched, setMarkDispatched] = useState(true);
 
   // Customer Shipping Address Modal State
   const [addressModalOpen, setAddressModalOpen] = useState(false);
@@ -215,19 +288,38 @@ export default function AdminOrdersPage() {
     setTimeout(() => setCopiedAddress(false), 2000);
   };
 
+  // Debounce the search box: one request per pause in typing, not per keystroke (429 risk).
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 400);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+  const [totalOrders, setTotalOrders] = useState<number | null>(null);
+
   const fetchOrders = async () => {
     setLoading(true);
     setError(false);
     try {
-      const params: any = { limit: 100 };
-      if (statusFilter !== "all") params.status = statusFilter;
-      if (searchQuery.trim()) params.search = searchQuery.trim();
+      const params: any = { page: 1, limit: 100, sort: "-createdAt" };
+      if (statusFilter !== "all") params.status = statusFilter.toUpperCase();
+      if (debouncedSearch) params.search = debouncedSearch;
 
-      const { data } = await api.get("/admin/orders", { params });
-      const ordersData = data?.data?.orders || (Array.isArray(data?.data) ? data.data : []) || (Array.isArray(data) ? data : []);
-      setOrders(Array.isArray(ordersData) ? ordersData : []);
-    } catch (err) {
-      console.error("Failed to fetch admin orders:", err);
+      const { data } = await api.get("/admin/orders", { params, cache: "no-store" } as any);
+      setOrders(extractList(data, "orders"));
+      setTotalOrders(typeof data?.pagination?.total === "number" ? data.pagination.total : null);
+    } catch (err: any) {
+      const status = err?.response?.status;
+      // 401 is handled by the api client (refresh or logout) and 403/429 already show a toast.
+      if (status >= 500) {
+        console.error(
+          "Admin orders failed:",
+          status,
+          "X-Request-Id:",
+          err?.response?.headers?.["x-request-id"] || "n/a"
+        );
+      } else {
+        console.error("Failed to fetch admin orders:", err);
+      }
       setError(true);
     } finally {
       setLoading(false);
@@ -236,7 +328,8 @@ export default function AdminOrdersPage() {
 
   useEffect(() => {
     fetchOrders();
-  }, [statusFilter, searchQuery]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, debouncedSearch]);
 
   // Action 1: Approve / Confirm Payment
   const handleApprovePayment = async (orderMongoId?: string, paymentMongoId?: string) => {
@@ -246,11 +339,16 @@ export default function AdminOrdersPage() {
         return;
       }
 
-      if (paymentMongoId) {
-        await api.post(`/admin/operations/payments/${paymentMongoId}/approve`, {
-          reason: "Admin payment confirmed from orders view",
-        }).catch(() => null);
+      // Payment approval is what triggers invoice + shipment creation on the backend.
+      // If it fails, stop here: marking the order "Processing" anyway leaves an order
+      // with no shipment record, so a tracking ID can never be attached to it.
+      if (!paymentMongoId) {
+        toast.error("This order has no linked payment record. Approve it from Payment Operations instead.");
+        return;
       }
+      await api.post(`/admin/operations/payments/${paymentMongoId}/approve`, {
+        reason: "Admin payment confirmed from orders view",
+      });
 
       if (orderMongoId) {
         const paidPayload = {
@@ -351,32 +449,77 @@ export default function AdminOrdersPage() {
     setIsSubmittingTracking(true);
 
     try {
-      const finalTrackingNumber = trackingNumberInput.trim() || (isDigital ? "DIGITAL-FULFILLMENT" : "");
+      // Tracking numbers must be unique across shipments; digital deliveries get a per-order reference.
+      const finalTrackingNumber =
+        trackingNumberInput.trim() || (isDigital ? `DIGITAL-${selectedOrderForTracking.orderNumber || orderMongoId.slice(-8)}` : "");
       const resolvedTrackingUrl =
         getSafeExternalUrl(enteredTrackingUrl) ||
         (finalTrackingNumber ? resolveCourierTrackingUrl(courierInput, finalTrackingNumber) : "");
 
-      await api.put(`/admin/orders/${orderMongoId}/status`, {
-        status: "Shipped",
-        orderStatus: "Shipped",
-        courier_name: courierInput.trim(),
+      // Tracking is only persisted on the Shipment record (CourierAssignRequest).
+      // PUT /admin/orders/{id}/status ignores tracking fields, which is why readers
+      // and authors never saw the tracking ID when it was saved from this page.
+      const shipmentRes = await api.get("/admin/shipments", {
+        params: { order: orderMongoId, limit: 100 },
+        cache: "no-store",
+      } as any);
+      const shipment = extractList(shipmentRes.data, "shipments").find((s: any) =>
+        shipmentBelongsToOrder(s, selectedOrderForTracking)
+      );
+      // Admin shipment actions take shipment._id only (never orderNumber / shipmentId UUID / AWB).
+      const shipmentId = shipment?._id || shipment?.id;
+      if (!shipmentId) {
+        toast.error(
+          "No shipment exists for this order yet. A shipment is created automatically after the payment is verified and the invoice is generated. Confirm the payment, wait a few seconds, then try again.",
+          { duration: 7000 }
+        );
+        return;
+      }
+      if (!canAssignCourier(shipment.status)) {
+        toast.error(
+          `This shipment is already "${getShipmentLabel(shipment.status)}". Update its progress from Shipments & Courier.`,
+          { duration: 6000 }
+        );
+        return;
+      }
+
+      // provider must be "manual" (courier adapters are placeholders); the backend builds the
+      // tracking URL for India Post / Delhivery / BlueDart / DTDC / Ekart.
+      await api.post(`/admin/shipments/${shipmentId}/assign-courier`, {
+        provider: "manual",
         courierName: courierInput.trim(),
-        courier: courierInput.trim(),
-        carrier: courierInput.trim(),
-        tracking_id: finalTrackingNumber,
-        trackingId: finalTrackingNumber,
+        serviceName: courierInput.trim(),
         trackingNumber: finalTrackingNumber,
-        tracking_url: resolvedTrackingUrl,
-        trackingUrl: resolvedTrackingUrl,
+        trackingUrl: resolvedTrackingUrl || undefined,
       });
 
-      toast.success(`Shipment details saved with ${courierInput} & status set to Shipped! 🚚`);
+      // Mark it dispatched via the shipment (COURIER_ASSIGNED -> IN_TRANSIT). The backend then
+      // syncs the order to SHIPPED; the order status must not be updated separately.
+      if (markDispatched) {
+        await api.post(`/admin/shipments/${shipmentId}/update-status`, {
+          status: "IN_TRANSIT",
+          description: `Dispatched via ${courierInput.trim()}`,
+          occurredAt: new Date().toISOString(),
+          metadata: { source: "admin-orders" },
+        });
+      }
+
+      toast.success(
+        markDispatched
+          ? `${courierInput} tracking saved and order marked Shipped.`
+          : `${courierInput} tracking saved. Mark it in transit from Shipments & Courier when it leaves.`
+      );
       setTrackingModalOpen(false);
       setTrackingNumberInput("");
       setTrackingUrlInput("");
       fetchOrders();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || "Failed to save tracking details.");
+      const status = err.response?.status;
+      toast.error(
+        status === 409
+          ? "That tracking number is already used on another shipment. Check the AWB and enter a different one."
+          : err.response?.data?.message || "Failed to save tracking details."
+      );
     } finally {
       setIsSubmittingTracking(false);
     }
@@ -388,8 +531,11 @@ export default function AdminOrdersPage() {
     const customer = getCustomerName(order).toLowerCase();
     const query = searchQuery.toLowerCase();
 
-    const matchesSearch = orderNum.includes(query) || utrNum.includes(query) || customer.includes(query);
-    const matchesStatus = statusFilter === "all" || (order.status || order.orderStatus || "").toUpperCase() === statusFilter.toUpperCase();
+    const books = (order.items || []).map((item: any) => (item.book?.title || "").toLowerCase()).join(" ");
+    const matchesSearch =
+      orderNum.includes(query) || utrNum.includes(query) || customer.includes(query) || books.includes(query);
+    const matchesStatus =
+      statusFilter === "all" || normalizeOrderStatus(order.status || order.orderStatus || "") === statusFilter.toUpperCase();
     return matchesSearch && matchesStatus;
   });
 
@@ -425,10 +571,11 @@ export default function AdminOrdersPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Orders</SelectItem>
-                <SelectItem value="PENDING">Pending</SelectItem>
-                <SelectItem value="PROCESSING">Processing / Printing</SelectItem>
-                <SelectItem value="SHIPPED">Shipped</SelectItem>
-                <SelectItem value="DELIVERED">Completed</SelectItem>
+                {Object.entries(ORDER_STATUS_LABELS).map(([value, meta]) => (
+                  <SelectItem key={value} value={value}>
+                    {meta.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -436,11 +583,13 @@ export default function AdminOrdersPage() {
           {/* Quick Status Filter Pills with Live Counters */}
           <div className="flex items-center gap-2 overflow-x-auto pt-3 border-t border-[#E2E6DF]/70 text-xs">
             {[
-              { id: "all", label: "All Orders", count: orders.length },
-              { id: "pending", label: "Pending", count: orders.filter((o) => (o.status || o.orderStatus || "").toUpperCase() === "PENDING").length },
-              { id: "processing", label: "Processing / Printed", count: orders.filter((o) => (o.status || o.orderStatus || "").toUpperCase() === "PROCESSING").length },
-              { id: "shipped", label: "Shipped", count: orders.filter((o) => ["SHIPPED", "IN TRANSIT", "IN-TRANSIT"].includes((o.status || o.orderStatus || "").toUpperCase())).length },
-              { id: "delivered", label: "Completed / Delivered", count: orders.filter((o) => ["DELIVERED", "COMPLETED"].includes((o.status || o.orderStatus || "").toUpperCase())).length },
+              // Counts reflect the loaded page; "All" shows the server total when available.
+              { id: "all", label: "All Orders", count: statusFilter === "all" && totalOrders !== null ? totalOrders : orders.length },
+              ...Object.entries(ORDER_STATUS_LABELS).map(([id, meta]) => ({
+                id,
+                label: meta.label,
+                count: orders.filter((o) => normalizeOrderStatus(o.status || o.orderStatus || "") === id).length,
+              })),
             ].map((pill) => (
               <button
                 key={pill.id}
@@ -488,6 +637,7 @@ export default function AdminOrdersPage() {
                   <TableRow>
                     <TableHead className="font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Order ID</TableHead>
                     <TableHead className="font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Customer & Contact</TableHead>
+                    <TableHead className="font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Books Ordered</TableHead>
                     <TableHead className="font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">UTR Reference</TableHead>
                     <TableHead className="text-right font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Total Amount</TableHead>
                     <TableHead className="text-center font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Payment</TableHead>
@@ -562,6 +712,11 @@ export default function AdminOrdersPage() {
                             <MapPin className="h-3 w-3 text-[#8A6D1E]" />
                             <span>View Address</span>
                           </button>
+                        </TableCell>
+
+                        {/* Books (every item, not just the first) */}
+                        <TableCell className="align-top">
+                          <OrderItemsCell items={order.items} />
                         </TableCell>
 
                         {/* UTR Number */}
@@ -640,9 +795,10 @@ export default function AdminOrdersPage() {
                               size="sm"
                               onClick={() => {
                                 setSelectedOrderForTracking(order);
-                                setTrackingNumberInput(order.trackingNumber || "");
-                                setCourierInput(order.courierName || order.courier_name || order.courier || order.carrier || "India Post");
-                                setTrackingUrlInput(getSafeExternalUrl(order.trackingUrl || order.tracking_url || ""));
+                                const existing = extractTrackingInfo(order);
+                                setTrackingNumberInput(existing.trackingNumber);
+                                setCourierInput(existing.courierName || "India Post");
+                                setTrackingUrlInput(existing.trackingUrl);
                                 setTrackingModalOpen(true);
                               }}
                               className="border-[#D4AF37] text-[#0F3D3E] hover:bg-[#D4AF37]/10 text-[11px] h-7 px-2.5 rounded-lg gap-1 font-semibold"
@@ -659,7 +815,7 @@ export default function AdminOrdersPage() {
 
                   {filteredOrders.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={7} className="h-24 text-center text-muted-foreground text-xs">
+                      <TableCell colSpan={8} className="h-24 text-center text-muted-foreground text-xs">
                         No orders found matching search criteria.
                       </TableCell>
                     </TableRow>
@@ -757,6 +913,19 @@ export default function AdminOrdersPage() {
               />
             </div>
 
+            <label htmlFor="mark-dispatched" className="flex items-start gap-2 text-xs text-[#0F3D3E] cursor-pointer">
+              <input
+                id="mark-dispatched"
+                type="checkbox"
+                checked={markDispatched}
+                onChange={(e) => setMarkDispatched(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                The parcel has left with the courier (marks the shipment In Transit, and the order becomes Shipped)
+              </span>
+            </label>
+
             <DialogFooter className="pt-2">
               <Button
                 type="button"
@@ -771,7 +940,7 @@ export default function AdminOrdersPage() {
                 disabled={isSubmittingTracking}
                 className="bg-[#0F3D3E] text-white hover:bg-[#174C4D]"
               >
-                {isSubmittingTracking ? "Saving..." : "Save Tracking & Mark Shipped"}
+                {isSubmittingTracking ? "Saving..." : markDispatched ? "Save Tracking & Mark Shipped" : "Save Tracking"}
               </Button>
             </DialogFooter>
           </form>
@@ -867,14 +1036,14 @@ export default function AdminOrdersPage() {
                     <div key={idx} className="flex items-center justify-between pt-2 first:pt-0">
                       <div className="pr-2">
                         <p className="font-serif font-bold text-[#0F3D3E] line-clamp-1">
-                          {item.book?.title || item.title || "Book Title"}
+                          {item.book?.title ?? item.title ?? "Book no longer available"}
                         </p>
                         <p className="text-[10px] text-[#5C6E6E]">
                           Qty: <strong className="text-[#0F3D3E]">{item.quantity}</strong> {item.format ? `• ${item.format}` : (item.book?.format ? `• ${item.book.format}` : "")}
                         </p>
                       </div>
                       <span className="font-mono font-bold text-[#0F3D3E] shrink-0">
-                        ₹{(item.price || 0) * (item.quantity || 1)}
+                        ₹{((Number(item.price) || 0) * (Number(item.quantity) || 1)).toLocaleString("en-IN")}
                       </span>
                     </div>
                   ))}

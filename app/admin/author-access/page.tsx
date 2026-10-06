@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import api from "@/lib/api";
+import { useAuthStore } from "@/store/auth-store";
+import { isPaidAuthorDashboardEnabled } from "@/lib/author-access";
 import {
   ShieldCheck,
   CreditCard,
@@ -32,7 +34,8 @@ import toast from "react-hot-toast";
 
 export default function AdminAuthorAccessPage() {
   const [activeTab, setActiveTab] = useState<"entitlements" | "plans" | "purchases">("entitlements");
-  const [paidAccessFeatureEnabled, setPaidAccessFeatureEnabled] = useState(false);
+  // From GET /users/me/context (loaded by SessionBootstrap). Missing flag = disabled.
+  const paidAccessFeatureEnabled = isPaidAuthorDashboardEnabled(useAuthStore((state) => state.userContext));
 
   // Entitlements State
   const [entitlements, setEntitlements] = useState<any[]>([]);
@@ -60,22 +63,6 @@ export default function AdminAuthorAccessPage() {
   // Purchases State
   const [purchases, setPurchases] = useState<any[]>([]);
   const [loadingPurchases, setLoadingPurchases] = useState(false);
-
-  // Check paid feature flag
-  useEffect(() => {
-    async function checkFeature() {
-      try {
-        const { data } = await api.get("/users/me/context").catch(() => ({ data: null }));
-        const features = data?.data?.features || data?.features || {};
-        if (features.paidAuthorDashboardAccess !== undefined) {
-          setPaidAccessFeatureEnabled(Boolean(features.paidAuthorDashboardAccess));
-        }
-      } catch {
-        // Fallback
-      }
-    }
-    checkFeature();
-  }, []);
 
   // Fetch Entitlements
   const fetchEntitlements = useCallback(async () => {
@@ -200,16 +187,20 @@ export default function AdminAuthorAccessPage() {
             Author Dashboard Access
           </h1>
           <p className="text-xs sm:text-sm text-[#5C6E6E] mt-1">
-            Manage author entitlement grants, access plans, and purchase verification.
+            {paidAccessFeatureEnabled
+              ? "Manage author entitlement grants, access plans, and purchase verification."
+              : "Historical entitlement records (read-only audit). Approved authors already have free dashboard access."}
           </p>
         </div>
-        <Button
-          onClick={() => setIsGrantModalOpen(true)}
-          className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-bold gap-2 shadow-xs"
-        >
-          <ShieldCheck className="h-4 w-4" />
-          <span>Manual Access Grant</span>
-        </Button>
+        {paidAccessFeatureEnabled && (
+          <Button
+            onClick={() => setIsGrantModalOpen(true)}
+            className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-bold gap-2 shadow-xs"
+          >
+            <ShieldCheck className="h-4 w-4" />
+            <span>Manual Access Grant</span>
+          </Button>
+        )}
       </div>
 
       {/* Feature Flag Banner */}
@@ -222,6 +213,8 @@ export default function AdminAuthorAccessPage() {
               <p className="text-amber-800 text-[11px] mt-0.5">
                 Backend has <code className="font-mono bg-white/60 px-1 py-0.5 rounded">paidAuthorDashboardAccess=false</code>.
                 Approved authors have unrestricted access to their analytics studio without mandatory plan purchase.
+                Plans, purchases and grant/revoke/restore are hidden; revoking an old entitlement would not block anyone.
+                To block an author, suspend the account in Users &amp; Accounts.
               </p>
             </div>
           </CardContent>
@@ -235,14 +228,18 @@ export default function AdminAuthorAccessPage() {
             <ShieldCheck className="h-3.5 w-3.5" />
             <span>Entitlements</span>
           </TabsTrigger>
-          <TabsTrigger value="plans" className="text-xs font-bold gap-1.5">
-            <Package className="h-3.5 w-3.5" />
-            <span>Access Plans</span>
-          </TabsTrigger>
-          <TabsTrigger value="purchases" className="text-xs font-bold gap-1.5">
-            <CreditCard className="h-3.5 w-3.5" />
-            <span>Purchases Queue</span>
-          </TabsTrigger>
+          {paidAccessFeatureEnabled && (
+            <>
+              <TabsTrigger value="plans" className="text-xs font-bold gap-1.5">
+                <Package className="h-3.5 w-3.5" />
+                <span>Access Plans</span>
+              </TabsTrigger>
+              <TabsTrigger value="purchases" className="text-xs font-bold gap-1.5">
+                <CreditCard className="h-3.5 w-3.5" />
+                <span>Purchases Queue</span>
+              </TabsTrigger>
+            </>
+          )}
         </TabsList>
 
         {/* Tab 1: Entitlements */}
@@ -301,7 +298,9 @@ export default function AdminAuthorAccessPage() {
                             {ent.createdAt ? new Date(ent.createdAt).toLocaleDateString() : "N/A"}
                           </TableCell>
                           <TableCell className="text-right">
-                            {isActive ? (
+                            {!paidAccessFeatureEnabled ? (
+                              <span className="text-[11px] text-[#5C6E6E] italic">Audit only</span>
+                            ) : isActive ? (
                               <Button
                                 size="sm"
                                 variant="outline"

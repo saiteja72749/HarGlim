@@ -1,57 +1,374 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  AlertCircle,
+  ArrowRight,
   BookOpen,
+  CheckCircle,
+  Clock,
   DollarSign,
   FileText,
-  CreditCard,
-  ArrowRight,
   PlusCircle,
+  RefreshCw,
+  ShoppingCart,
+  Wallet,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
+import { normalizeAuthorDashboard, type AuthorDashboardSummary } from "@/lib/author-dashboard";
+import { AuthorSalesPanel } from "@/components/authors/author-sales-panel";
+
+type AuthorDashboardData = {
+  totalBooks: number;
+  publishedBooks: number;
+  manuscriptsCount: number;
+  pendingCount: number;
+  processingCount: number;
+  rejectedCount: number;
+  totalSold: number;
+  totalEarnings: number;
+  grossRevenue: number;
+  eligibleUnsettled: number;
+  pendingPayout: number;
+  paidLifetime: number;
+  recentBooks: any[];
+  manuscripts: any[];
+};
+
+const emptyDashboardData: AuthorDashboardData = {
+  totalBooks: 0,
+  publishedBooks: 0,
+  manuscriptsCount: 0,
+  pendingCount: 0,
+  processingCount: 0,
+  rejectedCount: 0,
+  totalSold: 0,
+  totalEarnings: 0,
+  grossRevenue: 0,
+  eligibleUnsettled: 0,
+  pendingPayout: 0,
+  paidLifetime: 0,
+  recentBooks: [],
+  manuscripts: [],
+};
+
+const unwrapData = (payload: any) => payload?.data?.data ?? payload?.data ?? payload ?? {};
+
+const extractList = (payload: any, keys: string[] = []) => {
+  const data = unwrapData(payload);
+  for (const key of keys) {
+    const value = data?.[key] ?? payload?.[key];
+    if (Array.isArray(value)) return value;
+  }
+
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(payload)) return payload;
+
+  const nested = data?.items || data?.results || data?.docs;
+  return Array.isArray(nested) ? nested : [];
+};
+
+const getNumber = (...values: any[]) => {
+  for (const value of values) {
+    // Number(null) and Number("") are 0: skip them so a missing field doesn't hide the fallback.
+    if (value === null || value === undefined || value === "") continue;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+};
+
+const normalizeStatus = (status: any) =>
+  String(status || "draft").toLowerCase().replace(/\s+/g, "_");
+
+const getSoldCount = (book: any) =>
+  getNumber(book?.totalSales, book?.unitsSold, book?.copiesSold, book?.sales, book?.soldCount);
+
+const getRoyaltyAmount = (item: any) =>
+  getNumber(item?.royaltyEarned, item?.royaltyAmount, item?.amount, item?.earnings, item?.revenue);
+
+const getBookId = (book: any) => String(book?._id || book?.id || book?.bookId || book?.slug || book?.title || "");
+
+const mergeBooksById = (...lists: any[][]) => {
+  const map = new Map<string, any>();
+
+  for (const list of lists) {
+    for (const book of list) {
+      const id = getBookId(book);
+      if (!id) continue;
+      map.set(id, { ...(map.get(id) || {}), ...book });
+    }
+  }
+
+  return Array.from(map.values());
+};
+
+const getStatusLabel = (status: any) => {
+  const normalized = normalizeStatus(status);
+  if (normalized === "pending") return "Pending";
+  if (["processing", "under_review", "in_editing", "submitted"].includes(normalized)) return "Processing";
+  if (["approved", "published"].includes(normalized)) return "Published";
+  if (["rejected", "revision_required", "changes_requested"].includes(normalized)) return "Needs Revision";
+  return String(status || "Draft");
+};
 
 export default function AuthorDashboard() {
   const { user } = useAuthStore();
-  const [dashboardData, setDashboardData] = useState<any>(null);
+  const [dashboardData, setDashboardData] = useState<AuthorDashboardData>(emptyDashboardData);
   const [loading, setLoading] = useState(true);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [salesSummary, setSalesSummary] = useState<AuthorDashboardSummary | null>(null);
+
+  const fetchDashboardData = useCallback(async () => {
+    if (!user) return;
+
+    setLoading(true);
+    try {
+      const authorId = user?._id || user?.id;
+      const requestConfig = { cache: "no-store" } as any;
+
+      const [dashboardRes, booksRes, performanceRes, royaltiesRes, analyticsRes, publicBooksRes] =
+        await Promise.allSettled([
+          api.get("/authors/me/dashboard", requestConfig),
+          api.get("/authors/me/books", { params: { limit: 100, sort: "-updatedAt" }, ...requestConfig } as any),
+          api.get("/authors/me/books/performance", requestConfig),
+          api.get("/authors/me/royalties", { params: { limit: 100 }, ...requestConfig } as any),
+          api.get("/authors/me/analytics", requestConfig),
+          // Live GET /books ignores ?author= and returns the whole catalog, which made every
+          // book count as this author's. /authors/{id}/books is the real per-author list.
+          authorId
+            ? api.get(`/authors/${authorId}/books`, { params: { limit: 100 }, ...requestConfig } as any)
+            : Promise.resolve({ data: [] }),
+        ]);
+
+      const dashboardRaw = dashboardRes.status === "fulfilled" ? unwrapData(dashboardRes.value.data) : {};
+      // Metrics may come flat or grouped (summary / metrics / royalties); flatten once.
+      const dashboard = {
+        ...dashboardRaw,
+        ...(dashboardRaw?.summary || {}),
+        ...(dashboardRaw?.metrics || {}),
+        ...(dashboardRaw?.books || {}),
+        ...(dashboardRaw?.royalties || {}),
+        ...(dashboardRaw?.payouts || {}),
+      };
+      const topBooks = extractList(dashboardRaw?.topBooks || [], []);
+      // Grouped live payload: books{}, sales{}, royalties{}, topBooks[], recentSales[]
+      const summary = dashboardRes.status === "fulfilled" ? normalizeAuthorDashboard(dashboardRes.value.data) : null;
+      setSalesSummary(summary);
+      const analytics = analyticsRes.status === "fulfilled" ? unwrapData(analyticsRes.value.data) : {};
+      const authorBooks =
+        booksRes.status === "fulfilled"
+          ? extractList(booksRes.value.data, ["books", "manuscripts", "items"])
+          : [];
+      const performanceBooks =
+        performanceRes.status === "fulfilled"
+          ? extractList(performanceRes.value.data, ["books", "performance", "items"])
+          : [];
+      const publicBooks =
+        publicBooksRes.status === "fulfilled"
+          ? extractList(publicBooksRes.value.data, ["books", "items"])
+          : [];
+      const royaltyEntries =
+        royaltiesRes.status === "fulfilled"
+          ? extractList(royaltiesRes.value.data, ["royalties", "entries", "items", "sales"])
+          : [];
+
+      const allBooks = mergeBooksById(authorBooks, performanceBooks, publicBooks);
+      const publishedBooksList = allBooks.filter((book) =>
+        ["published", "approved", "active"].includes(normalizeStatus(book.status))
+      );
+      const manuscripts = authorBooks.filter(
+        (book) => !["published", "active"].includes(normalizeStatus(book.status))
+      );
+
+      const statusCounts = authorBooks.reduce(
+        (counts, book) => {
+          const status = normalizeStatus(book.status);
+          if (status === "pending" || status === "draft") counts.pending += 1;
+          if (["processing", "under_review", "in_editing", "submitted"].includes(status)) {
+            counts.processing += 1;
+          }
+          if (["rejected", "revision_required", "changes_requested"].includes(status)) {
+            counts.rejected += 1;
+          }
+          return counts;
+        },
+        { pending: 0, processing: 0, rejected: 0 }
+      );
+
+      const totalSoldFromBooks = mergeBooksById(performanceBooks, publicBooks, authorBooks).reduce(
+        (sum, book) => sum + getSoldCount(book),
+        0
+      );
+      const totalEarningsFromRoyalties = royaltyEntries.reduce(
+        (sum, item) => sum + getRoyaltyAmount(item),
+        0
+      );
+      const totalEarningsFromPerformance = performanceBooks.reduce(
+        (sum, book) => sum + getRoyaltyAmount(book),
+        0
+      );
+
+      const nextData: AuthorDashboardData = {
+        totalBooks: getNumber(
+          summary?.books.total || undefined,
+          dashboard.totalBooks,
+          dashboard.booksCount,
+          analytics.totalBooks,
+          allBooks.length
+        ),
+        publishedBooks: getNumber(
+          summary?.books.total ? summary.books.published : undefined,
+          dashboard.publishedBooks,
+          dashboard.publishedBooksCount,
+          analytics.publishedBooks,
+          publishedBooksList.length
+        ),
+        manuscriptsCount: getNumber(
+          dashboard.manuscriptsCount,
+          dashboard.totalManuscripts,
+          dashboard.manuscripts?.length,
+          manuscripts.length
+        ),
+        pendingCount: getNumber(
+          dashboard.pendingCount,
+          dashboard.pendingBooks,
+          dashboard.pendingManuscripts,
+          statusCounts.pending
+        ),
+        processingCount: getNumber(
+          dashboard.processingCount,
+          dashboard.processingBooks,
+          dashboard.underReviewCount,
+          dashboard.underReview,
+          statusCounts.processing
+        ),
+        rejectedCount: getNumber(
+          dashboard.rejectedCount,
+          dashboard.revisionRequiredCount,
+          statusCounts.rejected
+        ),
+        totalSold: getNumber(
+          summary?.unitsSold,
+          dashboard.unitsSold,
+          dashboard.totalSold,
+          dashboard.totalUnitsSold,
+          dashboard.copiesSold,
+          analytics.totalUnitsSold,
+          analytics.totalSales,
+          totalSoldFromBooks
+        ),
+        totalEarnings: getNumber(
+          summary?.accrued,
+          dashboard.accruedKnown,
+          dashboard.accrued,
+          dashboard.totalEarnings,
+          dashboard.totalRoyalty,
+          analytics.totalRoyalty,
+          analytics.totalRevenue,
+          totalEarningsFromRoyalties,
+          totalEarningsFromPerformance
+        ),
+        grossRevenue: getNumber(summary?.grossRevenue, dashboard.grossBookRevenue, dashboard.grossRevenue, analytics.totalRevenue),
+        eligibleUnsettled: getNumber(summary?.eligibleUnsettled, dashboard.eligibleUnsettled),
+        pendingPayout: getNumber(summary?.pendingPayout, dashboard.settledPendingPayment, dashboard.pendingPayouts),
+        paidLifetime: getNumber(summary?.paidLifetime, dashboard.paidLifetime, dashboard.lifetimePayouts),
+        recentBooks: (topBooks.length > 0
+          ? topBooks
+          : performanceBooks.length > 0
+          ? performanceBooks
+          : publishedBooksList
+        ).slice(0, 5),
+        manuscripts: manuscripts.slice(0, 5),
+      };
+
+      setDashboardData(nextData);
+      setLastSyncedAt(new Date());
+    } catch (err) {
+      console.warn("Error fetching author dashboard data:", err);
+      setDashboardData(emptyDashboardData);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
 
   useEffect(() => {
-    const fetchDashboardData = async () => {
-      setLoading(true);
-      try {
-        let resData: any = {};
-        try {
-          const authorId = user?._id || user?.id;
-          const { data } = await api.get("/authors/me/dashboard").catch(() =>
-            api.get(`/authors/${authorId}/stats`)
-          );
-          resData = data?.data || data || {};
-        } catch {
-          resData = {};
-        }
-
-        setDashboardData({
-          publishedBooks: resData.publishedBooks ?? (resData.books?.length || 0),
-          manuscriptsCount: resData.manuscriptsCount ?? (resData.manuscripts?.length || 0),
-          totalEarnings: resData.accruedKnown ?? resData.totalEarnings ?? resData.totalRoyalty ?? 0,
-          recentBooks: Array.isArray(resData.recentBooks) ? resData.recentBooks : (Array.isArray(resData.books) ? resData.books : []),
-          manuscripts: Array.isArray(resData.manuscripts) ? resData.manuscripts : [],
-        });
-      } catch (err) {
-        console.warn("Error fetching dashboard data:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchDashboardData();
-  }, [user]);
+  }, [fetchDashboardData]);
+
+  const statCards = useMemo(
+    () => [
+      {
+        label: "Total Books",
+        value: dashboardData.totalBooks,
+        helper: `${dashboardData.publishedBooks} published`,
+        icon: BookOpen,
+        iconClass: "bg-[#0F3D3E] text-[#D4AF37]",
+      },
+      {
+        label: "Copies Sold",
+        value: dashboardData.totalSold,
+        helper: "Live backend sales",
+        icon: ShoppingCart,
+        iconClass: "bg-emerald-500/10 text-emerald-700 border border-emerald-500/20",
+      },
+      {
+        label: "Pending",
+        value: dashboardData.pendingCount,
+        helper: "Drafts or waiting review",
+        icon: Clock,
+        iconClass: "bg-amber-500/10 text-amber-700 border border-amber-500/20",
+      },
+      {
+        label: "Processing",
+        value: dashboardData.processingCount,
+        helper: "Submitted or under review",
+        icon: FileText,
+        iconClass: "bg-blue-500/10 text-blue-700 border border-blue-500/20",
+      },
+      {
+        label: "Needs Revision",
+        value: dashboardData.rejectedCount,
+        helper: "Rejected or changes requested",
+        icon: AlertCircle,
+        iconClass: "bg-rose-500/10 text-rose-700 border border-rose-500/20",
+      },
+      {
+        label: "Royalty Earned",
+        value: `₹${Number(dashboardData.totalEarnings).toLocaleString("en-IN")}`,
+        helper: `From ₹${Number(dashboardData.grossRevenue).toLocaleString("en-IN")} gross book revenue`,
+        icon: DollarSign,
+        iconClass: "bg-[#D4AF37]/20 text-[#0F3D3E] border border-[#D4AF37]/40",
+      },
+      {
+        label: "Eligible for Payout",
+        value: `₹${Number(dashboardData.eligibleUnsettled).toLocaleString("en-IN")}`,
+        helper: "Not yet in a settlement",
+        icon: Wallet,
+        iconClass: "bg-emerald-500/10 text-emerald-700 border border-emerald-500/20",
+      },
+      {
+        label: "Payout Pending",
+        value: `₹${Number(dashboardData.pendingPayout).toLocaleString("en-IN")}`,
+        helper: "Settled, awaiting transfer",
+        icon: Clock,
+        iconClass: "bg-amber-500/10 text-amber-700 border border-amber-500/20",
+      },
+      {
+        label: "Paid to You",
+        value: `₹${Number(dashboardData.paidLifetime).toLocaleString("en-IN")}`,
+        helper: "Lifetime payouts",
+        icon: CheckCircle,
+        iconClass: "bg-[#0F3D3E] text-[#D4AF37]",
+      },
+    ],
+    [dashboardData]
+  );
 
   if (loading) {
     return (
@@ -61,208 +378,217 @@ export default function AuthorDashboard() {
     );
   }
 
-  const {
-    publishedBooks = 0,
-    manuscriptsCount = 0,
-    totalEarnings = 0,
-    recentBooks = [],
-    manuscripts = [],
-  } = dashboardData || {};
-
   return (
     <div className="space-y-8 text-[#0F3D3E] font-sans">
-      
-      {/* 1. Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E2E6DF] pb-5">
         <div>
           <h1 className="text-2xl sm:text-3xl font-serif font-bold text-[#0F3D3E]">
             Author Workspace
           </h1>
           <p className="text-xs sm:text-sm text-[#5C6E6E] mt-0.5">
-            Welcome back, {user?.name || "Author"}! Manage your published books, manuscripts, and royalty earnings.
+            Welcome back, {user?.name || "Author"}! Your dashboard is synced with backend book, sales, and royalty APIs.
           </p>
+          {lastSyncedAt && (
+            <p className="text-[11px] text-[#5C6E6E] mt-1">
+              Last synced {lastSyncedAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+            </p>
+          )}
         </div>
 
-        <Button
-          asChild
-          className="bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] border border-[#D4AF37]/40 font-serif font-bold text-xs h-11 px-5 rounded-xl shadow-xs gap-2"
-        >
-          <Link href="/author/manuscripts/new">
-            <PlusCircle className="h-4 w-4" />
-            <span>Submit New Manuscript</span>
-          </Link>
-        </Button>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={fetchDashboardData}
+            disabled={loading}
+            className="h-11 rounded-xl text-xs font-bold gap-2 border-[#0F3D3E]/30 text-[#0F3D3E]"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            <span>Refresh</span>
+          </Button>
+          <Button
+            asChild
+            className="bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] border border-[#D4AF37]/40 font-serif font-bold text-xs h-11 px-5 rounded-xl shadow-xs gap-2"
+          >
+            <Link href="/author/manuscripts/new">
+              <PlusCircle className="h-4 w-4" />
+              <span>Submit New Manuscript</span>
+            </Link>
+          </Button>
+        </div>
       </div>
 
-      {/* 2. Top 3 Simple Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-        {/* Card 1: Total Books */}
-        <Card className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xs flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#5C6E6E]">
-              Total Books
-            </span>
-            <p className="text-3xl font-serif font-bold text-[#0F3D3E]">
-              {publishedBooks}
-            </p>
-            <p className="text-[11px] text-[#5C6E6E]">Published catalog</p>
-          </div>
-          <div className="h-12 w-12 rounded-2xl bg-[#0F3D3E] text-[#D4AF37] flex items-center justify-center shadow-xs">
-            <BookOpen className="h-6 w-6" />
-          </div>
-        </Card>
-
-        {/* Card 2: Manuscripts Submitted */}
-        <Card className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xs flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#5C6E6E]">
-              Manuscripts Submitted
-            </span>
-            <p className="text-3xl font-serif font-bold text-[#0F3D3E]">
-              {manuscriptsCount}
-            </p>
-            <p className="text-[11px] text-[#5C6E6E]">Under review & editing</p>
-          </div>
-          <div className="h-12 w-12 rounded-2xl bg-[#D4AF37]/20 text-[#0F3D3E] border border-[#D4AF37]/40 flex items-center justify-center shadow-xs">
-            <FileText className="h-6 w-6" />
-          </div>
-        </Card>
-
-        {/* Card 3: Total Earnings */}
-        <Card className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xs flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#5C6E6E]">
-              Total Earnings
-            </span>
-            <p className="text-3xl font-serif font-bold text-[#0F3D3E]">
-              ₹{Number(totalEarnings).toLocaleString("en-IN")}
-            </p>
-            <p className="text-[11px] text-[#5C6E6E]">Royalties from Admin</p>
-          </div>
-          <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 flex items-center justify-center shadow-xs">
-            <DollarSign className="h-6 w-6" />
-          </div>
-        </Card>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
+        {statCards.map((stat) => (
+          <Card
+            key={stat.label}
+            className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xs flex items-center justify-between"
+          >
+            <div className="space-y-1 min-w-0">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#5C6E6E]">
+                {stat.label}
+              </span>
+              <p className="text-3xl font-serif font-bold text-[#0F3D3E]">
+                {typeof stat.value === "number" ? Number(stat.value).toLocaleString("en-IN") : stat.value}
+              </p>
+              <p className="text-[11px] text-[#5C6E6E]">{stat.helper}</p>
+            </div>
+            <div className={`h-12 w-12 rounded-2xl flex items-center justify-center shadow-xs shrink-0 ${stat.iconClass}`}>
+              <stat.icon className="h-6 w-6" />
+            </div>
+          </Card>
+        ))}
       </div>
 
-      {/* 3. Quick Actions */}
+      {salesSummary && (salesSummary.topBooks.length > 0 || salesSummary.recentSales.length > 0) && (
+        <Card className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xs space-y-4">
+          <h2 className="text-base font-serif font-bold text-[#0F3D3E]">Your Book Sales</h2>
+          <AuthorSalesPanel summary={salesSummary} />
+        </Card>
+      )}
+
       <div className="space-y-3">
-        <h2 className="text-base font-serif font-bold text-[#0F3D3E]">
-          Quick Actions
-        </h2>
+        <h2 className="text-base font-serif font-bold text-[#0F3D3E]">Quick Actions</h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Link href="/author/manuscripts/new" className="block">
-            <Card className="bg-white border border-[#E2E6DF] hover:border-[#D4AF37] rounded-2xl p-5 shadow-xs hover:shadow-md transition-all flex items-center justify-between group cursor-pointer">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-[#0F3D3E] text-[#D4AF37] flex items-center justify-center">
-                  <PlusCircle className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="font-serif font-bold text-sm text-[#0F3D3E] group-hover:text-[#D4AF37] transition-colors">
-                    Submit Manuscript
-                  </h3>
-                  <p className="text-[11px] text-[#5C6E6E]">Upload new book draft</p>
-                </div>
-              </div>
-              <ArrowRight className="h-4 w-4 text-[#5C6E6E] group-hover:translate-x-1 transition-transform" />
-            </Card>
-          </Link>
-
-          <Link href="/author/books" className="block">
-            <Card className="bg-white border border-[#E2E6DF] hover:border-[#D4AF37] rounded-2xl p-5 shadow-xs hover:shadow-md transition-all flex items-center justify-between group cursor-pointer">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-[#0F3D3E] text-[#D4AF37] flex items-center justify-center">
-                  <BookOpen className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="font-serif font-bold text-sm text-[#0F3D3E] group-hover:text-[#D4AF37] transition-colors">
-                    Manage Books
-                  </h3>
-                  <p className="text-[11px] text-[#5C6E6E]">View published catalog</p>
-                </div>
-              </div>
-              <ArrowRight className="h-4 w-4 text-[#5C6E6E] group-hover:translate-x-1 transition-transform" />
-            </Card>
-          </Link>
-
-          <Link href="/author/settings" className="block">
-            <Card className="bg-white border border-[#E2E6DF] hover:border-[#D4AF37] rounded-2xl p-5 shadow-xs hover:shadow-md transition-all flex items-center justify-between group cursor-pointer">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-[#0F3D3E] text-[#D4AF37] flex items-center justify-center">
-                  <CreditCard className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="font-serif font-bold text-sm text-[#0F3D3E] group-hover:text-[#D4AF37] transition-colors">
-                    Update Payment Details
-                  </h3>
-                  <p className="text-[11px] text-[#5C6E6E]">Bank account & bio settings</p>
-                </div>
-              </div>
-              <ArrowRight className="h-4 w-4 text-[#5C6E6E] group-hover:translate-x-1 transition-transform" />
-            </Card>
-          </Link>
+          <QuickActionCard
+            href="/author/manuscripts/new"
+            icon={<PlusCircle className="h-5 w-5" />}
+            title="Submit Manuscript"
+            description="Upload new book draft"
+          />
+          <QuickActionCard
+            href="/author/books"
+            icon={<BookOpen className="h-5 w-5" />}
+            title="Manage Books"
+            description="View published catalog"
+          />
+          <QuickActionCard
+            href="/author/royalties"
+            icon={<DollarSign className="h-5 w-5" />}
+            title="Royalty Records"
+            description="Sales and payout history"
+          />
         </div>
       </div>
 
-      {/* 4. Recent Publications & Manuscripts Overview */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        
-        {/* Published Books Preview */}
         <Card className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-[#E2E6DF] pb-3">
             <h3 className="font-serif font-bold text-base text-[#0F3D3E] flex items-center gap-2">
               <BookOpen className="h-4 w-4 text-[#D4AF37]" />
-              <span>Published Books</span>
+              <span>Book Sales</span>
             </h3>
             <Button variant="ghost" size="sm" asChild className="text-xs text-[#0F3D3E] font-bold">
-              <Link href="/author/books">View All →</Link>
+              <Link href="/author/books">View All</Link>
             </Button>
           </div>
 
           <div className="space-y-3">
-            {recentBooks.map((book: any) => (
-              <div key={book.id || book._id} className="flex items-center justify-between p-3 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF]">
-                <div>
-                  <p className="font-serif font-bold text-xs text-[#0F3D3E]">{book.title}</p>
-                  <p className="text-[11px] text-[#5C6E6E]">{book.sales || 0} copies sold</p>
+            {dashboardData.recentBooks.length === 0 ? (
+              <EmptyPanel
+                title="No book sales yet"
+                text="Published titles and sold-copy counts will appear here after backend sales are recorded."
+              />
+            ) : (
+              dashboardData.recentBooks.map((book) => (
+                <div key={getBookId(book)} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF]">
+                  <div className="min-w-0">
+                    <p className="font-serif font-bold text-xs text-[#0F3D3E] truncate">
+                      {book.title || "Untitled Book"}
+                    </p>
+                    <p className="text-[11px] text-[#5C6E6E]">
+                      {getSoldCount(book).toLocaleString("en-IN")} copies sold
+                    </p>
+                  </div>
+                  <Badge className="bg-[#0F3D3E]/10 text-[#0F3D3E] border border-[#0F3D3E]/20 text-[10px] shrink-0">
+                    {getStatusLabel(book.status)}
+                  </Badge>
                 </div>
-                <Badge className="bg-[#0F3D3E]/10 text-[#0F3D3E] border border-[#0F3D3E]/20 text-[10px]">
-                  Published
-                </Badge>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </Card>
 
-        {/* Manuscripts Preview */}
         <Card className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-[#E2E6DF] pb-3">
             <h3 className="font-serif font-bold text-base text-[#0F3D3E] flex items-center gap-2">
               <FileText className="h-4 w-4 text-[#D4AF37]" />
-              <span>Recent Manuscripts</span>
+              <span>Manuscript Pipeline</span>
             </h3>
             <Button variant="ghost" size="sm" asChild className="text-xs text-[#0F3D3E] font-bold">
-              <Link href="/author/manuscripts">View All →</Link>
+              <Link href="/author/manuscripts">View All</Link>
             </Button>
           </div>
 
           <div className="space-y-3">
-            {manuscripts.map((item: any) => (
-              <div key={item.id || item._id} className="flex items-center justify-between p-3 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF]">
-                <div>
-                  <p className="font-serif font-bold text-xs text-[#0F3D3E]">{item.title}</p>
-                  <p className="text-[11px] text-[#5C6E6E]">Submitted on {new Date(item.createdAt || Date.now()).toLocaleDateString("en-IN")}</p>
+            {dashboardData.manuscripts.length === 0 ? (
+              <EmptyPanel
+                title="No manuscripts in progress"
+                text="Draft, pending, and processing manuscripts will sync here from the backend."
+              />
+            ) : (
+              dashboardData.manuscripts.map((item) => (
+                <div key={getBookId(item)} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF]">
+                  <div className="min-w-0">
+                    <p className="font-serif font-bold text-xs text-[#0F3D3E] truncate">
+                      {item.title || "Untitled Manuscript"}
+                    </p>
+                    <p className="text-[11px] text-[#5C6E6E]">
+                      {item.updatedAt || item.createdAt
+                        ? `Updated ${new Date(item.updatedAt || item.createdAt).toLocaleDateString("en-IN")}`
+                        : "Awaiting backend timestamp"}
+                    </p>
+                  </div>
+                  <Badge className="bg-amber-50 text-amber-700 border border-amber-200 text-[10px] shrink-0">
+                    {getStatusLabel(item.status)}
+                  </Badge>
                 </div>
-                <Badge className="bg-amber-50 text-amber-700 border border-amber-200 text-[10px]">
-                  Under Review
-                </Badge>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </Card>
-
       </div>
+    </div>
+  );
+}
 
+function QuickActionCard({
+  href,
+  icon,
+  title,
+  description,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <Link href={href} className="block">
+      <Card className="bg-white border border-[#E2E6DF] hover:border-[#D4AF37] rounded-2xl p-5 shadow-xs hover:shadow-md transition-all flex items-center justify-between group cursor-pointer">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="h-10 w-10 rounded-xl bg-[#0F3D3E] text-[#D4AF37] flex items-center justify-center shrink-0">
+            {icon}
+          </div>
+          <div className="min-w-0">
+            <h3 className="font-serif font-bold text-sm text-[#0F3D3E] group-hover:text-[#D4AF37] transition-colors truncate">
+              {title}
+            </h3>
+            <p className="text-[11px] text-[#5C6E6E] truncate">{description}</p>
+          </div>
+        </div>
+        <ArrowRight className="h-4 w-4 text-[#5C6E6E] group-hover:translate-x-1 transition-transform shrink-0" />
+      </Card>
+    </Link>
+  );
+}
+
+function EmptyPanel({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="rounded-xl border border-dashed border-[#E2E6DF] bg-[#F8F9F7] p-5 text-center">
+      <CheckCircle className="h-6 w-6 mx-auto text-[#5C6E6E]/50 mb-2" />
+      <p className="text-sm font-serif font-bold text-[#0F3D3E]">{title}</p>
+      <p className="text-xs text-[#5C6E6E] mt-1">{text}</p>
     </div>
   );
 }

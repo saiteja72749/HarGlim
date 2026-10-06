@@ -8,6 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
+import { extractList } from "@/lib/tracking";
+import {
+  FULFILMENT_META,
+  PAYMENT_STATE_META,
+  getFulfilmentStage,
+  getOrderTotal,
+  getPaymentState,
+} from "@/lib/order-status";
 
 export function RecentOrdersSection() {
   const { user } = useAuthStore();
@@ -22,11 +30,13 @@ export function RecentOrdersSection() {
 
     async function fetchOrders() {
       try {
-        const { data } = await api.get("/users/me/orders");
-        const ordersData = data?.data?.orders || data?.orders || data?.data || data || [];
-        if (Array.isArray(ordersData)) {
-          setOrders(ordersData.slice(0, 3)); // show top 3 recent orders
-        }
+        // /users/{id}/orders is the documented route; "me" is not an id.
+        const userId = user?._id || user?.id;
+        const { data } = await api.get(`/users/${userId}/orders`, { params: { limit: 20 } });
+        const ordersData = extractList(data, "orders").sort(
+          (a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
+        setOrders(ordersData.slice(0, 3)); // show top 3 recent orders
       } catch (err) {
         console.error("Failed to load user orders for recent orders section:", err);
       } finally {
@@ -41,36 +51,15 @@ export function RecentOrdersSection() {
     return null;
   }
 
-  const getStatusBadge = (status: string) => {
-    const s = (status || "").toUpperCase();
-    if (s === "SHIPPED" || s === "IN TRANSIT") {
-      return (
-        <Badge className="bg-blue-500/10 text-blue-700 border-blue-500/20 font-semibold flex items-center gap-1">
-          <Truck className="h-3 w-3 text-blue-600" />
-          <span>In Transit / Shipped</span>
-        </Badge>
-      );
-    }
-    if (s === "DELIVERED" || s === "COMPLETED") {
-      return (
-        <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 font-semibold flex items-center gap-1">
-          <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-          <span>Delivered</span>
-        </Badge>
-      );
-    }
-    if (s === "PROCESSING") {
-      return (
-        <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/20 font-semibold flex items-center gap-1">
-          <Package className="h-3 w-3 text-amber-600" />
-          <span>Processing</span>
-        </Badge>
-      );
-    }
+  const getStatusBadge = (order: any) => {
+    const payment = getPaymentState(order);
+    const stage = getFulfilmentStage(order);
+    const meta = payment === "paid" || stage === "cancelled" ? FULFILMENT_META[stage] : PAYMENT_STATE_META[payment];
+    const Icon = stage === "shipped" ? Truck : stage === "delivered" ? CheckCircle2 : payment === "paid" ? Package : Clock;
     return (
-      <Badge className="bg-muted text-muted-foreground font-medium flex items-center gap-1">
-        <Clock className="h-3 w-3" />
-        <span>{status || "Order Placed"}</span>
+      <Badge className={`${meta.tone} font-semibold flex items-center gap-1`}>
+        <Icon className="h-3 w-3" />
+        <span>{meta.label}</span>
       </Badge>
     );
   };
@@ -99,7 +88,6 @@ export function RecentOrdersSection() {
           const orderNo = order.orderNumber || orderId;
           const orderDate = order.createdAt || order.date;
           const items = order.items || [];
-          const status = order.orderStatus || order.status || "PROCESSING";
 
           return (
             <div
@@ -129,11 +117,11 @@ export function RecentOrdersSection() {
                 <div className="space-y-0.5">
                   <span className="text-muted-foreground">Total</span>
                   <p className="font-bold text-foreground">
-                    ₹{(order.totalAmount || order.total || 0).toLocaleString()}
+                    ₹{getOrderTotal(order).toLocaleString("en-IN")}
                   </p>
                 </div>
 
-                <div>{getStatusBadge(status)}</div>
+                <div>{getStatusBadge(order)}</div>
               </div>
 
               {/* Order Items List */}

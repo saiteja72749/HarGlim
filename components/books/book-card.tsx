@@ -87,6 +87,10 @@ export function BookCard({
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (typeof book.stock === "number" && book.stock - Number((book as any).reservedStock || 0) <= 0) {
+      toast.error(`"${book.title}" is out of stock right now.`);
+      return;
+    }
     addItem(book);
     toast.success(`"${book.title}" added to cart!`);
   };
