@@ -465,6 +465,11 @@ export default function AddBookPage() {
           authorType === "new" && newAuthorEmail.trim()
             ? normalizeEmailForStorage(newAuthorEmail)
             : "";
+        if (authorType === "new" && !normalizedAuthorEmail) {
+          toast.error("Please enter the author's email address.");
+          setLoading(false);
+          return;
+        }
         if (normalizedAuthorEmail && !isValidEmailAddress(normalizedAuthorEmail)) {
           toast.error("Please enter a valid author email address.");
           setLoading(false);
@@ -951,15 +956,16 @@ export default function AddBookPage() {
 
                   <div className="space-y-1.5">
                     <Label htmlFor="newAuthorEmail" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                      Author Email (Optional)
+                      Author Email *
                     </Label>
                     <Input
                       id="newAuthorEmail"
                       type="email"
-                      placeholder="e.g. author@example.com (or auto-generated)"
+                      placeholder="e.g. author@example.com"
                       value={newAuthorEmail}
                       onChange={(e) => setNewAuthorEmail(e.target.value)}
                       className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs"
+                      required
                     />
                   </div>
                 </div>

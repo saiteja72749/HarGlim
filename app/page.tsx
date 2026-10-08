@@ -102,6 +102,10 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [, setError] = useState(false);
 
+  // Hero featured-book rotation
+  const [heroIndex, setHeroIndex] = useState(0);
+  const [heroPaused, setHeroPaused] = useState(false);
+
   // FAQ Accordion & Search State
   const [faqSearch, setFaqSearch] = useState("");
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
@@ -125,8 +129,8 @@ export default function Home() {
       setError(false);
 
       const featuredRes = await api
-        .get("/books?featured=true&limit=4")
-        .catch(() => api.get("/books?isFeatured=true&limit=4"));
+        .get("/books?featured=true&limit=8")
+        .catch(() => api.get("/books?isFeatured=true&limit=8"));
 
       const featuredList = extractBooks(featuredRes.data);
       // Strictly enforce Feature on Home (isFeatured) flag; new release alone must not qualify
@@ -184,6 +188,14 @@ export default function Home() {
   useEffect(() => {
     fetchHomeData();
   }, []);
+
+  useEffect(() => {
+    if (heroPaused || featuredBooks.length < 2) return;
+    const timer = setInterval(() => {
+      setHeroIndex((i) => (i + 1) % featuredBooks.length);
+    }, 4500);
+    return () => clearInterval(timer);
+  }, [heroPaused, featuredBooks.length]);
 
   const filteredFaqs = activeFaqs.filter(
     (faq) =>
@@ -291,46 +303,81 @@ export default function Home() {
                       </div>
                     </div>
                   ) : (() => {
-                  // Only feature a book on the homepage hero if "Feature on Home" is explicitly enabled
-                  const heroBook = featuredBooks.find((b: any) => b.isFeatured === true || b.featured === true) || null;
+                  // Only feature books on the homepage hero if "Feature on Home" is explicitly enabled;
+                  // rotate through all of them on a timer.
+                  const heroBooks = featuredBooks;
+                  const activeIndex = heroBooks.length > 0 ? heroIndex % heroBooks.length : 0;
+                  const heroBook = heroBooks[activeIndex] || null;
                   const heroAuthor = heroBook ? getBookAuthorInfo(heroBook).name : "Harglim Publishers Catalog";
                   const heroCover = getOptimizedCoverImage(heroBook?.coverImage);
                   const heroTitle = heroBook?.title || "Discover Inspiring Books";
                   const heroTag = heroBook ? "Featured on Home" : "Harglim Publishers";
+                  const heroHref = heroBook ? `/books/${heroBook.slug || heroBook._id}` : "/books";
 
                   return (
                     <motion.div
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1, y: [0, -10, 0] }}
                       transition={{ opacity: { duration: 0.5 }, y: { repeat: Infinity, duration: 4, ease: "easeInOut" } }}
-                      className="relative w-full h-full rounded-2xl overflow-hidden shadow-2xl border-2 border-[#D4AF37]/40 bg-[#0C3233] flex flex-col justify-end"
+                      onMouseEnter={() => setHeroPaused(true)}
+                      onMouseLeave={() => setHeroPaused(false)}
+                      className="relative w-full h-full rounded-2xl overflow-hidden shadow-2xl border-2 border-[#D4AF37]/40 bg-[#0C3233]"
                     >
-                      <Image
-                        src={heroCover}
-                        onError={(e: any) => {
-                          if (e?.target) {
-                            e.target.src = "/logo.webp";
-                          }
-                        }}
-                        alt={heroTitle}
-                        fill
-                        className="object-cover"
-                        sizes="(max-width: 1024px) 340px, 28vw"
-                        priority
-                        unoptimized={heroCover.startsWith("https://res.cloudinary.com/")}
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#0F3D3E] via-[#0F3D3E]/40 to-transparent opacity-90" />
-                      <div className="absolute bottom-6 left-6 right-6 space-y-1.5 text-white z-10">
-                        <span className="px-2.5 py-0.5 rounded bg-[#D4AF37] text-[#0F3D3E] text-[10px] font-bold uppercase tracking-wider shadow-sm">
-                          {heroTag}
-                        </span>
-                        <p className="font-serif font-bold text-xl line-clamp-2">
-                          {heroTitle}
-                        </p>
-                        <p className="text-xs text-white/80 font-medium">
-                          {heroAuthor}
-                        </p>
-                      </div>
+                      <AnimatePresence initial={false}>
+                        <motion.div
+                          key={heroBook?._id || "placeholder"}
+                          initial={{ opacity: 0, scale: 1.04 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.8, ease: "easeInOut" }}
+                          className="absolute inset-0"
+                        >
+                          <Link href={heroHref} className="block w-full h-full">
+                            <Image
+                              src={heroCover}
+                              onError={(e: any) => {
+                                if (e?.target) {
+                                  e.target.src = "/logo.webp";
+                                }
+                              }}
+                              alt={heroTitle}
+                              fill
+                              className="object-cover"
+                              sizes="(max-width: 1024px) 340px, 28vw"
+                              priority={activeIndex === 0}
+                              unoptimized={heroCover.startsWith("https://res.cloudinary.com/")}
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-[#0F3D3E] via-[#0F3D3E]/40 to-transparent opacity-90" />
+                            <div className="absolute bottom-10 left-6 right-6 space-y-1.5 text-white z-10">
+                              <span className="px-2.5 py-0.5 rounded bg-[#D4AF37] text-[#0F3D3E] text-[10px] font-bold uppercase tracking-wider shadow-sm">
+                                {heroTag}
+                              </span>
+                              <p className="font-serif font-bold text-xl line-clamp-2">
+                                {heroTitle}
+                              </p>
+                              <p className="text-xs text-white/80 font-medium">
+                                {heroAuthor}
+                              </p>
+                            </div>
+                          </Link>
+                        </motion.div>
+                      </AnimatePresence>
+
+                      {heroBooks.length > 1 && (
+                        <div className="absolute bottom-4 left-0 right-0 z-20 flex justify-center gap-1.5">
+                          {heroBooks.map((b, i) => (
+                            <button
+                              key={b._id || i}
+                              type="button"
+                              aria-label={`Show featured book ${i + 1}`}
+                              onClick={() => setHeroIndex(i)}
+                              className={`h-1.5 rounded-full transition-all ${
+                                i === activeIndex ? "w-6 bg-[#D4AF37]" : "w-1.5 bg-white/50 hover:bg-white/80"
+                              }`}
+                            />
+                          ))}
+                        </div>
+                      )}
                     </motion.div>
                   );
                 })()}

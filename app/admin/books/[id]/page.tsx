@@ -334,23 +334,27 @@ export default function EditBookPage() {
 
         // Try creating author profile via dedicated admin user endpoint (never use public register)
         const normalizedAuthorEmail = newAuthorEmail.trim() ? normalizeEmailForStorage(newAuthorEmail) : "";
-        if (normalizedAuthorEmail && !isValidEmailAddress(normalizedAuthorEmail)) {
+        if (!normalizedAuthorEmail) {
+          toast.error("Please enter the new author's email address.");
+          setLoading(false);
+          return;
+        }
+        if (!isValidEmailAddress(normalizedAuthorEmail)) {
           toast.error("Please enter a valid author email address.");
           setLoading(false);
           return;
         }
 
-        const existingByEmail = normalizedAuthorEmail
-          ? authorsList.find((a) => normalizeEmailForStorage(a.email || "").toLowerCase() === normalizedAuthorEmail.toLowerCase())
-          : null;
+        const existingByEmail = authorsList.find(
+          (a) => normalizeEmailForStorage(a.email || "").toLowerCase() === normalizedAuthorEmail.toLowerCase()
+        );
         if (existingByEmail && /^[0-9a-fA-F]{24}$/.test(existingByEmail._id || existingByEmail.id)) {
           finalAuthorId = existingByEmail._id || existingByEmail.id;
           targetAuthorDisplayName = existingByEmail.name || targetAuthorDisplayName;
         }
 
         if (!finalAuthorId) {
-          const cleanSlug = targetAuthorDisplayName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 15) || "writer";
-          const emailToUse = normalizedAuthorEmail || `author.${cleanSlug}.${Date.now().toString().slice(-4)}@harglim.internal`;
+          const emailToUse = normalizedAuthorEmail;
           const tempPassword = `Author#${Math.random().toString(36).slice(-6)}!Aa1`;
 
           try {
@@ -721,7 +725,7 @@ export default function EditBookPage() {
 
                   <div className="space-y-1.5">
                     <Label htmlFor="newAuthorEmail" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                      Author Email (Optional)
+                      Author Email *
                     </Label>
                     <Input
                       id="newAuthorEmail"
@@ -730,6 +734,7 @@ export default function EditBookPage() {
                       value={newAuthorEmail}
                       onChange={(e) => setNewAuthorEmail(e.target.value)}
                       className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs"
+                      required
                     />
                   </div>
                 </div>
