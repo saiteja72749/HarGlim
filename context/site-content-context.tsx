@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useLayoutEffect } from 'react';
 import api from '@/lib/api';
 
 export interface SiteContent {
@@ -247,40 +247,86 @@ const SiteContentContext = createContext<SiteContentContextType>({
   loading: false,
 });
 
+const nonEmpty = (value: any) => (typeof value === 'string' && value.trim() ? value : undefined);
+
+/**
+ * GET /content returns both the flat keys the admin editor saves (homeTitle, packagesJson, ...)
+ * and the backend's own grouped sections (hero{}, about{}, contact{}, faq[], socialLinks{}).
+ * Flat keys win; grouped sections fill whatever the flat keys leave empty, so content saved
+ * either way reaches the site instead of being shadowed by the built-in defaults.
+ */
+function fromBackendContent(api: any): Partial<SiteContent> {
+  const flat: Record<string, any> = {};
+  for (const [key, value] of Object.entries(api || {})) {
+    if (key in defaultSiteContent && (typeof value === 'boolean' || nonEmpty(value) !== undefined)) {
+      flat[key] = value;
+    }
+  }
+
+  const grouped: Partial<SiteContent> = {};
+  const set = (key: keyof SiteContent, value: any) => {
+    const v = nonEmpty(value);
+    if (v !== undefined) (grouped as any)[key] = v;
+  };
+  set('homeTitle', api?.hero?.title);
+  set('homeSubtitle', api?.hero?.subtitle);
+  set('aboutTitle', api?.about?.title);
+  set('aboutSubtitle', api?.about?.subtitle);
+  set('aboutMission', api?.about?.mission || api?.about?.body);
+  set('aboutVision', api?.about?.vision);
+  set('contactEmail', api?.contact?.email);
+  set('contactPhone', api?.contact?.phone);
+  set('contactHours', api?.contact?.hours);
+  // The backend keeps one address string (contact.address / contactAddress).
+  set('contactAddressLine1', api?.contactAddress || api?.contact?.address);
+  // A single backend address line must not get the built-in second line appended to it.
+  if (grouped.contactAddressLine1) grouped.contactAddressLine2 = '';
+  set('contactSupportEmail', api?.siteSettings?.supportEmail);
+  set('socialFacebook', api?.socialLinks?.facebook);
+  set('socialTwitter', api?.socialLinks?.twitter);
+  set('socialInstagram', api?.socialLinks?.instagram);
+  set('socialLinkedin', api?.socialLinks?.linkedin);
+  if (Array.isArray(api?.faq) && api.faq.length > 0) grouped.faqsJson = JSON.stringify(api.faq);
+  const activeAnnouncement = Array.isArray(api?.announcements)
+    ? api.announcements.find((a: any) => a && a.isActive !== false && nonEmpty(a.text ?? a.message ?? a.title))
+    : null;
+  if (activeAnnouncement) {
+    grouped.announcementActive = true;
+    grouped.announcementText = activeAnnouncement.text ?? activeAnnouncement.message ?? activeAnnouncement.title;
+  }
+
+  return { ...grouped, ...flat };
+}
+
+// Runs before the browser paints on the client (plain effect on the server), so cached
+// backend content replaces the built-in defaults without a visible text swap on refresh.
+const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+
 export function SiteContentProvider({ children }: { children: React.ReactNode }) {
   const [content, setContent] = useState<SiteContent>(defaultSiteContent);
   const [loading, setLoading] = useState(true);
 
-  // Load content from localStorage & backend on mount
+  useIsomorphicLayoutEffect(() => {
+    try {
+      const cached = localStorage.getItem(STORAGE_KEY);
+      if (cached) setContent({ ...defaultSiteContent, ...JSON.parse(cached) });
+    } catch {
+      // Unreadable cache: the backend response below replaces it.
+    }
+  }, []);
+
   useEffect(() => {
     const loadContent = async () => {
       try {
-        // 1. Try local cache first for instant render
-        const cached = localStorage.getItem(STORAGE_KEY);
-        if (cached) {
-          try {
-            const parsed = JSON.parse(cached);
-            // If cached packages contain old dummy packages (missing pkg-999), reset packagesJson to default
-            if (parsed.packagesJson && (!parsed.packagesJson.includes("pkg-999") || parsed.packagesJson.includes("14999") || parsed.packagesJson.includes("Demo Starter"))) {
-              parsed.packagesJson = defaultSiteContent.packagesJson;
-            }
-            setContent((prev) => ({ ...prev, ...parsed }));
-          } catch (e) {
-            console.error('Failed to parse cached site content:', e);
-          }
-        }
-
-        // 2. Fetch fresh content from backend API if available
         const res = await api.get('/content').catch(() => null);
-        if (res?.data) {
-          const apiData = res.data.data || res.data;
-          if (apiData && typeof apiData === 'object') {
-            const merged = { ...defaultSiteContent, ...apiData };
-            if (merged.packagesJson && (merged.packagesJson.includes("Demo Starter") || merged.packagesJson.includes("Demo Pro") || !merged.packagesJson.includes("pkg-999"))) {
-              merged.packagesJson = defaultSiteContent.packagesJson;
-            }
-            setContent(merged);
+        const apiData = res?.data?.data || res?.data;
+        if (apiData && typeof apiData === 'object') {
+          const merged = { ...defaultSiteContent, ...fromBackendContent(apiData) };
+          setContent(merged);
+          try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+          } catch {
+            // Storage full/blocked: the live content is already in state.
           }
         }
       } catch (err) {
@@ -293,18 +339,23 @@ export function SiteContentProvider({ children }: { children: React.ReactNode })
     loadContent();
   }, []);
 
+  /** Saves to the backend first; the site only changes once PUT /admin/content succeeds. */
   const updateContent = async (newFields: Partial<SiteContent>): Promise<boolean> => {
     const updated = { ...content, ...newFields };
+    // Flat compatibility payload (partial update). The two address lines are stored as the
+    // backend's single contactAddress.
+    const contactAddress = [updated.contactAddressLine1, updated.contactAddressLine2]
+      .map((line) => line?.trim())
+      .filter(Boolean)
+      .join(', ');
+    await api.put('/admin/content', { ...updated, contactAddress });
     setContent(updated);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-
     try {
-      await api.put('/admin/content', updated);
-      return true;
-    } catch (err) {
-      console.warn('API update failed, saved to local cache:', err);
-      return true; // Saved locally
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    } catch {
+      // Cache only.
     }
+    return true;
   };
 
   const resetContent = () => {
@@ -324,6 +375,17 @@ export function SiteContentProvider({ children }: { children: React.ReactNode })
       {children}
     </SiteContentContext.Provider>
   );
+}
+
+/**
+ * The value an admin saved for `key`, or undefined while it is still the built-in default.
+ * Pages with their own long-form copy use this so backend edits show without replacing
+ * that copy with the shorter defaults above.
+ */
+export function editedContent(content: SiteContent | undefined, key: keyof SiteContent): string | undefined {
+  const value = content?.[key];
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  return value === defaultSiteContent[key] ? undefined : value;
 }
 
 export function useSiteContent() {

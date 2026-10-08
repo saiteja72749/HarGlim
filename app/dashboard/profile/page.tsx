@@ -24,7 +24,13 @@ import { useAuthStore } from "@/store/auth-store";
 import toast from "react-hot-toast";
 import { ErrorState } from "@/components/ui/error-state";
 import api from "@/lib/api";
-import { loadSavedAddress, saveAddress } from "@/lib/saved-address";
+import {
+  fetchSavedAddresses,
+  getDefaultAddress,
+  saveAddresses,
+  withDefaultAddress,
+  type SavedAddress,
+} from "@/lib/saved-address";
 
 export default function ProfilePage() {
   const { user, setUser } = useAuthStore();
@@ -32,6 +38,7 @@ export default function ProfilePage() {
   const [isFetching, setIsFetching] = useState(true);
   const [error, setError] = useState(false);
   const [totalOrders, setTotalOrders] = useState<number>(0);
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
 
   const [formData, setFormData] = useState({
     name: user?.name || "",
@@ -50,14 +57,18 @@ export default function ProfilePage() {
 
     try {
       const userId = user?._id || user?.id;
-      const [res, ordersRes] = await Promise.allSettled([
+      const [res, ordersRes, addressesRes] = await Promise.allSettled([
         // GET /users/me is the documented "current user profile" endpoint.
         api.get("/users/me", { cache: "no-store" } as any),
-        api.get(`/users/${userId}/orders`, { params: { limit: 100 } }),
+        // Only the count is shown: pagination.total from a 1-item page.
+        api.get(`/users/${userId}/orders`, { params: { limit: 1 } }),
+        fetchSavedAddresses(),
       ]);
 
-      // Phone/address are not part of the backend user profile; they live on this device.
-      const saved = loadSavedAddress(userId);
+      // Phone/address come from the default saved address (GET /users/me/addresses).
+      const addresses = addressesRes.status === "fulfilled" ? addressesRes.value : [];
+      setSavedAddresses(addresses);
+      const saved = getDefaultAddress(addresses);
 
       if (res.status === "fulfilled") {
         const userData = res.value.data?.data?.user || res.value.data?.data || res.value.data?.user || res.value.data;
@@ -132,21 +143,28 @@ export default function ProfilePage() {
       await api.put(`/users/${userId}`, { name: formData.name.trim(), bio: formData.bio });
       if (user) setUser({ ...user, name: formData.name.trim() });
 
-      const savedLocally = saveAddress(userId, {
-        fullName: formData.name,
-        email: formData.email,
-        phone: formData.phone,
-        addressLine1: formData.address,
-        city: formData.city,
-        state: formData.state,
-        postalCode: formData.pincode,
-        country: "India",
-      });
+      // An address is saved only when the backend's required fields are present.
+      const hasAddress = formData.address.trim() && formData.city.trim() && formData.pincode.trim();
+      const defaultAddress = getDefaultAddress(savedAddresses);
+      const nextAddresses = hasAddress
+        ? withDefaultAddress(savedAddresses, {
+            _id: defaultAddress?._id,
+            label: defaultAddress?.label || "Home",
+            fullName: formData.name,
+            email: formData.email,
+            phone: formData.phone,
+            addressLine1: formData.address,
+            addressLine2: defaultAddress?.addressLine2,
+            city: formData.city,
+            state: formData.state,
+            postalCode: formData.pincode,
+            country: defaultAddress?.country || "India",
+          })
+        : null;
+      if (nextAddresses) setSavedAddresses(await saveAddresses(nextAddresses));
 
       toast.success(
-        savedLocally
-          ? "Profile saved. Your delivery address is saved on this device and will pre-fill checkout."
-          : "Profile saved."
+        nextAddresses ? "Profile and default delivery address saved. Checkout will use this address." : "Profile saved."
       );
     } catch (err: any) {
       console.error("Failed to update profile", err);

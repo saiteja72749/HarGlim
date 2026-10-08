@@ -87,7 +87,7 @@ export function Footer() {
                 <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0" />
                 <span>
                   {content?.contactAddressLine1
-                    ? `${content.contactAddressLine1}, ${content.contactAddressLine2}`
+                    ? [content.contactAddressLine1, content.contactAddressLine2].filter(Boolean).join(", ")
                     : siteConfig.contact.address}
                 </span>
               </div>

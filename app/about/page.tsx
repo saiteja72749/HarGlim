@@ -5,6 +5,7 @@ import Image from "next/image";
 import { BookOpen, Users, Target, Heart, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import api from "@/lib/api";
+import { editedContent, useSiteContent } from "@/context/site-content-context";
 
 const values = [
   {
@@ -33,10 +34,13 @@ const team = [
 ];
 
 export default function AboutPage() {
-  const [liveStats, setLiveStats] = useState({
-    booksCount: 0,
-    authorsCount: 0,
-  });
+  const { content } = useSiteContent();
+  const aboutTitle = editedContent(content, "aboutTitle");
+  const aboutSubtitle = editedContent(content, "aboutSubtitle");
+  const aboutMission = editedContent(content, "aboutMission");
+  const aboutVision = editedContent(content, "aboutVision");
+  // null until the backend answers, so the counters never flash "0+" on refresh.
+  const [liveStats, setLiveStats] = useState<{ booksCount: number; authorsCount: number } | null>(null);
 
   useEffect(() => {
     const fetchLiveStats = async () => {
@@ -61,15 +65,15 @@ export default function AboutPage() {
 
         setLiveStats({ booksCount: bCount, authorsCount: aCount });
       } catch {
-        // Keep zeros on failure
+        setLiveStats({ booksCount: 0, authorsCount: 0 });
       }
     };
     fetchLiveStats();
   }, []);
 
   const stats = [
-    { label: "Books Published", value: `${liveStats.booksCount}+`, icon: BookOpen },
-    { label: "Happy Authors", value: `${liveStats.authorsCount}+`, icon: Users },
+    { label: "Books Published", value: liveStats ? `${liveStats.booksCount}+` : "—", icon: BookOpen },
+    { label: "Happy Authors", value: liveStats ? `${liveStats.authorsCount}+` : "—", icon: Users },
   ];
 
   return (
@@ -86,11 +90,12 @@ export default function AboutPage() {
           </div>
 
           <h1 className="text-4xl sm:text-5xl md:text-6xl font-serif font-bold text-white tracking-tight">
-            About Harglim Publishers
+            {aboutTitle || "About Harglim Publishers"}
           </h1>
 
           <p className="text-base sm:text-lg text-white/80 max-w-2xl mx-auto font-light leading-relaxed">
-            Founded with a mission to empower authors and delight readers, Harglim Publishers is a premier independent publishing house, bringing great stories to the world.
+            {aboutSubtitle ||
+              "Founded with a mission to empower authors and delight readers, Harglim Publishers is a premier independent publishing house, bringing great stories to the world."}
           </p>
         </div>
       </section>
@@ -125,6 +130,17 @@ export default function AboutPage() {
               Our Story & Mission
             </h2>
             <div className="space-y-4 text-xs sm:text-sm text-[#5C6E6E] leading-relaxed font-sans">
+              {aboutMission ? (
+                aboutMission
+                  .split(/\n\s*\n/)
+                  .filter((para) => para.trim())
+                  .map((para, i) => (
+                    <p key={i} className="whitespace-pre-line">
+                      {para.trim()}
+                    </p>
+                  ))
+              ) : (
+              <>
               <p>
                 Harglim Publishers was born from a simple yet powerful belief: every aspiring writer deserves an opportunity to become a published author.
               </p>
@@ -134,6 +150,14 @@ export default function AboutPage() {
               <p>
                 Today, Harglim Publishers continues to grow as a trusted partner for emerging and established writers alike. Every book we publish represents a dream fulfilled, a voice amplified, and a story brought to life.
               </p>
+              </>
+              )}
+              {aboutVision && (
+                <p className="whitespace-pre-line">
+                  <span className="font-semibold text-[#0F3D3E]">Our vision: </span>
+                  {aboutVision}
+                </p>
+              )}
             </div>
           </div>
 

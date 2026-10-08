@@ -8,8 +8,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { editedContent, useSiteContent } from "@/context/site-content-context";
 
 export default function RoyaltyInfoPage() {
+  const { content } = useSiteContent();
+  const royaltySummary = editedContent(content, "royaltySummary");
   const fadeInUp = {
     hidden: { opacity: 0, y: 40 },
     visible: { opacity: 1, y: 0, transition: { duration: 0.6 } },
@@ -125,9 +128,8 @@ export default function RoyaltyInfoPage() {
             <h1 className="text-5xl md:text-6xl font-serif font-bold mb-6">
               Royalty Information
             </h1>
-            <p className="text-xl text-primary-foreground/90">
-              Transparent, fair royalty rates and timely payments for all
-              authors.
+            <p className="text-xl text-primary-foreground/90 whitespace-pre-line">
+              {royaltySummary || "Transparent, fair royalty rates and timely payments for all authors."}
             </p>
           </motion.div>
         </div>

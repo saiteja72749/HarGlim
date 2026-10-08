@@ -105,9 +105,7 @@ export default function AdminBooksPage() {
       if (statusFilter !== "all") params.status = statusFilter;
       if (categoryFilter !== "all") params.category = categoryFilter;
 
-      const { data } = await api.get("/admin/books", { params }).catch(() =>
-        api.get("/books", { params })
-      );
+      const { data } = await api.get("/admin/books", { params });
       const items = data.data?.books || (Array.isArray(data.data) ? data.data : []) || (Array.isArray(data) ? data : []);
       const apiBooks = Array.isArray(items) ? items : [];
       setBooks(apiBooks);

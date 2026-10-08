@@ -8,7 +8,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   BookOpen,
   ChevronRight,
-  Mail,
   Twitter,
   Instagram,
   Linkedin,
@@ -31,7 +30,7 @@ import { ErrorState } from '@/components/ui/error-state';
 import type { Author, Book } from '@/types';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
-import { getBookAuthorInfo, getSafeExternalUrl } from '@/lib/utils';
+import { getSafeExternalUrl } from '@/lib/utils';
 
 const socialIcons: Record<string, React.ElementType> = {
   twitter: Twitter,
@@ -55,84 +54,16 @@ export default function AuthorDetailPage() {
     setLoading(true);
     setError(false);
     try {
-      // 1. Attempt to Fetch Author Profile
-      let authorData: Author | null = null;
-      try {
-        const authorRes = await api
-          .get(`/authors/${params.id}`)
-          .catch(async () => {
-            const listRes = await api.get('/authors');
-            const items =
-              listRes.data?.data?.authors || listRes.data?.data || listRes.data || [];
-            const found = Array.isArray(items)
-              ? items.find((a: any) => (a.id || a._id) === params.id)
-              : null;
-            if (found) return { data: { data: found } };
-            return null;
-          });
-        const extracted = authorRes?.data?.data || authorRes?.data;
-        if (extracted && (extracted._id || extracted.id || extracted.name)) {
-          authorData = extracted as Author;
-        }
-      } catch (err) {
-        console.warn('Author profile fetch warning:', err);
-      }
-
-      // 2. Fetch Author's Books with multi-level fallbacks
-      let fetchedBooks: Book[] = [];
-      try {
-        // GET /authors/{id}/books is the real per-author list (GET /books ignores ?author=).
-        const authorBooksRes = await api.get(`/authors/${params.id}/books`, { params: { limit: 100 } }).catch(() => null);
-        const bData = authorBooksRes?.data?.data || authorBooksRes?.data;
-        if (Array.isArray(bData)) {
-          fetchedBooks = bData;
-        }
-
-        // Fallback only: scan the catalog and match by author id/name.
-        const allBooksRes = fetchedBooks.length === 0
-          ? await api.get('/books', { params: { limit: 100 } }).catch(() => null)
-          : null;
-        if (fetchedBooks.length === 0 && allBooksRes?.data) {
-          const allRaw =
-            allBooksRes.data?.data?.books ||
-            allBooksRes.data?.data ||
-            allBooksRes.data?.books ||
-            allBooksRes.data ||
-            [];
-          const allList: Book[] = Array.isArray(allRaw) ? allRaw : [];
-          const targetId = String(params.id || '').toLowerCase();
-          const authorNameLower = (authorData?.name || '').toLowerCase();
-
-          fetchedBooks = allList.filter((b) => {
-            const bAuthId = String(
-              typeof b.author === 'object' ? b.author?._id || b.author?.id : b.author || ''
-            ).toLowerCase();
-            const bAuthorInfo = getBookAuthorInfo(b);
-            const bAuthName = bAuthorInfo.name.toLowerCase();
-            return (
-              bAuthId === targetId ||
-              (authorNameLower && bAuthName.includes(authorNameLower))
-            );
-          });
-        }
-      } catch (bErr) {
-        console.error('Failed to fetch author books:', bErr);
-      }
-
-      // 3. If authorData is missing but books were matched to this ID, synthesize author profile!
-      if (!authorData && fetchedBooks.length > 0) {
-        const primaryBook = fetchedBooks[0];
-        const resolved = getBookAuthorInfo(primaryBook);
-        authorData = {
-          _id: String(params.id),
-          name: resolved.name,
-          email: '',
-          role: 'author',
-          bio: `Author of "${primaryBook.title}" and published catalog works with Harglim Publishers.`,
-          profilePicture: primaryBook.coverImage || '',
-          bookCount: fetchedBooks.length,
-        };
-      }
+      // Public profile (_id, name, profilePicture, bio) and the author's own book list.
+      const [authorRes, booksRes] = await Promise.all([
+        api.get(`/authors/${params.id}`).catch(() => null),
+        api.get(`/authors/${params.id}/books`, { params: { limit: 100 } }).catch(() => null),
+      ]);
+      const extracted = authorRes?.data?.data || authorRes?.data;
+      const authorData: Author | null =
+        extracted && (extracted._id || extracted.id) ? (extracted as Author) : null;
+      const bData = booksRes?.data?.data?.books ?? booksRes?.data?.data ?? booksRes?.data?.books;
+      const fetchedBooks: Book[] = Array.isArray(bData) ? bData : [];
 
       if (authorData) {
         setAuthor(authorData);
@@ -322,19 +253,6 @@ export default function AuthorDetailPage() {
                   <Share2 className="h-4 w-4 mr-2" />
                   Share Profile
                 </Button>
-
-                {author.email && (
-                  <Button
-                    asChild
-                    variant="outline"
-                    className="h-11 px-5 rounded-xl font-serif font-bold text-xs bg-white/10 hover:bg-white/20 text-white border-white/30"
-                  >
-                    <a href={`mailto:${author.email}`}>
-                      <Mail className="h-4 w-4 mr-2" />
-                      Contact
-                    </a>
-                  </Button>
-                )}
               </div>
             </div>
           </div>
@@ -567,19 +485,6 @@ export default function AuthorDetailPage() {
                           </a>
                         );
                       })}
-
-                    {author.email && (
-                      <a
-                        href={`mailto:${author.email}`}
-                        className="flex items-center justify-between p-3 rounded-xl bg-[#F8F9F7] hover:bg-[#0F3D3E] hover:text-white transition-colors group text-xs font-medium"
-                      >
-                        <div className="flex items-center gap-3">
-                          <Mail className="h-4 w-4 text-[#D4AF37]" />
-                          <span>Direct Email</span>
-                        </div>
-                        <ArrowRight className="h-3.5 w-3.5 opacity-40 group-hover:opacity-100" />
-                      </a>
-                    )}
                   </div>
                 </div>
               </div>

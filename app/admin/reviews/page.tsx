@@ -37,9 +37,7 @@ export default function AdminReviewsPage() {
       const params: any = { limit: 50 };
       if (statusFilter !== "all") params.status = statusFilter;
 
-      const { data } = await api.get("/admin/reviews", { params }).catch(() =>
-        api.get("/reviews", { params })
-      );
+      const { data } = await api.get("/admin/reviews", { params });
       const items = data?.data?.reviews || (Array.isArray(data?.data) ? data.data : []) || (Array.isArray(data) ? data : []);
       setReviews(Array.isArray(items) ? items : []);
     } catch (err) {

@@ -7,6 +7,8 @@ export interface BackendCategory {
   slug?: string;
   description?: string;
   active?: boolean;
+  isActive?: boolean;
+  bookCount?: number;
 }
 
 let cachedCategories: BackendCategory[] | null = null;
@@ -26,9 +28,7 @@ export async function fetchBackendCategories(forceRefresh = false): Promise<Back
 
   fetchPromise = (async () => {
     try {
-      const res = await api.get("/categories", { params: { limit: 100 } }).catch(() =>
-        api.get("/admin/categories", { params: { limit: 100 } })
-      );
+      const res = await api.get("/categories", { params: { limit: 100 } });
 
       const data = res?.data;
       const rawList =
@@ -39,6 +39,7 @@ export async function fetchBackendCategories(forceRefresh = false): Promise<Back
 
       const list: BackendCategory[] = Array.isArray(rawList)
         ? rawList.map((c: any) => ({
+            ...c,
             _id: c._id || c.id || "",
             id: c._id || c.id || "",
             name: c.name || "",

@@ -57,9 +57,7 @@ export default function BecomeAuthorPage() {
   const checkStatus = async () => {
     setIsLoadingStatus(true);
     try {
-      const res = await api.get("/users/me/author-application").catch(() =>
-        api.get("/author-applications/me")
-      );
+      const res = await api.get("/users/me/author-application", { cache: "no-store" } as any);
       const data = res.data;
       const app = data?.data || data?.application || (Array.isArray(data) ? data[0] : data);
       if (app && (app.status || app.state)) {

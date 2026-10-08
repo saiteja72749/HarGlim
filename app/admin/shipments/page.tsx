@@ -84,9 +84,7 @@ export default function AdminShipmentsPage() {
 
       let res: any;
       if (searchQuery.trim()) {
-        res = await api.get("/admin/shipments/search", { params: { q: searchQuery.trim() } }).catch(() =>
-          api.get("/admin/shipments", { params: { search: searchQuery.trim(), ...params } })
-        );
+        res = await api.get("/admin/shipments/search", { params: { q: searchQuery.trim() } });
       } else {
         res = await api.get("/admin/shipments", { params });
       }

@@ -258,24 +258,4 @@ export async function bootstrapUserContext(overrideToken?: string): Promise<User
   return request;
 }
 
-/**
- * Categories change rarely, but nearly every page (home, books catalog,
- * categories index, admin book forms) fetches them independently on mount.
- * This caches the resolved list in memory for a short window so navigating
- * between those pages doesn't re-issue the same request every time.
- */
-let categoriesCache: { data: any[]; expiresAt: number } | null = null;
-const CATEGORIES_CACHE_MS = 5 * 60 * 1000;
-
-export async function getCachedCategories(): Promise<any[]> {
-  if (categoriesCache && categoriesCache.expiresAt > Date.now()) {
-    return categoriesCache.data;
-  }
-  const { data } = await api.get('/categories');
-  const items = data?.data?.categories || data?.data || data || [];
-  const list = Array.isArray(items) ? items : [];
-  categoriesCache = { data: list, expiresAt: Date.now() + CATEGORIES_CACHE_MS };
-  return list;
-}
-
 export default api;

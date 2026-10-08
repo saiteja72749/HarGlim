@@ -36,9 +36,7 @@ export default function CategoryDetailPage() {
 
         const [catRes, booksRes] = await Promise.all([
           api.get(`/categories/${slug}`).catch(() => null),
-          api.get(`/categories/${slug}/books`, { params: { sort: sortParam } })
-            .catch(() => api.get("/books", { params: { category: slug, sort: sortParam } }))
-            .catch(() => null)
+          api.get(`/categories/${slug}/books`, { params: { sort: sortParam } }).catch(() => null),
         ]);
         
         const catData = catRes?.data?.data || catRes?.data;

@@ -1,0 +1,16 @@
+# Netlify deploy for the Next.js app (server-rendered pages, image optimisation and the
+# security headers in next.config.mjs all need Netlify's Next.js runtime, so this site is
+# deployed from Git or the Netlify CLI rather than as a drag-and-drop static folder).
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  # Next.js 16 needs Node.js 20.9+.
+  NODE_VERSION = "22"
+  NEXT_TELEMETRY_DISABLED = "1"
+  NEXT_PUBLIC_API_URL = "https://harglimpublish-backend.onrender.com/api"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

@@ -65,29 +65,15 @@ export default function AdminContentPage() {
       const formDataUpload = new FormData();
       formDataUpload.append("image", file);
 
-      let uploadedUrl = "";
-      try {
-        const res = await api.post("/uploads/image", formDataUpload, {
-          headers: { "Content-Type": "multipart/form-data" },
-        }).catch(() =>
-          api.post("/authors/me/uploads/image", formDataUpload, {
-            headers: { "Content-Type": "multipart/form-data" },
-          })
-        );
-        uploadedUrl = res?.data?.url || res?.data?.data?.url || res?.data?.image || "";
-      } catch (uploadErr) {
-        console.warn("Backend image upload route fallback to base64 encoding:", uploadErr);
-      }
+      // A failed upload stops here: a base64 image must never be saved into site content.
+      const res = await api.post("/uploads/image", formDataUpload, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      const uploadedUrl = res?.data?.data?.url || res?.data?.url || "";
+      if (!uploadedUrl) throw new Error("The upload finished but no image URL was returned.");
 
-      // 2. Fallback to base64 data URL if backend URL not returned
-      if (!uploadedUrl) {
-        uploadedUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-      }
+      // Persist to the admin's own profile (PATCH /users/me) before showing it as saved.
+      await api.patch("/users/me", { profilePicture: uploadedUrl });
 
       // Update local state, SiteContent, and Auth Store user profile
       setFormData((prev) => ({ ...prev, adminProfileImage: uploadedUrl }));
@@ -99,13 +85,10 @@ export default function AdminContentPage() {
         });
       }
 
-      // Try persisting profile picture to user profile API
-      await api.patch("/users/me", { profilePicture: uploadedUrl, profileImage: uploadedUrl }).catch(() => null);
-
-      toast.success("Admin profile photo uploaded & updated live!");
+      toast.success("Admin profile photo uploaded and saved.");
     } catch (err: any) {
       console.error("Failed to upload profile photo:", err);
-      toast.error("Failed to upload photo. Please try again.");
+      toast.error(err?.response?.data?.message || err?.message || "Failed to upload photo. Please try again.");
     } finally {
       setIsUploadingPhoto(false);
     }
@@ -555,7 +538,14 @@ export default function AdminContentPage() {
             <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
                 <CardTitle className="text-lg">Publishing Packages (JSON Format)</CardTitle>
-                <CardDescription>Configure packages displayed on the Publish page (6 official plans from ₹999 to ₹9,999).</CardDescription>
+                <CardDescription>
+                  Display copy only. The Publish page shows it only while no real package exists. Packages authors can
+                  select (and that are saved on manuscripts) are managed in{" "}
+                  <a href="/admin/packages" className="font-semibold text-[#8A6D1E] underline underline-offset-2">
+                    Publishing Packages
+                  </a>
+                  .
+                </CardDescription>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">

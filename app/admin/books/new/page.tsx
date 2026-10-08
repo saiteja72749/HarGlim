@@ -28,10 +28,8 @@ import {
 import { Switch } from "@/components/ui/switch";
 import toast from "react-hot-toast";
 
-import { EXACT_CATEGORIES } from "@/config/categories";
-import { resolveCategoryObjectId } from "@/lib/categories";
+import { fetchBackendCategories, resolveCategoryObjectId } from "@/lib/categories";
 import { isValidEmailAddress, normalizeEmailForStorage } from "@/lib/email";
-export const BISAC_CATEGORIES = EXACT_CATEGORIES;
 
 type AuthorType = "existing" | "new" | "external";
 
@@ -87,6 +85,7 @@ export default function AddBookPage() {
   const [loading, setLoading] = useState(false);
   const [fetchingAuthors, setFetchingAuthors] = useState(false);
   const [fetchingCategories, setFetchingCategories] = useState(true);
+  const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
 
   // New Category Creation Modal State
   const [addCategoryModalOpen, setAddCategoryModalOpen] = useState(false);
@@ -109,6 +108,8 @@ export default function AddBookPage() {
       const created = data?.data || data?.category || data;
       const catName = created?.name || newCategoryName.trim();
 
+      setCategoryOptions((prev) => (prev.includes(catName) ? prev : [...prev, catName]));
+      fetchBackendCategories(true);
       setFormData((prev: any) => ({ ...prev, category: catName }));
       setNewCategoryName("");
       setNewCategoryDescription("");
@@ -134,13 +135,11 @@ export default function AddBookPage() {
   const [addAuthorModalOpen, setAddAuthorModalOpen] = useState(false);
   const [quickAuthorName, setQuickAuthorName] = useState("");
   const [quickAuthorEmail, setQuickAuthorEmail] = useState("");
-  const [quickAuthorBio, setQuickAuthorBio] = useState("");
   const [isCreatingQuickAuthor, setIsCreatingQuickAuthor] = useState(false);
 
   // New Author State
   const [newAuthorName, setNewAuthorName] = useState<string>("");
   const [newAuthorEmail, setNewAuthorEmail] = useState<string>("");
-  const [newAuthorBio, setNewAuthorBio] = useState<string>("");
 
   // External Author State
   const [externalAuthorName, setExternalAuthorName] = useState<string>(initialAuthor);
@@ -163,52 +162,24 @@ export default function AddBookPage() {
     royaltyPercentage: "30",
   });
 
-  // Fetch Categories list
+  // Category options come from GET /categories (the same list the storefront uses).
   useEffect(() => {
-    const loadCategories = async () => {
-      setFetchingCategories(true);
-      try {
-        await api.get("/categories").catch(() => api.get("/admin/categories"));
-      } catch (err) {
-        console.warn("Failed to load categories:", err);
-      } finally {
-        setFetchingCategories(false);
-      }
-    };
-    loadCategories();
+    fetchBackendCategories()
+      .then((list) => setCategoryOptions(list.map((c) => c.name).filter(Boolean)))
+      .finally(() => setFetchingCategories(false));
   }, []);
 
   // Fetch all registered & public authors immediately on mount
   const loadAllAuthors = async () => {
     setFetchingAuthors(true);
     try {
-      // 1. Fetch from /admin/users (role=author) with fallback to /users
-      const resUsers = await api
-        .get("/admin/users", { params: { role: "author", limit: 100 }, cache: "no-store" } as any)
-        .catch(() => api.get("/users", { params: { role: "author", limit: 100 }, cache: "no-store" } as any))
-        .catch(() => null);
-
-      // 2. Fetch from /authors public catalog
-      const resAuthors = await api
-        .get("/authors", { params: { limit: 100 }, cache: "no-store" } as any)
-        .catch(() => null);
-
-      const list1 =
-        resUsers?.data?.data?.users ||
-        resUsers?.data?.users ||
-        (Array.isArray(resUsers?.data?.data) ? resUsers?.data?.data : []) ||
-        (Array.isArray(resUsers?.data) ? resUsers?.data : []);
-
-      const list2 =
-        resAuthors?.data?.data?.authors ||
-        resAuthors?.data?.authors ||
-        (Array.isArray(resAuthors?.data?.data) ? resAuthors?.data?.data : []) ||
-        (Array.isArray(resAuthors?.data) ? resAuthors?.data : []);
-
-      const combined = [
-        ...(Array.isArray(list1) ? list1 : []),
-        ...(Array.isArray(list2) ? list2 : []),
-      ];
+      // Every author is a user with role "author": GET /admin/users (limit max 100).
+      const resUsers = await api.get("/admin/users", {
+        params: { role: "author", limit: 100 },
+        cache: "no-store",
+      } as any);
+      const list = resUsers?.data?.data?.users ?? resUsers?.data?.data;
+      const combined = Array.isArray(list) ? list : [];
 
       const seen = new Set<string>();
       const parsed: any[] = [];
@@ -340,20 +311,11 @@ export default function AddBookPage() {
         throw new Error("Could not retrieve account ID for newly created author.");
       }
 
-      if (quickAuthorBio.trim()) {
-        await api.put(`/admin/users/${newId}`, {
-          name: quickAuthorName.trim(),
-          email: emailToUse,
-          bio: quickAuthorBio.trim(),
-        }).catch(() => null);
-      }
-
       const newAuthorObj = {
         _id: String(newId),
         name: quickAuthorName.trim(),
         email: emailToUse,
         role: "author",
-        bio: quickAuthorBio.trim(),
       };
 
       setAuthorsList((prev) => [newAuthorObj, ...prev.filter((a) => a._id !== String(newId))]);
@@ -364,7 +326,6 @@ export default function AddBookPage() {
       setAddAuthorModalOpen(false);
       setQuickAuthorName("");
       setQuickAuthorEmail("");
-      setQuickAuthorBio("");
 
       toast.success(`Author "${quickAuthorName.trim()}" created and selected! ✍️`);
     } catch (err: any) {
@@ -487,9 +448,7 @@ export default function AddBookPage() {
         if (existingByNameOrEmail && isObjectId(existingByNameOrEmail._id)) {
           finalAuthorId = existingByNameOrEmail._id;
           // Ensure role is author
-          await api.patch(`/admin/users/${finalAuthorId}/role`, { role: "author" }).catch(() =>
-            api.put(`/admin/users/${finalAuthorId}/role`, { role: "author" }).catch(() => null)
-          );
+          await api.patch(`/admin/users/${finalAuthorId}`, { role: "author" });
         } else {
           // Generate a valid email & temporary credentials for the new author
           const cleanSlug = targetName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 15) || "writer";
@@ -526,15 +485,6 @@ export default function AddBookPage() {
 
             if (!newUserId) {
               throw new Error("Could not retrieve account ID for newly created author.");
-            }
-
-            // Save bio if provided
-            if (authorType === "new" && newAuthorBio.trim()) {
-              await api.put(`/admin/users/${newUserId}`, {
-                name: targetName,
-                email: emailToUse,
-                bio: newAuthorBio.trim(),
-              }).catch(() => null);
             }
 
             finalAuthorId = newUserId;
@@ -970,19 +920,6 @@ export default function AddBookPage() {
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="newAuthorBio" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                    Author Biography (Optional)
-                  </Label>
-                  <Textarea
-                    id="newAuthorBio"
-                    rows={3}
-                    placeholder="Short summary of author's credentials..."
-                    value={newAuthorBio}
-                    onChange={(e) => setNewAuthorBio(e.target.value)}
-                    className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs"
-                  />
-                </div>
               </div>
             )}
 
@@ -1075,7 +1012,7 @@ export default function AddBookPage() {
                     <SelectValue placeholder={fetchingCategories ? "Loading categories..." : "Select Category"} />
                   </SelectTrigger>
                   <SelectContent className="bg-white border-[#E2E6DF] max-h-72">
-                    {EXACT_CATEGORIES.map((categoryName) => (
+                    {categoryOptions.map((categoryName) => (
                       <SelectItem key={categoryName} value={categoryName}>
                         {categoryName}
                       </SelectItem>
@@ -1337,19 +1274,6 @@ export default function AddBookPage() {
               </p>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="quickAuthorBio" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                Biography (Optional)
-              </Label>
-              <Textarea
-                id="quickAuthorBio"
-                rows={3}
-                placeholder="Short author biography"
-                value={quickAuthorBio}
-                onChange={(e) => setQuickAuthorBio(e.target.value)}
-                className="border-[#E2E6DF] rounded-xl text-xs"
-              />
-            </div>
 
             <DialogFooter className="pt-2">
               <Button

@@ -39,9 +39,7 @@ export default function AdminInvoicesPage() {
     try {
       let res: any;
       if (searchQuery.trim()) {
-        res = await api.get("/admin/invoices/search", { params: { q: searchQuery.trim() } }).catch(() =>
-          api.get("/admin/invoices", { params: { search: searchQuery.trim(), limit: 50 } })
-        );
+        res = await api.get("/admin/invoices/search", { params: { q: searchQuery.trim() } });
       } else {
         res = await api.get("/admin/invoices", { params: { limit: 50 } });
       }

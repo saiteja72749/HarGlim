@@ -18,3 +18,5 @@ node_modules
 *.tsbuildinfo
 test-results/
 playwright-report/
+# Netlify local build output
+.netlify

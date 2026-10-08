@@ -34,9 +34,7 @@ export default function AdminNotificationsPage() {
     try {
       let res: any;
       if (searchQuery.trim()) {
-        res = await api.get("/admin/notifications/search", { params: { q: searchQuery.trim() } }).catch(() =>
-          api.get("/admin/notifications", { params: { search: searchQuery.trim(), limit: 50 } })
-        );
+        res = await api.get("/admin/notifications/search", { params: { q: searchQuery.trim() } });
       } else {
         res = await api.get("/admin/notifications", { params: { limit: 50 } }).catch(() => null);
       }

@@ -25,8 +25,25 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useSiteContent } from "@/context/site-content-context";
+import { useAuthStore } from "@/store/auth-store";
 
 // Default curated publishing packages for HarGlim Publishers
+// Accepts a package array or the wrapped `[{ packages: [...] }]` shape of CMS packagesJson,
+// and turns text prices like "₹999/-" into numbers. Unwanted packages are archived by an
+// admin (Admin → Publishing Packages), not filtered here.
+const normalizePackages = (raw: any): any[] => {
+  let list: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.packages) ? raw.packages : [];
+  if (list.length > 0 && list.every((item) => Array.isArray(item?.packages))) {
+    list = list.flatMap((item) => item.packages);
+  }
+  return list
+    .filter((p) => p?.name && p.isActive !== false)
+    .map((p) => ({
+      ...p,
+      price: typeof p.price === "number" ? p.price : Number(String(p.price ?? "").replace(/[^0-9.]/g, "")) || 0,
+    }));
+};
+
 const defaultPackages = [
   {
     id: "pkg-999",
@@ -220,8 +237,9 @@ const stepGuide = [
 
 export default function PublishPage() {
   const { content } = useSiteContent();
+  const role = useAuthStore((state) => state.user?.role);
   const [packages, setPackages] = useState<any[]>([]);
-  const [, setLoadingPackages] = useState(true);
+  const [loadingPackages, setLoadingPackages] = useState(true);
   const [authorsCount, setAuthorsCount] = useState(0);
 
   useEffect(() => {
@@ -241,43 +259,25 @@ export default function PublishPage() {
     const fetchPackages = async () => {
       setLoadingPackages(true);
       try {
+        // GET /publish-packages is the package database (active only, sorted by price).
+        // Its _id is what manuscript submission sends as packageId.
         const { data } = await api.get("/publish-packages").catch(() => ({ data: { data: [] } }));
-        const rawPkgData = data?.packages || data?.data?.packages || (Array.isArray(data?.data) ? data.data : []) || (Array.isArray(data) ? data : []);
-        
-        // Filter out legacy backend demo packages ("Demo Starter Publishing", "Demo Pro Publishing")
-        const validBackendPkgs = Array.isArray(rawPkgData)
-          ? rawPkgData.filter((p: any) => p?.name && !p.name.toLowerCase().includes("demo") && !p.description?.toLowerCase().includes("demo"))
-          : [];
+        const realPkgs = normalizePackages(data?.data ?? data).map((p) => ({ ...p, isRealPackage: true }));
+        if (realPkgs.length > 0) {
+          setPackages(realPkgs);
+          return;
+        }
 
-        if (validBackendPkgs.length > 0) {
-          setPackages(validBackendPkgs);
-        } else if (content?.packagesJson) {
-          try {
-            const parsed = JSON.parse(content.packagesJson);
-            const validSitePkgs = Array.isArray(parsed)
-              ? parsed.filter((p: any) => p?.name && !p.name.toLowerCase().includes("demo") && !p.description?.toLowerCase().includes("demo"))
-              : [];
-            setPackages(validSitePkgs.length > 0 ? validSitePkgs : defaultPackages);
-          } catch {
-            setPackages(defaultPackages);
-          }
-        } else {
-          setPackages(defaultPackages);
+        // No real packages yet: CMS packagesJson is display copy only (never a packageId source).
+        let sitePkgs: any[] = [];
+        try {
+          sitePkgs = content?.packagesJson ? normalizePackages(JSON.parse(content.packagesJson)) : [];
+        } catch {
+          sitePkgs = [];
         }
+        setPackages(sitePkgs.length > 0 ? sitePkgs : defaultPackages);
       } catch {
-        if (content?.packagesJson) {
-          try {
-            const parsed = JSON.parse(content.packagesJson);
-            const validSitePkgs = Array.isArray(parsed)
-              ? parsed.filter((p: any) => p?.name && !p.name.toLowerCase().includes("demo") && !p.description?.toLowerCase().includes("demo"))
-              : [];
-            setPackages(validSitePkgs.length > 0 ? validSitePkgs : defaultPackages);
-          } catch {
-            setPackages(defaultPackages);
-          }
-        } else {
-          setPackages(defaultPackages);
-        }
+        setPackages(defaultPackages);
       } finally {
         setLoadingPackages(false);
       }
@@ -285,7 +285,14 @@ export default function PublishPage() {
     fetchPackages();
   }, [content?.packagesJson]);
 
-  const displayPackages = packages.length > 0 ? packages : defaultPackages;
+  // Approved authors go straight to submission with the package preselected; everyone else
+  // must apply to become an author first.
+  const packageHref = (pkg: any) =>
+    role === "author" && pkg.isRealPackage && pkg._id
+      ? `/author/manuscripts/new?packageId=${encodeURIComponent(pkg._id)}`
+      : role === "author"
+        ? "/author/manuscripts/new"
+        : "/dashboard/become-author";
 
   return (
     <div className="bg-[#F8F9F7] min-h-screen text-[#0F3D3E] font-sans">
@@ -508,7 +515,20 @@ export default function PublishPage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 items-stretch">
-          {displayPackages.map((pkg, idx) => {
+          {loadingPackages &&
+            [0, 1, 2].map((i) => (
+              <div key={`pkg-skeleton-${i}`} className="rounded-3xl border border-[#E2E6DF] bg-white p-8 space-y-4 animate-pulse">
+                <div className="h-6 w-2/3 rounded bg-[#0F3D3E]/10" />
+                <div className="h-3 w-full rounded bg-[#0F3D3E]/5" />
+                <div className="h-10 w-1/2 rounded bg-[#0F3D3E]/10" />
+                <div className="space-y-2 pt-4">
+                  {[0, 1, 2, 3].map((j) => (
+                    <div key={j} className="h-3 w-5/6 rounded bg-[#0F3D3E]/5" />
+                  ))}
+                </div>
+              </div>
+            ))}
+          {!loadingPackages && packages.map((pkg, idx) => {
             const isHighlighted = pkg.highlighted;
 
             return (
@@ -561,7 +581,7 @@ export default function PublishPage() {
                   </div>
 
                   <div className="pt-8">
-                    <Link href="/dashboard/become-author" className="block">
+                    <Link href={packageHref(pkg)} className="block">
                       <Button
                         className={`w-full h-12 font-serif font-bold text-sm rounded-xl transition-all ${
                           isHighlighted

@@ -15,30 +15,40 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { siteConfig } from "@/config/site";
+import { useSiteContent, type SiteContent } from "@/context/site-content-context";
 import toast from "react-hot-toast";
 
 import api from "@/lib/api";
 
-const contactCards = [
+// Contact details come from the admin-editable site content (GET /content); siteConfig
+// is only the fallback for a field the backend leaves empty.
+const getContactCards = (content: SiteContent) => [
   {
     icon: Mail,
     title: "Email Us",
-    lines: [siteConfig.contact.supportEmail, siteConfig.contact.authorsEmail].filter(Boolean),
+    lines: Array.from(
+      new Set([
+        content.contactSupportEmail || siteConfig.contact.supportEmail,
+        content.contactEmail || siteConfig.contact.authorsEmail,
+      ])
+    ).filter(Boolean),
   },
   {
     icon: Phone,
     title: "Call Us",
-    lines: [siteConfig.contact.phonePrimary, siteConfig.contact.phoneSecondary].filter(Boolean),
+    lines: [content.contactPhone || siteConfig.contact.phonePrimary, siteConfig.contact.phoneSecondary].filter(Boolean),
   },
   {
     icon: MapPin,
     title: "Publishing Headquarters",
-    lines: [siteConfig.contact.addressLine1, siteConfig.contact.addressLine2].filter(Boolean),
+    lines: content.contactAddressLine1
+      ? [content.contactAddressLine1, content.contactAddressLine2].filter(Boolean)
+      : [siteConfig.contact.addressLine1, siteConfig.contact.addressLine2].filter(Boolean),
   },
   {
     icon: Clock,
     title: "Working Hours",
-    lines: [siteConfig.contact.workingHours.weekdays, siteConfig.contact.workingHours.weekends].filter(Boolean),
+    lines: [content.contactHours || siteConfig.contact.workingHours.weekdays].filter(Boolean),
   },
 ];
 
@@ -52,6 +62,7 @@ const inquiryCategories = [
 ];
 
 export default function ContactPage() {
+  const { content } = useSiteContent();
   const [formState, setFormState] = useState({
     name: "",
     email: "",
@@ -78,21 +89,15 @@ export default function ContactPage() {
         subject: formState.inquiryType || "Website contact enquiry",
         message: formState.message.trim(),
         page: "/contact",
-      }).catch(() =>
-        api.post("/contact-requests", {
-          name: formState.name.trim(),
-          email: formState.email.trim(),
-          phone: formState.phone.trim(),
-          subject: formState.inquiryType || "Website contact enquiry",
-          message: formState.message.trim(),
-          page: "/contact",
-        })
-      );
+      });
       setIsSubmitted(true);
       toast.success("Thank you! Your message has been sent.");
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to submit contact form:", err);
-      toast.error("Failed to submit message. Please try again or use the email address listed on this page.");
+      toast.error(
+        err?.response?.data?.message ||
+          "Failed to submit message. Please try again or use the email address listed on this page."
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -137,7 +142,7 @@ export default function ContactPage() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-4">
-              {contactCards.map((card, idx) => (
+              {getContactCards(content).map((card, idx) => (
                 <Card key={idx} className="bg-white border border-[#E2E6DF] rounded-2xl p-5 shadow-xs hover:border-[#D4AF37] transition-all">
                   <div className="flex items-start gap-4">
                     <div className="h-10 w-10 shrink-0 rounded-xl bg-[#0F3D3E] text-[#D4AF37] flex items-center justify-center shadow-xs">

@@ -13,8 +13,6 @@ import {
   X,
   Mail,
   ShieldCheck,
-  Eye,
-  EyeOff,
   BookOpen,
   CheckCircle2,
   Building2,
@@ -43,7 +41,8 @@ export default function AuthorSettingsPage() {
   // View / Edit toggles
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isEditingPayment, setIsEditingPayment] = useState(false);
-  const [showAccountNumber, setShowAccountNumber] = useState(false);
+  // The backend only ever returns a masked account number ("**********7263").
+  const [maskedAccount, setMaskedAccount] = useState("");
 
   // Author Profile Form & Saved state for cancellation
   const [profileForm, setProfileForm] = useState({
@@ -77,54 +76,46 @@ export default function AuthorSettingsPage() {
     upiId: "",
   });
 
+  // Accepts the masked payout object returned by GET/PUT payment-details.
+  const applyPayoutDetails = (details: any) => {
+    if (!details || typeof details !== "object") return;
+    const payment = {
+      accountHolderName: details.accountHolderName || "",
+      bankName: details.bankName || "",
+      accountNumber: "", // never pre-filled: only a masked value exists
+      ifscCode: details.ifscCode || "",
+      upiId: details.upiId || "",
+    };
+    setPaymentForm(payment);
+    setSavedPayment(payment);
+    setMaskedAccount(details.accountNumberMasked || "");
+  };
+
   useEffect(() => {
     // Fetch profile & payment details
     const fetchSettings = async () => {
       if (!user?._id && !user?.id) return;
       try {
-        const authorId = user._id || user.id;
-        // Public GET /authors/{id} never includes payout details; the authenticated
-        // GET /users/me returns the owner's own document, so read them from there.
-        const [res, meRes] = await Promise.all([
-          api.get(`/authors/${authorId}`, { cache: "no-store" } as any).catch(() => null),
+        // Profile from the authenticated GET /users/me (the public author API no longer
+        // carries email); payout details from GET /authors/me/payment-details (masked).
+        const [meRes, payoutRes] = await Promise.all([
           api.get("/users/me", { cache: "no-store" } as any).catch(() => null),
+          api.get("/authors/me/payment-details", { cache: "no-store" } as any).catch(() => null),
         ]);
         const me = meRes?.data?.data?.user || meRes?.data?.data || meRes?.data?.user || {};
-        if (res?.data || me?._id) {
-          const authObj = { ...(res?.data?.data || res?.data || {}), paymentDetails: me.paymentDetails || (res?.data?.data || res?.data || {}).paymentDetails };
-          const imgUrl =
-            authObj.profileImage ||
-            authObj.profilePicture ||
-            user?.profileImage ||
-            "";
+        const imgUrl = me.profilePicture || me.profileImage || user?.profileImage || "";
+        const initialProfile = {
+          name: me.name || user?.name || "",
+          email: me.email || user?.email || "",
+          bio: me.bio || "",
+          profileImage: imgUrl,
+        };
+        setProfileForm(initialProfile);
+        setSavedProfile(initialProfile);
+        setImagePreview(imgUrl);
+        setImgError(false);
 
-          const initialProfile = {
-            name: authObj.name || user?.name || "",
-            email: authObj.email || user?.email || "",
-            bio: authObj.bio || "",
-            profileImage: imgUrl,
-          };
-          setProfileForm(initialProfile);
-          setSavedProfile(initialProfile);
-          setImagePreview(imgUrl);
-          setImgError(false);
-
-          if (authObj.paymentDetails) {
-            const initialPayment = {
-              accountHolderName:
-                authObj.paymentDetails.accountHolderName ||
-                authObj.name ||
-                user?.name ||
-                "",
-              bankName: authObj.paymentDetails.bankName || "",
-              accountNumber: authObj.paymentDetails.accountNumber || "",
-              ifscCode: authObj.paymentDetails.ifscCode || "",
-              upiId: authObj.paymentDetails.upiId || "",
-            };
-            setPaymentForm(initialPayment);
-            setSavedPayment(initialPayment);
-          }
-        }
+        applyPayoutDetails(payoutRes?.data?.data);
       } catch (e) {
         console.error("Failed to load author settings:", e);
       }
@@ -182,22 +173,16 @@ export default function AuthorSettingsPage() {
         }
       }
 
-      // PUT /authors/{id} is live (undocumented); PUT /users/{id} is the documented
-      // UserUpdateRequest (name, bio, profilePicture). Send both photo field names, since
-      // the documented one is profilePicture and the old code only sent profileImage.
+      // PUT /authors/{id}: name, bio, profilePicture.
       const payload: Record<string, string> = {
         name: profileForm.name.trim(),
         bio: profileForm.bio,
       };
       if (finalImage && /^https?:\/\//.test(finalImage)) {
         payload.profilePicture = finalImage;
-        payload.profileImage = finalImage;
       }
 
-      await api.put(`/authors/${authorId}`, payload).catch((err) => {
-        if (err?.response?.status === 404) return api.put(`/users/${authorId}`, payload);
-        throw err;
-      });
+      await api.put(`/authors/${authorId}`, payload);
 
       if (user) {
         setUser({
@@ -231,21 +216,35 @@ export default function AuthorSettingsPage() {
 
   const handleSavePayment = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const trimmed = Object.fromEntries(
+      Object.entries(paymentForm).map(([key, value]) => [key, value.trim()])
+    ) as typeof paymentForm;
+    const hasUpi = Boolean(trimmed.upiId);
+    const hasFullBank = Boolean(
+      trimmed.accountHolderName && trimmed.bankName && trimmed.accountNumber && trimmed.ifscCode
+    );
+    if (!hasUpi && !hasFullBank) {
+      toast.error(
+        maskedAccount && !trimmed.accountNumber
+          ? "Enter the account number again to save bank details, or add a UPI ID."
+          : "Provide either a UPI ID or complete bank details (holder name, bank, account number, IFSC)."
+      );
+      return;
+    }
+
     setLoading(true);
     try {
       const authorId = user?._id || user?.id;
-      const payload = {
-        paymentDetails: paymentForm,
-      };
+      // Only filled fields are sent; the account number is sent only when re-entered.
+      const paymentDetails = Object.fromEntries(Object.entries(trimmed).filter(([, value]) => value));
+      const { data } = await api.put(`/authors/${authorId}/payment-details`, { paymentDetails });
 
-      await api
-        .put(`/authors/${authorId}/payment-details`, payload)
-        .catch(() => api.put(`/authors/${authorId}`, payload));
-
-      setSavedPayment({ ...paymentForm });
+      // The response carries the masked record; the typed account number is dropped here.
+      applyPayoutDetails(data?.data || { ...trimmed, accountNumberMasked: maskedAccount });
       setIsEditingPayment(false);
 
-      toast.success("Payment & payout details saved securely! 💳");
+      toast.success(data?.message || "Payment and payout details saved securely");
     } catch (err: any) {
       toast.error(err.response?.data?.message || "Failed to save payment details.");
     } finally {
@@ -253,19 +252,10 @@ export default function AuthorSettingsPage() {
     }
   };
 
-  // Mask account number for secure preview
-  const formatMaskedAccount = (accNum: string) => {
-    if (!accNum) return "Not specified";
-    if (showAccountNumber) return accNum;
-    if (accNum.length <= 4) return accNum;
-    const last4 = accNum.slice(-4);
-    return `•••• •••• •••• ${last4}`;
-  };
-
   const hasPaymentDetails = Boolean(
     savedPayment.accountHolderName ||
       savedPayment.bankName ||
-      savedPayment.accountNumber ||
+      maskedAccount ||
       savedPayment.upiId
   );
 
@@ -626,31 +616,12 @@ export default function AuthorSettingsPage() {
 
                     {/* Account Number */}
                     <div className="p-4 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF] space-y-1">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#5C6E6E] flex items-center justify-between">
-                        <span className="flex items-center gap-1.5">
-                          <Lock className="h-3.5 w-3.5 text-[#D4AF37]" />
-                          Account Number
-                        </span>
-                        {paymentForm.accountNumber && (
-                          <button
-                            type="button"
-                            onClick={() => setShowAccountNumber(!showAccountNumber)}
-                            className="text-[#5C6E6E] hover:text-[#0F3D3E] flex items-center gap-1 text-[10px] font-medium"
-                          >
-                            {showAccountNumber ? (
-                              <>
-                                <EyeOff className="h-3 w-3" /> Hide
-                              </>
-                            ) : (
-                              <>
-                                <Eye className="h-3 w-3" /> Reveal
-                              </>
-                            )}
-                          </button>
-                        )}
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#5C6E6E] flex items-center gap-1.5">
+                        <Lock className="h-3.5 w-3.5 text-[#D4AF37]" />
+                        Account Number
                       </span>
                       <p className="text-sm font-mono font-bold text-[#0F3D3E]">
-                        {formatMaskedAccount(paymentForm.accountNumber)}
+                        {maskedAccount || "Not specified"}
                       </p>
                     </div>
 
@@ -730,7 +701,6 @@ export default function AuthorSettingsPage() {
                         })
                       }
                       className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs font-bold"
-                      required
                     />
                   </div>
 
@@ -749,7 +719,6 @@ export default function AuthorSettingsPage() {
                         setPaymentForm({ ...paymentForm, bankName: e.target.value })
                       }
                       className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs font-bold"
-                      required
                     />
                   </div>
                 </div>
@@ -760,12 +729,13 @@ export default function AuthorSettingsPage() {
                       htmlFor="accountNumber"
                       className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]"
                     >
-                      Account Number *
+                      Account Number {maskedAccount ? "" : "*"}
                     </Label>
                     <Input
                       id="accountNumber"
                       type="password"
-                      placeholder="Enter bank account number"
+                      autoComplete="off"
+                      placeholder={maskedAccount ? `Saved: ${maskedAccount}. Re-enter to change` : "Enter bank account number"}
                       value={paymentForm.accountNumber}
                       onChange={(e) =>
                         setPaymentForm({
@@ -774,7 +744,6 @@ export default function AuthorSettingsPage() {
                         })
                       }
                       className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs font-mono font-bold"
-                      required
                     />
                   </div>
 
@@ -796,7 +765,6 @@ export default function AuthorSettingsPage() {
                         })
                       }
                       className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs font-mono font-bold uppercase"
-                      required
                     />
                   </div>
                 </div>

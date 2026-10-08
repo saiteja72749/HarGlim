@@ -105,9 +105,12 @@ const toItem = (m: any) => {
     packageId: String(request.package?._id || request.package || request.packageId || ""),
     date: m.submittedAt || request.createdAt || m.updatedAt || m.createdAt || null,
     stage: getStage(m),
+    // Only plain text is rendered; a populated/object field here would crash React (error #31).
     feedback:
-      request.reason || request.adminNotes || request.editorialNotes || request.feedback ||
-      m.feedback || m.editorialNotes || m.rejectionReason || null,
+      [
+        request.reason, request.adminNotes, request.editorialNotes, request.feedback,
+        m.feedback, m.editorialNotes, m.rejectionReason,
+      ].find((v) => typeof v === "string" && v.trim()) || null,
   };
 };
 

@@ -93,9 +93,7 @@ export default function AdminUsersPage() {
         params.isActive = statusFilter === "Active" ? "true" : "false";
       }
 
-      const { data } = await api.get("/admin/users", { params }).catch(() =>
-        api.get("/users", { params })
-      );
+      const { data } = await api.get("/admin/users", { params });
       const items = data?.data?.users || (Array.isArray(data?.data) ? data.data : []) || (Array.isArray(data) ? data : []);
       setUsers(Array.isArray(items) ? items : []);
     } catch (err) {
@@ -277,19 +275,12 @@ export default function AdminUsersPage() {
     setIsSubmittingEdit(true);
 
     try {
-      const payload = {
-        name: editForm.name,
-        email: editForm.email,
+      // PATCH /admin/users/{id} accepts role and isActive/status only; name and email are
+      // owned by the user's own profile, so they are shown read-only in this form.
+      await api.patch(`/admin/users/${userId}`, {
         role: editForm.role.toLowerCase(),
         isActive: editForm.status === "Active",
-        status: editForm.status,
-      };
-
-      await api.put(`/admin/users/${userId}`, payload).catch(() =>
-        api.patch(`/admin/users/${userId}`, payload).catch(() =>
-          api.put(`/users/${userId}`, payload)
-        )
-      );
+      });
 
       toast.success(`User details for "${editForm.name}" updated successfully!`);
       setEditingUser(null);
@@ -622,25 +613,17 @@ export default function AdminUsersPage() {
                 <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block">
                   Full Name
                 </label>
-                <Input
-                  value={editForm.name}
-                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                  placeholder="Enter full name"
-                  required
-                />
+                <Input value={editForm.name} readOnly disabled />
               </div>
 
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block">
                   Email Address
                 </label>
-                <Input
-                  type="email"
-                  value={editForm.email}
-                  onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                  placeholder="Enter email address"
-                  required
-                />
+                <Input type="email" value={editForm.email} readOnly disabled />
+                <p className="text-[11px] text-muted-foreground">
+                  Name and email are changed by the user from their own profile. Admins can change role and status.
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">

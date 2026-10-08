@@ -10,8 +10,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { editedContent, useSiteContent } from "@/context/site-content-context";
 
 export default function AuthorGuidelinesPage() {
+  const { content } = useSiteContent();
+  const guidelinesText = editedContent(content, "authorGuidelinesText");
   const fadeInUp = {
     hidden: { opacity: 0, y: 40 },
     visible: { opacity: 1, y: 0, transition: { duration: 0.6 } },
@@ -105,9 +108,9 @@ export default function AuthorGuidelinesPage() {
             <h1 className="text-5xl md:text-6xl font-serif font-bold mb-6">
               Author Guidelines
             </h1>
-            <p className="text-xl text-primary-foreground/90 mb-8">
-              Follow our comprehensive guidelines to ensure your manuscript
-              meets our publishing standards.
+            <p className="text-xl text-primary-foreground/90 mb-8 whitespace-pre-line">
+              {guidelinesText ||
+                "Follow our comprehensive guidelines to ensure your manuscript meets our publishing standards."}
             </p>
             <Link href="/publish">
               <Button

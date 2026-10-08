@@ -181,28 +181,8 @@ export default function PaymentsPage() {
       setOrderNumbers(numbers);
     } catch (err: any) {
       console.warn("Failed to fetch user payments:", err);
-      // Fallback: if payments list fails, try extracting from user orders
-      try {
-        const userId = user._id || user.id;
-        const ordersRes = await api.get(`/users/${userId}/orders`);
-        const ordersData = ordersRes.data?.data || ordersRes.data || [];
-        const fallbackList = Array.isArray(ordersData)
-          ? ordersData
-              .filter((o: any) => o.payment || o.paymentMethod || o.utr)
-              .map((o: any) => ({
-                _id: o.payment?._id || o.payment || `pay-${o._id}`,
-                order: o,
-                amount: o.totalPrice || o.totalAmount || 0,
-                paymentMethod: o.paymentMethod || "UPI",
-                status: o.paymentStatus || (o.isPaid ? "VERIFIED" : o.utr ? "VERIFICATION_PENDING" : "PENDING"),
-                createdAt: o.createdAt || new Date().toISOString(),
-                utr: o.utr,
-              }))
-          : [];
-        setPayments(fallbackList);
-      } catch {
-        setPayments([]);
-      }
+      setPayments([]);
+      toast.error(err?.response?.data?.message || "Could not load your payments. Please try again.");
     } finally {
       setLoading(false);
     }

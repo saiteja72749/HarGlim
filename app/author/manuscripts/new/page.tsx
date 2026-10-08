@@ -26,7 +26,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import toast from "react-hot-toast";
 import Link from "next/link";
-import api, { getCachedCategories } from "@/lib/api";
+import api from "@/lib/api";
+import { fetchBackendCategories } from "@/lib/categories";
 
 // Backend default upload limit (UPLOAD_MAX_BYTES) is 25MB.
 const MAX_MANUSCRIPT_BYTES = 25 * 1024 * 1024;
@@ -45,7 +46,7 @@ export default function NewManuscriptPage() {
 
   useEffect(() => {
     // Category must be a real Category ObjectId for POST /authors/me/books.
-    getCachedCategories()
+    fetchBackendCategories()
       .then((list) => setCategories(list.filter((c: any) => c.isActive !== false && c.active !== false)))
       .catch(() => setCategories([]));
   }, []);
@@ -67,10 +68,13 @@ export default function NewManuscriptPage() {
       try {
         const res = await api.get("/publish-packages");
         const list = res.data?.data || res.data || [];
-        const arr = Array.isArray(list) ? list : [];
+        const arr = (Array.isArray(list) ? list : []).filter((p: any) => p?.isActive !== false);
         setPackages(arr);
-        if (arr.length > 0) {
-          setSelectedPackageId(arr[0]._id || arr[0].id);
+        // The Publish page links here with ?packageId=<_id> for the card the author chose.
+        const requested = new URLSearchParams(window.location.search).get("packageId");
+        const preselected = arr.find((p: any) => (p._id || p.id) === requested) || arr[0];
+        if (preselected) {
+          setSelectedPackageId(preselected._id || preselected.id);
         }
       } catch (err) {
         console.warn("Failed to load publish packages:", err);
@@ -279,7 +283,7 @@ export default function NewManuscriptPage() {
                       <SelectContent>
                         {packages.map((pkg) => (
                           <SelectItem key={pkg._id || pkg.id} value={pkg._id || pkg.id}>
-                            {pkg.name} — ₹{(pkg.price || 0).toLocaleString()}
+                            {pkg.name} — ₹{Number(pkg.price || 0).toLocaleString("en-IN")}
                           </SelectItem>
                         ))}
                       </SelectContent>

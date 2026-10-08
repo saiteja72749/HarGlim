@@ -10,7 +10,13 @@ import { AnimatePresence, motion } from 'framer-motion';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/auth-store';
-import { loadSavedAddress, saveAddress } from '@/lib/saved-address';
+import {
+  fetchSavedAddresses,
+  getDefaultAddress,
+  saveAddresses,
+  withDefaultAddress,
+  type SavedAddress,
+} from '@/lib/saved-address';
 
 const defaultAddress = {
   fullName: '',
@@ -39,15 +45,36 @@ export default function CheckoutStepPage() {
   const authUser = useAuthStore((state) => state.user);
   const authUserId = authUser?._id || authUser?.id;
 
-  // Pre-fill from the address saved on Profile / the last order, then the account name/email.
-  useEffect(() => {
-    const saved = loadSavedAddress(authUserId);
-    setAddress((prev) => ({
-      ...prev,
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
+  const [selectedAddressId, setSelectedAddressId] = useState<string>('');
+  const [saveThisAddress, setSaveThisAddress] = useState(true);
+
+  const applySavedAddress = (saved: SavedAddress | null) => {
+    setSelectedAddressId(saved?._id || '');
+    setAddress({
+      ...defaultAddress,
       ...Object.fromEntries(Object.entries(saved || {}).filter(([, v]) => typeof v === 'string' && v)),
-      fullName: prev.fullName || saved?.fullName || authUser?.name || '',
-      email: prev.email || saved?.email || authUser?.email || '',
-    }));
+      fullName: saved?.fullName || authUser?.name || '',
+      email: saved?.email || authUser?.email || '',
+    });
+  };
+
+  // Load the account's saved addresses (GET /users/me/addresses) and pre-select the default.
+  useEffect(() => {
+    if (!authUserId) return;
+    let cancelled = false;
+    fetchSavedAddresses()
+      .then((list) => {
+        if (cancelled) return;
+        setSavedAddresses(list);
+        applySavedAddress(getDefaultAddress(list));
+      })
+      .catch(() => {
+        if (!cancelled) applySavedAddress(null);
+      });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authUserId]);
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'upi' | 'cod'>('upi');
@@ -114,53 +141,29 @@ export default function CheckoutStepPage() {
       const enteredPostalCode = address.postalCode.trim();
       const enteredCountry = (address.country || "India").trim();
 
+      // POST /orders schema: shippingAddress {fullName, addressLine1, addressLine2, city,
+      // postalCode, country, email, phone}. `state` is not in the schema yet but is kept so
+      // it reaches the backend once supported (couriers need it).
       const shippingAddressObj = {
         fullName: enteredFullName,
-        name: enteredFullName,
-        phone: enteredPhone,
-        phoneNumber: enteredPhone,
-        recipientPhone: enteredPhone,
-        email: enteredEmail,
         addressLine1: enteredAddressLine1,
-        street: enteredAddressLine1,
-        address: enteredAddressLine1,
         addressLine2: enteredAddressLine2 || undefined,
         city: enteredCity,
         state: enteredState,
         postalCode: enteredPostalCode,
-        pincode: enteredPostalCode,
-        pinCode: enteredPostalCode,
         country: enteredCountry,
-      };
-      const orderFormData = {
-        customerName: enteredFullName,
-        fullName: enteredFullName,
         email: enteredEmail,
-        customerEmail: enteredEmail,
         phone: enteredPhone,
-        customerPhone: enteredPhone,
-        shippingAddress: shippingAddressObj,
-        submittedAt: new Date().toISOString(),
       };
 
-      // NOTE: Root level email, phone, and customerName are explicitly sent
-      // so backend never overrides them with the registered user's account email.
+      // customerEmail / customerPhone are sent explicitly so the backend never replaces
+      // the contact typed here with the account's registered email.
       const payload = {
         items: formattedItems,
-        orderFormData,
-        customerSnapshot: orderFormData,
-        checkoutSnapshot: orderFormData,
-        email: enteredEmail,
-        customerEmail: enteredEmail,
-        phone: enteredPhone,
-        customerPhone: enteredPhone,
-        recipientPhone: enteredPhone,
-        fullName: enteredFullName,
-        customerName: enteredFullName,
-        name: enteredFullName,
         shippingAddress: shippingAddressObj,
-        deliveryAddress: shippingAddressObj,
-        paymentMethod: 'UPI'
+        customerEmail: enteredEmail,
+        customerPhone: enteredPhone,
+        paymentMethod: 'UPI',
       };
 
       const { data } = await api.post('/orders', payload);
@@ -178,7 +181,15 @@ export default function CheckoutStepPage() {
 
         setCurrentOrderId(orderId);
         setCurrentOrderNumber(orderNum);
-        saveAddress(authUserId, address);
+        if (saveThisAddress) {
+          // Saving the address is separate from the order: a failure here never blocks payment.
+          const next = withDefaultAddress(savedAddresses, { ...shippingAddressObj, _id: selectedAddressId || undefined });
+          if (next) {
+            saveAddresses(next)
+              .then(setSavedAddresses)
+              .catch(() => toast.error("Order placed, but the address could not be saved to your account."));
+          }
+        }
 
         let rawQr = responseData.qrCodeDataUrl || data.qrCodeDataUrl || paymentObj?.qrCodeDataUrl || orderObj?.qrCodeDataUrl || '';
         if (rawQr && !rawQr.startsWith('data:') && !rawQr.startsWith('http')) {
@@ -261,6 +272,28 @@ export default function CheckoutStepPage() {
                 <p className="text-sm text-muted-foreground mt-1">Where should we deliver your books?</p>
               </div>
 
+              {savedAddresses.length > 0 && (
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium">Saved addresses</span>
+                  <select
+                    id="savedAddress"
+                    value={selectedAddressId}
+                    onChange={(event) =>
+                      applySavedAddress(savedAddresses.find((a) => a._id === event.target.value) || null)
+                    }
+                    className="w-full rounded-2xl border border-border bg-background px-4 py-3 outline-none transition focus:border-primary/80"
+                  >
+                    {savedAddresses.map((a) => (
+                      <option key={a._id} value={a._id}>
+                        {[a.label, a.fullName, a.addressLine1, a.city, a.postalCode].filter(Boolean).join(' · ')}
+                        {a.isDefault ? ' (default)' : ''}
+                      </option>
+                    ))}
+                    <option value="">Use a new address</option>
+                  </select>
+                </label>
+              )}
+
               <div className="grid gap-4 sm:grid-cols-2">
                 {[
                   { name: 'fullName', label: 'Full Name', type: 'text' },
@@ -330,14 +363,15 @@ export default function CheckoutStepPage() {
                     className="w-full rounded-2xl border border-border bg-background px-4 py-3 outline-none transition focus:border-primary/80"
                   />
                 </label>
-                <label className="space-y-2">
-                  <span className="text-sm font-medium">Delivery Notes</span>
+                <label className="flex items-center gap-3 self-end pb-3 text-sm">
                   <input
-                    type="text"
-                    value={address.addressLine2}
-                    onChange={(event) => setAddress({ ...address, addressLine2: event.target.value })}
-                    className="w-full rounded-2xl border border-border bg-background px-4 py-3 outline-none transition focus:border-primary/80"
+                    id="saveThisAddress"
+                    type="checkbox"
+                    checked={saveThisAddress}
+                    onChange={(event) => setSaveThisAddress(event.target.checked)}
+                    className="h-4 w-4 accent-[#0F3D3E]"
                   />
+                  <span>Save this as my default address</span>
                 </label>
               </div>
 

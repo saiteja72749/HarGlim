@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import api from "@/lib/api";
+import { editedContent, useSiteContent } from "@/context/site-content-context";
 
 const defaultFaqCategories = [
   {
@@ -107,27 +107,22 @@ const defaultFaqCategories = [
 
 export default function FAQPage() {
   const [openIndex, setOpenIndex] = useState<number | null>(0);
-  const [faqCategories, setFaqCategories] = useState<any[]>(defaultFaqCategories);
-
-  useEffect(() => {
-    const fetchFaqs = async () => {
-      try {
-        const { data } = await api.get('/content');
-        const dynamicFaqs = data?.data?.faq || data?.faq;
-        if (Array.isArray(dynamicFaqs) && dynamicFaqs.length > 0) {
-          const hasCategories = dynamicFaqs.some((item: any) => Array.isArray(item?.items));
-          setFaqCategories(
-            hasCategories
-              ? dynamicFaqs
-              : [{ category: "Frequently Asked Questions", items: dynamicFaqs }]
-          );
-        }
-      } catch {
-        // Fall back to the default FAQ categories defined above.
-      }
-    };
-    fetchFaqs();
-  }, []);
+  // FAQs come from the shared site content (GET /content → faq / faqsJson), loaded once by
+  // SiteContentProvider; the categories above are shown until an admin saves FAQs.
+  const { content } = useSiteContent();
+  const faqCategories = useMemo(() => {
+    const raw = editedContent(content, "faqsJson");
+    if (!raw) return defaultFaqCategories;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed) || parsed.length === 0) return defaultFaqCategories;
+      return parsed.some((item: any) => Array.isArray(item?.items))
+        ? parsed
+        : [{ category: "Frequently Asked Questions", items: parsed }];
+    } catch {
+      return defaultFaqCategories;
+    }
+  }, [content]);
 
   const fadeInUp = {
     hidden: { opacity: 0, y: 40 },

@@ -98,7 +98,8 @@ export default function Home() {
   const [bestsellers, setBestsellers] = useState<Book[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [authors, setAuthors] = useState<any[]>([]);
-  const [liveStats, setLiveStats] = useState({ booksCount: 0, authorsCount: 0 });
+  // null until the backend answers, so the counters never flash "0+" on refresh.
+  const [liveStats, setLiveStats] = useState<{ booksCount: number; authorsCount: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [, setError] = useState(false);
 
@@ -128,22 +129,19 @@ export default function Home() {
       setLoading(true);
       setError(false);
 
-      const featuredRes = await api
-        .get("/books?featured=true&limit=8")
-        .catch(() => api.get("/books?isFeatured=true&limit=8"));
+      const featuredRes = await api.get("/books?featured=true&limit=8");
 
       const featuredList = extractBooks(featuredRes.data);
       // Strictly enforce Feature on Home (isFeatured) flag; new release alone must not qualify
       setFeaturedBooks(featuredList.filter((b: any) => b.isFeatured === true || b.featured === true));
       setLoading(false);
 
-      const [bestsellersRes, categoriesRes, authorsRes, booksCountRes, authorsCountRes] = await Promise.allSettled([
+      const [bestsellersRes, categoriesRes, authorsRes, booksCountRes] = await Promise.allSettled([
         // Live backend honours `bestseller=true`; `sort=rating` is ignored (returns default order).
         api.get("/books?bestseller=true&limit=4"),
-        api.get("/categories?featured=true&limit=6").catch(() => api.get("/categories?limit=6")),
+        api.get("/categories?featured=true&limit=6"),
         api.get("/authors?limit=6"),
         api.get("/books?limit=1"),
-        api.get("/authors?limit=1"),
       ]);
 
       if (bestsellersRes.status === "fulfilled") {
@@ -170,8 +168,9 @@ export default function Home() {
         if (typeof total === "number") booksCount = total;
       }
 
-      if (authorsCountRes.status === "fulfilled") {
-        const total = authorsCountRes.value.data?.pagination?.total ?? authorsCountRes.value.data?.data?.pagination?.total;
+      // The 6-author list carries the full author count in its pagination.
+      if (authorsRes.status === "fulfilled") {
+        const total = authorsRes.value.data?.pagination?.total ?? authorsRes.value.data?.data?.pagination?.total;
         if (typeof total === "number") authorsCount = total;
       }
 
@@ -268,14 +267,14 @@ export default function Home() {
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-1.5">
                     <BookOpen className="h-4 w-4 text-[#D4AF37]" />
-                    <span className="font-serif font-bold text-sm text-white">{liveStats.booksCount}+</span>
+                    <span className="font-serif font-bold text-sm text-white">{liveStats ? `${liveStats.booksCount}+` : "—"}</span>
                   </div>
                   <p className="text-[11px] text-white/60 hidden sm:block font-sans">Books Published</p>
                 </div>
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-1.5">
                     <Users className="h-4 w-4 text-emerald-400" />
-                    <span className="font-serif font-bold text-sm text-white">{liveStats.authorsCount}+</span>
+                    <span className="font-serif font-bold text-sm text-white">{liveStats ? `${liveStats.authorsCount}+` : "—"}</span>
                   </div>
                   <p className="text-[11px] text-white/60 hidden sm:block font-sans">Happy Authors</p>
                 </div>

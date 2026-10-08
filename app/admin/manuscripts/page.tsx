@@ -137,13 +137,9 @@ export default function AdminManuscriptsPage() {
         });
       } else if (newStatus === "rejected") {
         const reason = prompt("Enter rejection reason (optional):", "Editorial standards mismatch");
-        await api.post(`/admin/publish-requests/${id}/reject`, { reason }).catch(() =>
-          api.put(`/admin/publish-requests/${id}/status`, { status: "rejected", reason })
-        );
+        await api.post(`/admin/publish-requests/${id}/reject`, { reason });
       } else if (newStatus === "under_review") {
-        await api.post(`/admin/publish-requests/${id}/request-changes`).catch(() =>
-          api.put(`/admin/publish-requests/${id}/status`, { status: "under_review" })
-        );
+        await api.post(`/admin/publish-requests/${id}/request-changes`);
       } else {
         await api.put(`/admin/publish-requests/${id}/status`, { status: newStatus });
       }

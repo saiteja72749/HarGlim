@@ -40,7 +40,8 @@ export interface CartItem {
 export interface Author {
   _id: string;
   name: string;
-  email: string;
+  // Not returned by public author APIs (GET /authors, /authors/{id}); only on authenticated ones.
+  email?: string;
   role?: string;
   bio?: string;
   profileImage?: string;

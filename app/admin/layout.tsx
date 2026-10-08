@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Truck,
   Tags,
+  Package,
   Star,
   Receipt,
   Bell,
@@ -51,6 +52,7 @@ const sidebarSections = [
     items: [
       { href: "/admin/books", label: "Books Catalog", icon: BookOpen },
       { href: "/admin/categories", label: "Categories", icon: Tags },
+      { href: "/admin/packages", label: "Publishing Packages", icon: Package },
       { href: "/admin/manuscripts", label: "Publish Requests", icon: FileText },
       { href: "/admin/reviews", label: "Customer Reviews", icon: Star },
       { href: "/admin/content", label: "Site Content CMS", icon: Globe },

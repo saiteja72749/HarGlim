@@ -61,9 +61,7 @@ export default function AdminCategoriesPage() {
       if (statusFilter === "active") params.active = true;
       if (statusFilter === "inactive") params.active = false;
 
-      const { data } = await api.get("/admin/categories", { params }).catch(() =>
-        api.get("/categories", { params })
-      );
+      const { data } = await api.get("/admin/categories", { params });
       const items =
         data?.data?.categories ||
         (Array.isArray(data?.data) ? data.data : []) ||
@@ -147,9 +145,7 @@ export default function AdminCategoriesPage() {
     const newActive = !currentActive;
 
     try {
-      await api.patch(`/admin/categories/${catId}/status`, { active: newActive }).catch(() =>
-        api.put(`/admin/categories/${catId}`, { active: newActive })
-      );
+      await api.patch(`/admin/categories/${catId}/status`, { active: newActive });
       setCategories((prev) =>
         prev.map((c) =>
           (c._id || c.id) === catId ? { ...c, active: newActive, isActive: newActive } : c

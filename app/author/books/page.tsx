@@ -27,27 +27,27 @@ export default function AuthorBooksPage() {
     if (!user) return;
     setIsLoading(true);
     try {
-      const authorUserId = user._id || user.id;
       const noStore = { cache: "no-store" } as any;
-      const [resMe, resPerformance] = await Promise.all([
+      const [resMe, resPerformance, resDashboard] = await Promise.all([
         api.get("/authors/me/books", { params: { limit: 100 }, ...noStore }).catch(() => null),
         api.get("/authors/me/books/performance", noStore).catch(() => null),
+        // GET /authors/me/books carries no sales fields; the dashboard's topBooks[] does
+        // (unitsSold, grossBookRevenue, knownAccruedRoyalty), so it backs up /performance.
+        api.get("/authors/me/dashboard", noStore).catch(() => null),
       ]);
-      let fetchedBooks: any[] = extractList(resMe?.data, "books");
-
-      if (fetchedBooks.length === 0 && authorUserId) {
-        // Never fall back to GET /books?author=: the live backend ignores that filter
-        // and returns every author's books. /authors/{id}/books is author-scoped.
-        const resPublic = await api.get(`/authors/${authorUserId}/books`, { params: { limit: 100 } }).catch(() => null);
-        fetchedBooks = extractList(resPublic?.data, "books");
-      }
+      const fetchedBooks: any[] = extractList(resMe?.data, "books");
 
       // Sales/revenue/royalty live on the performance endpoint, keyed by book id.
       const performanceById = new Map<string, any>();
-      extractList(resPerformance?.data, "books").forEach((row: any) => {
-        const id = String(row.bookId || row.book?._id || row.book || row._id || "");
-        if (id) performanceById.set(id, row);
-      });
+      const dashboardTopBooks = resDashboard?.data?.data?.topBooks ?? resDashboard?.data?.topBooks;
+      const addPerformanceRows = (rows: any[]) =>
+        rows.forEach((row: any) => {
+          const id = String(row.bookId || row.book?._id || row.book || row._id || "");
+          if (id) performanceById.set(id, { ...(performanceById.get(id) || {}), ...row });
+        });
+      addPerformanceRows(extractList(resPerformance?.data, "books"));
+      // Applied last: the dashboard figures are the ones the royalty ledger is built from.
+      addPerformanceRows(Array.isArray(dashboardTopBooks) ? dashboardTopBooks : []);
 
       setBooks(
         fetchedBooks.map((book) => ({
@@ -202,7 +202,11 @@ function BookRow({ book, index }: { book: any; index: number }) {
   // royaltyPercentage is set by the publisher; never invent one when it is missing.
   const royaltyPerc = typeof book.royaltyPercentage === "number" ? book.royaltyPercentage : null;
   const unitRoyalty = royaltyPerc !== null ? Math.round((priceVal * royaltyPerc) / 100) : null;
-  const knownRoyalty = book.performance?.knownRoyalty ?? book.performance?.royalty ?? book.performance?.royaltyEarned;
+  const knownRoyalty =
+    book.performance?.knownRoyalty ??
+    book.performance?.knownAccruedRoyalty ??
+    book.performance?.royalty ??
+    book.performance?.royaltyEarned;
 
   return (
     <motion.tr

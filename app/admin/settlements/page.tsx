@@ -76,10 +76,9 @@ export default function AdminSettlementsPage() {
   useEffect(() => {
     const loadAuthors = async () => {
       try {
-        const res = await api.get("/authors", { params: { limit: 100 } }).catch(() =>
-          api.get("/admin/users", { params: { role: "author", limit: 100 } })
-        );
-        const data = res?.data?.data?.authors || res?.data?.authors || res?.data?.data || res?.data || [];
+        // Admin list of author accounts (the public /authors list carries no private fields).
+        const res = await api.get("/admin/users", { params: { role: "author", limit: 100 } });
+        const data = res?.data?.data?.users ?? res?.data?.data ?? [];
         const arr = Array.isArray(data) ? data : [];
         setAuthors(arr);
         if (arr.length > 0 && !authorId) {

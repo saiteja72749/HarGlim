@@ -29,10 +29,8 @@ import {
 import { Switch } from "@/components/ui/switch";
 import toast from "react-hot-toast";
 
-import { EXACT_CATEGORIES } from "@/config/categories";
-import { resolveCategoryObjectId, getCategoryDisplayName } from "@/lib/categories";
+import { fetchBackendCategories, resolveCategoryObjectId, getCategoryDisplayName } from "@/lib/categories";
 import { isValidEmailAddress, normalizeEmailForStorage } from "@/lib/email";
-export const BISAC_CATEGORIES = EXACT_CATEGORIES;
 
 type AuthorType = "existing" | "new" | "external";
 
@@ -55,7 +53,12 @@ export default function EditBookPage() {
   const [externalAuthorName, setExternalAuthorName] = useState<string>("");
   const [newAuthorName, setNewAuthorName] = useState<string>("");
   const [newAuthorEmail, setNewAuthorEmail] = useState<string>("");
-  const [newAuthorBio, setNewAuthorBio] = useState<string>("");
+
+  // Category options come from GET /categories (the same list the storefront uses).
+  const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
+  useEffect(() => {
+    fetchBackendCategories().then((list) => setCategoryOptions(list.map((c) => c.name).filter(Boolean)));
+  }, []);
 
   const [formData, setFormData] = useState({
     title: "",
@@ -98,6 +101,8 @@ export default function EditBookPage() {
       });
       const created = data?.data || data?.category || data;
       const catName = created?.name || newCategoryName.trim();
+      setCategoryOptions((prev) => (prev.includes(catName) ? prev : [...prev, catName]));
+      fetchBackendCategories(true);
       setFormData((prev: any) => ({ ...prev, category: catName }));
       setNewCategoryName("");
       setNewCategoryDescription("");
@@ -162,32 +167,9 @@ export default function EditBookPage() {
     const fetchBook = async () => {
       setFetching(true);
       try {
-        let bookData: any = null;
-
-        // Tier 1: Try /admin/books/:id
-        const res1 = await api.get(`/admin/books/${bookId}`).catch(() => null);
-        if (res1?.data) {
-          bookData = res1.data.data || res1.data;
-        }
-
-        // Tier 2: Try /books/:id
-        if (!bookData) {
-          const res2 = await api.get(`/books/${bookId}`).catch(() => null);
-          if (res2?.data) {
-            bookData = res2.data.data || res2.data;
-          }
-        }
-
-        // Tier 3: Search list in /books
-        if (!bookData) {
-          const res3 = await api.get(`/books?limit=100`).catch(() => null);
-          const list = res3?.data?.data?.books || res3?.data?.data || res3?.data || [];
-          if (Array.isArray(list)) {
-            bookData = list.find(
-              (b: any) => (b._id || b.id) === bookId || b.slug === bookId
-            );
-          }
-        }
+        // GET /admin/books/{id} returns any status (draft, archived, published).
+        const res = await api.get(`/admin/books/${bookId}`, { cache: "no-store" } as any).catch(() => null);
+        const bookData: any = res?.data?.data?.book || res?.data?.data || null;
 
         if (bookData) {
           const authorInfo = getBookAuthorInfo(bookData);
@@ -402,9 +384,7 @@ export default function EditBookPage() {
 
           const uploadRes = await api.post("/uploads/image", uploadFormData, {
             headers: { "Content-Type": undefined },
-          }).catch(() => api.post("/uploads/publishing-image", uploadFormData, {
-            headers: { "Content-Type": undefined },
-          }));
+          });
 
           coverImageUrl = uploadRes?.data?.data?.url || uploadRes?.data?.url;
         } catch (uploadErr) {
@@ -739,19 +719,6 @@ export default function EditBookPage() {
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="newAuthorBio" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                    Author Biography (Optional)
-                  </Label>
-                  <Textarea
-                    id="newAuthorBio"
-                    rows={3}
-                    placeholder="Short summary of author's credentials..."
-                    value={newAuthorBio}
-                    onChange={(e) => setNewAuthorBio(e.target.value)}
-                    className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs"
-                  />
-                </div>
               </div>
             )}
           </CardContent>
@@ -819,7 +786,7 @@ export default function EditBookPage() {
                     <SelectValue placeholder="Select Category" />
                   </SelectTrigger>
                   <SelectContent className="bg-white border-[#E2E6DF] max-h-72">
-                    {EXACT_CATEGORIES.map((categoryName) => (
+                    {Array.from(new Set([...categoryOptions, formData.category].filter(Boolean))).map((categoryName) => (
                       <SelectItem key={categoryName} value={categoryName}>
                         {categoryName}
                       </SelectItem>

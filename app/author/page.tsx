@@ -89,24 +89,7 @@ const normalizeStatus = (status: any) =>
 const getSoldCount = (book: any) =>
   getNumber(book?.totalSales, book?.unitsSold, book?.copiesSold, book?.sales, book?.soldCount);
 
-const getRoyaltyAmount = (item: any) =>
-  getNumber(item?.royaltyEarned, item?.royaltyAmount, item?.amount, item?.earnings, item?.revenue);
-
 const getBookId = (book: any) => String(book?._id || book?.id || book?.bookId || book?.slug || book?.title || "");
-
-const mergeBooksById = (...lists: any[][]) => {
-  const map = new Map<string, any>();
-
-  for (const list of lists) {
-    for (const book of list) {
-      const id = getBookId(book);
-      if (!id) continue;
-      map.set(id, { ...(map.get(id) || {}), ...book });
-    }
-  }
-
-  return Array.from(map.values());
-};
 
 const getStatusLabel = (status: any) => {
   const normalized = normalizeStatus(status);
@@ -129,57 +112,21 @@ export default function AuthorDashboard() {
 
     setLoading(true);
     try {
-      const authorId = user?._id || user?.id;
       const requestConfig = { cache: "no-store" } as any;
 
-      const [dashboardRes, booksRes, performanceRes, royaltiesRes, analyticsRes, publicBooksRes] =
-        await Promise.allSettled([
-          api.get("/authors/me/dashboard", requestConfig),
-          api.get("/authors/me/books", { params: { limit: 100, sort: "-updatedAt" }, ...requestConfig } as any),
-          api.get("/authors/me/books/performance", requestConfig),
-          api.get("/authors/me/royalties", { params: { limit: 100 }, ...requestConfig } as any),
-          api.get("/authors/me/analytics", requestConfig),
-          // Live GET /books ignores ?author= and returns the whole catalog, which made every
-          // book count as this author's. /authors/{id}/books is the real per-author list.
-          authorId
-            ? api.get(`/authors/${authorId}/books`, { params: { limit: 100 }, ...requestConfig } as any)
-            : Promise.resolve({ data: [] }),
-        ]);
+      // Two calls cover the whole page: the grouped dashboard (book counts, sales, royalties,
+      // topBooks, recentSales) and the author's own book list (manuscript statuses).
+      const [dashboardRes, booksRes] = await Promise.allSettled([
+        api.get("/authors/me/dashboard", requestConfig),
+        api.get("/authors/me/books", { params: { limit: 100, sort: "-updatedAt" }, ...requestConfig } as any),
+      ]);
 
-      const dashboardRaw = dashboardRes.status === "fulfilled" ? unwrapData(dashboardRes.value.data) : {};
-      // Metrics may come flat or grouped (summary / metrics / royalties); flatten once.
-      const dashboard = {
-        ...dashboardRaw,
-        ...(dashboardRaw?.summary || {}),
-        ...(dashboardRaw?.metrics || {}),
-        ...(dashboardRaw?.books || {}),
-        ...(dashboardRaw?.royalties || {}),
-        ...(dashboardRaw?.payouts || {}),
-      };
-      const topBooks = extractList(dashboardRaw?.topBooks || [], []);
-      // Grouped live payload: books{}, sales{}, royalties{}, topBooks[], recentSales[]
       const summary = dashboardRes.status === "fulfilled" ? normalizeAuthorDashboard(dashboardRes.value.data) : null;
       setSalesSummary(summary);
-      const analytics = analyticsRes.status === "fulfilled" ? unwrapData(analyticsRes.value.data) : {};
       const authorBooks =
-        booksRes.status === "fulfilled"
-          ? extractList(booksRes.value.data, ["books", "manuscripts", "items"])
-          : [];
-      const performanceBooks =
-        performanceRes.status === "fulfilled"
-          ? extractList(performanceRes.value.data, ["books", "performance", "items"])
-          : [];
-      const publicBooks =
-        publicBooksRes.status === "fulfilled"
-          ? extractList(publicBooksRes.value.data, ["books", "items"])
-          : [];
-      const royaltyEntries =
-        royaltiesRes.status === "fulfilled"
-          ? extractList(royaltiesRes.value.data, ["royalties", "entries", "items", "sales"])
-          : [];
+        booksRes.status === "fulfilled" ? extractList(booksRes.value.data, ["books", "items"]) : [];
 
-      const allBooks = mergeBooksById(authorBooks, performanceBooks, publicBooks);
-      const publishedBooksList = allBooks.filter((book) =>
+      const publishedBooksList = authorBooks.filter((book) =>
         ["published", "approved", "active"].includes(normalizeStatus(book.status))
       );
       const manuscripts = authorBooks.filter(
@@ -201,89 +148,20 @@ export default function AuthorDashboard() {
         { pending: 0, processing: 0, rejected: 0 }
       );
 
-      const totalSoldFromBooks = mergeBooksById(performanceBooks, publicBooks, authorBooks).reduce(
-        (sum, book) => sum + getSoldCount(book),
-        0
-      );
-      const totalEarningsFromRoyalties = royaltyEntries.reduce(
-        (sum, item) => sum + getRoyaltyAmount(item),
-        0
-      );
-      const totalEarningsFromPerformance = performanceBooks.reduce(
-        (sum, book) => sum + getRoyaltyAmount(book),
-        0
-      );
-
       const nextData: AuthorDashboardData = {
-        totalBooks: getNumber(
-          summary?.books.total || undefined,
-          dashboard.totalBooks,
-          dashboard.booksCount,
-          analytics.totalBooks,
-          allBooks.length
-        ),
-        publishedBooks: getNumber(
-          summary?.books.total ? summary.books.published : undefined,
-          dashboard.publishedBooks,
-          dashboard.publishedBooksCount,
-          analytics.publishedBooks,
-          publishedBooksList.length
-        ),
-        manuscriptsCount: getNumber(
-          dashboard.manuscriptsCount,
-          dashboard.totalManuscripts,
-          dashboard.manuscripts?.length,
-          manuscripts.length
-        ),
-        pendingCount: getNumber(
-          dashboard.pendingCount,
-          dashboard.pendingBooks,
-          dashboard.pendingManuscripts,
-          statusCounts.pending
-        ),
-        processingCount: getNumber(
-          dashboard.processingCount,
-          dashboard.processingBooks,
-          dashboard.underReviewCount,
-          dashboard.underReview,
-          statusCounts.processing
-        ),
-        rejectedCount: getNumber(
-          dashboard.rejectedCount,
-          dashboard.revisionRequiredCount,
-          statusCounts.rejected
-        ),
-        totalSold: getNumber(
-          summary?.unitsSold,
-          dashboard.unitsSold,
-          dashboard.totalSold,
-          dashboard.totalUnitsSold,
-          dashboard.copiesSold,
-          analytics.totalUnitsSold,
-          analytics.totalSales,
-          totalSoldFromBooks
-        ),
-        totalEarnings: getNumber(
-          summary?.accrued,
-          dashboard.accruedKnown,
-          dashboard.accrued,
-          dashboard.totalEarnings,
-          dashboard.totalRoyalty,
-          analytics.totalRoyalty,
-          analytics.totalRevenue,
-          totalEarningsFromRoyalties,
-          totalEarningsFromPerformance
-        ),
-        grossRevenue: getNumber(summary?.grossRevenue, dashboard.grossBookRevenue, dashboard.grossRevenue, analytics.totalRevenue),
-        eligibleUnsettled: getNumber(summary?.eligibleUnsettled, dashboard.eligibleUnsettled),
-        pendingPayout: getNumber(summary?.pendingPayout, dashboard.settledPendingPayment, dashboard.pendingPayouts),
-        paidLifetime: getNumber(summary?.paidLifetime, dashboard.paidLifetime, dashboard.lifetimePayouts),
-        recentBooks: (topBooks.length > 0
-          ? topBooks
-          : performanceBooks.length > 0
-          ? performanceBooks
-          : publishedBooksList
-        ).slice(0, 5),
+        totalBooks: summary?.books.total || authorBooks.length,
+        publishedBooks: summary?.books.total ? summary.books.published : publishedBooksList.length,
+        manuscriptsCount: manuscripts.length,
+        pendingCount: statusCounts.pending,
+        processingCount: statusCounts.processing,
+        rejectedCount: statusCounts.rejected,
+        totalSold: summary?.unitsSold ?? 0,
+        totalEarnings: summary?.accrued ?? 0,
+        grossRevenue: summary?.grossRevenue ?? 0,
+        eligibleUnsettled: summary?.eligibleUnsettled ?? 0,
+        pendingPayout: summary?.pendingPayout ?? 0,
+        paidLifetime: summary?.paidLifetime ?? 0,
+        recentBooks: (summary?.topBooks.length ? summary.topBooks : publishedBooksList).slice(0, 5),
         manuscripts: manuscripts.slice(0, 5),
       };
 

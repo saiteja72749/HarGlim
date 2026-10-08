@@ -41,7 +41,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import type { Book as BookType, Category } from "@/types";
-import api, { getCachedCategories } from "@/lib/api";
+import api from "@/lib/api";
+import { fetchBackendCategories } from "@/lib/categories";
 import { cn } from "@/lib/utils";
 
 const priceRanges = [
@@ -85,7 +86,7 @@ function BooksContent() {
 
   const fetchCategories = async () => {
     try {
-      const items = await getCachedCategories();
+      const items = (await fetchBackendCategories()) as Category[];
       setCategories(items);
     } catch (err) {
       console.error("Failed to fetch categories:", err);

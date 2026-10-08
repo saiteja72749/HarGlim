@@ -55,9 +55,7 @@ export default function AdminAuthorsPage() {
       const params: any = { role: "author", page, limit: 20 };
       if (searchQuery.trim()) params.search = searchQuery.trim();
 
-      const { data } = await api.get("/admin/users", { params }).catch(() =>
-        api.get("/users", { params })
-      );
+      const { data } = await api.get("/admin/users", { params });
 
       const items =
         data?.data?.users ||
