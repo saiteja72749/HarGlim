@@ -1,4 +1,6 @@
 import { Metadata } from 'next';
+import { notFound } from 'next/navigation';
+import { serializeJsonLd } from '@/lib/json-ld';
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -6,10 +8,14 @@ type Props = {
 };
 
 const getAuthorData = async (id: string) => {
+  // Author URLs use the Mongo _id; the backend answers 500 (not 404) for a malformed one.
+  if (!/^[a-f0-9]{24}$/i.test(id)) notFound();
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
+  const res = await fetch(`${API_URL}/authors/${id}`, { next: { revalidate: 300 } }).catch(() => null);
+  // A missing author is a real 404; network or server errors still render the page.
+  if (res?.status === 404) notFound();
+  if (!res?.ok) return null;
   try {
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
-    const res = await fetch(`${API_URL}/authors/${id}`, { next: { revalidate: 3600 } });
-    if (!res.ok) return null;
     const data = await res.json();
     return data.data || data;
   } catch {
@@ -86,8 +92,8 @@ export default async function AuthorLayout({ children, params }: Props) {
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbsJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(breadcrumbsJsonLd) }} />
       {children}
     </>
   );

@@ -37,14 +37,16 @@ import toast from "react-hot-toast";
 import { DELIVERY_PLANS, resolveCourierTrackingUrl } from "@/lib/couriers";
 import {
   SHIPMENT_LABELS,
-  canAssignCourier,
   canCancelShipment,
+  canEditTracking,
   extractList,
   extractTrackingInfo,
   getNextShipmentStatuses,
   getShipmentLabel,
+  nextTrackingUrl,
   normalizeShipmentStatus,
 } from "@/lib/tracking";
+import { assignCourier } from "@/lib/shipment-actions";
 import { getSafeExternalUrl } from "@/lib/utils";
 
 export default function AdminShipmentsPage() {
@@ -123,11 +125,10 @@ export default function AdminShipmentsPage() {
   // Auto-generate tracking URL when courier or tracking number changes
   const handleTrackingNumberChange = (val: string) => {
     const cleanNum = val.trim();
-    const generatedUrl = resolveCourierTrackingUrl(courierForm.serviceName, cleanNum);
     setCourierForm((prev) => ({
       ...prev,
       trackingNumber: cleanNum,
-      trackingUrl: generatedUrl || prev.trackingUrl,
+      trackingUrl: nextTrackingUrl(prev.serviceName, prev.trackingNumber, cleanNum, prev.trackingUrl),
     }));
   };
 
@@ -177,7 +178,7 @@ export default function AdminShipmentsPage() {
       };
 
       // Admin shipment actions take shipment._id only (never orderNumber / shipmentId UUID / AWB).
-      await api.post(`/admin/shipments/${shipmentId}/assign-courier`, payload);
+      await assignCourier(selectedShipmentForCourier, payload, "admin-shipments");
       toast.success(`Assigned ${courierForm.serviceName} (${finalTrackingNumber.toUpperCase()}).`);
       setSelectedShipmentForCourier(null);
       fetchShipments();
@@ -470,7 +471,7 @@ export default function AdminShipmentsPage() {
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-1.5">
                               {/* Only actions valid for the current shipment status are shown. */}
-                              {canAssignCourier(s.status) && (
+                              {canEditTracking(s.status) && (
                                 <Button
                                   size="sm"
                                   variant="outline"

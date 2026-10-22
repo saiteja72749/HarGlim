@@ -195,6 +195,7 @@ export const SHIPMENT_LABELS: Record<string, string> = {
   CANCELLED: "Cancelled",
   RETURN_REQUESTED: "Return Requested",
   RETURNED: "Returned",
+  TRACKING_UPDATED: "Tracking Details Updated",
 };
 
 /** Progress moves allowed via POST /admin/shipments/{_id}/update-status (cancel has its own endpoint). */
@@ -242,4 +243,48 @@ export function getTrackingHistory(source: any): { status: string; description?:
       occurredAt: e.occurredAt || e.timestamp || e.createdAt || e.date,
     }))
     .sort((a: any, b: any) => new Date(a.occurredAt || 0).getTime() - new Date(b.occurredAt || 0).getTime());
+}
+
+/** Shipment still on the road (or not yet picked up), so its courier/AWB can be corrected. */
+const TRACKING_EDITABLE_STATUSES = ["CREATED", "COURIER_ASSIGNED", "PICKUP_SCHEDULED", "PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY"];
+export const canEditTracking = (status: unknown) => TRACKING_EDITABLE_STATUSES.includes(normalizeShipmentStatus(status));
+
+/**
+ * update-status steps that lead from `from` to `to` (excluding `from`), or [] when `to` is not
+ * reachable. Used to put a dispatched shipment back where it was if re-assigning the courier
+ * resets it to COURIER_ASSIGNED.
+ */
+export function getShipmentStatusPath(from: unknown, to: unknown): string[] {
+  const start = normalizeShipmentStatus(from);
+  const goal = normalizeShipmentStatus(to);
+  if (start === goal) return [];
+  const previous = new Map<string, string>([[start, ""]]);
+  const queue = [start];
+  while (queue.length) {
+    const current = queue.shift()!;
+    for (const next of NEXT_SHIPMENT_STATUSES[current] || []) {
+      if (previous.has(next)) continue;
+      previous.set(next, current);
+      if (next === goal) {
+        const path = [next];
+        for (let step = current; step !== start; step = previous.get(step)!) path.unshift(step);
+        return path;
+      }
+      queue.push(next);
+    }
+  }
+  return [];
+}
+
+/**
+ * Keeps a tracking URL in step with an edited tracking number: a courier-generated URL wins,
+ * otherwise an old URL that embedded the previous number gets the new one swapped in.
+ */
+export function nextTrackingUrl(courier: string, previousNumber: string, nextNumber: string, previousUrl: string): string {
+  const generated = resolveCourierTrackingUrl(courier, nextNumber);
+  if (generated) return generated;
+  if (previousNumber && previousUrl.includes(previousNumber)) {
+    return nextNumber ? previousUrl.split(previousNumber).join(nextNumber) : "";
+  }
+  return previousUrl;
 }

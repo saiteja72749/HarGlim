@@ -27,9 +27,12 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import toast from "react-hot-toast";
+import { createAuthorUser } from "@/lib/admin-authors";
 
 import { fetchBackendCategories, resolveCategoryObjectId } from "@/lib/categories";
 import { isValidEmailAddress, normalizeEmailForStorage } from "@/lib/email";
+import { hasCosts, readCosts, royaltyPercentFromCosts } from "@/lib/royalty";
+import { RoyaltyCostFields } from "@/components/books/royalty-cost-fields";
 
 type AuthorType = "existing" | "new" | "external";
 
@@ -159,7 +162,9 @@ export default function AddBookPage() {
     isFeatured: false,
     isBestseller: false,
     isNewRelease: false,
-    royaltyPercentage: "30",
+    printingCost: "",
+    platformCharges: "",
+    deliveryCharges: "",
   });
 
   // Category options come from GET /categories (the same list the storefront uses).
@@ -290,14 +295,10 @@ export default function AddBookPage() {
       }
 
       const emailToUse = normalizedEmail || `author.${cleanSlug}.${Date.now().toString().slice(-4)}@harglim.internal`;
-      const tempPassword = `Author#${Math.random().toString(36).slice(-6)}!Aa1`;
 
-      const adminUserRes = await api.post("/admin/users", {
+      const adminUserRes = await createAuthorUser({
         name: quickAuthorName.trim(),
         email: emailToUse,
-        password: tempPassword,
-        role: "author",
-        isActive: true,
       });
 
       const uData =
@@ -455,7 +456,6 @@ export default function AddBookPage() {
           const emailToUse = normalizedAuthorEmail
             ? normalizedAuthorEmail
             : `author.${cleanSlug}.${Date.now().toString().slice(-4)}@harglim.internal`;
-          const tempPassword = `Author#${Math.random().toString(36).slice(-6)}!Aa1`;
 
           toast.loading(`Creating author account for "${targetName}"...`, { id: "create-author" });
 
@@ -463,12 +463,9 @@ export default function AddBookPage() {
             // First try dedicated admin user creation API: POST /api/admin/users
             let newUserId: string | null = null;
             try {
-              const adminUserRes = await api.post("/admin/users", {
+              const adminUserRes = await createAuthorUser({
                 name: targetName,
                 email: emailToUse,
-                password: tempPassword,
-                role: "author",
-                isActive: true,
               });
               const uData =
                 adminUserRes?.data?.data?.user ||
@@ -567,7 +564,12 @@ export default function AddBookPage() {
         isFeatured: Boolean(formData.isFeatured),
         isBestseller: Boolean(formData.isBestseller),
         isNewRelease: Boolean(formData.isNewRelease),
-        royaltyPercentage: formData.royaltyPercentage ? Number(formData.royaltyPercentage) : 0,
+        // Royalty = MRP − printing − platform − delivery. The backend calculates royaltyPerCopy
+        // from these charges; a percentage is only sent for a book saved without any charges.
+        ...readCosts(formData),
+        ...(hasCosts(readCosts(formData))
+          ? {}
+          : { royaltyPercentage: royaltyPercentFromCosts(numericPrice, readCosts(formData)) }),
       };
 
       if (resolvedCategoryObjectId) {
@@ -1107,6 +1109,12 @@ export default function AddBookPage() {
                 </Select>
               </div>
             </div>
+
+            <RoyaltyCostFields
+              mrp={formData.price}
+              values={formData}
+              onChange={(key, value) => setFormData((prev) => ({ ...prev, [key]: value }))}
+            />
 
             <div className="grid gap-6 md:grid-cols-2">
               <div className="space-y-2">

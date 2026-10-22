@@ -6,6 +6,7 @@ import { MainContainer } from '@/components/layout/main-container';
 import { Providers } from './providers';
 import { siteConfig } from '@/config/site';
 import { NoiseOverlay } from '@/components/ui/noise-overlay';
+import { serializeJsonLd } from '@/lib/json-ld';
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteConfig.url),
@@ -30,7 +31,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Harglim Publishers',
     description: 'Discover Your Next Great Read',
-    url: 'https://harglim.com',
+    url: siteConfig.url,
     siteName: 'Harglim Publishers',
     locale: 'en_IN',
     type: 'website',
@@ -59,7 +60,7 @@ export default function RootLayout({
     '@type': 'Organization',
     name: siteConfig.name,
     url: siteConfig.url,
-    logo: `${siteConfig.url}/logo.webp`,
+    logo: `${siteConfig.url}/logo.png`,
     description: siteConfig.description,
     sameAs: [
       siteConfig.social.facebook,
@@ -92,11 +93,11 @@ export default function RootLayout({
       <body className="font-sans antialiased">
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+          dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
         />
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
+          dangerouslySetInnerHTML={{ __html: serializeJsonLd(websiteJsonLd) }}
         />
         <Providers>
           <NoiseOverlay />

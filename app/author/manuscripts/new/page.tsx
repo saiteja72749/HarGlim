@@ -72,7 +72,9 @@ export default function NewManuscriptPage() {
         setPackages(arr);
         // The Publish page links here with ?packageId=<_id> for the card the author chose.
         const requested = new URLSearchParams(window.location.search).get("packageId");
-        const preselected = arr.find((p: any) => (p._id || p.id) === requested) || arr[0];
+        // Without a chosen card the author must pick: defaulting to the first package would
+        // silently submit a package they never chose.
+        const preselected = arr.find((p: any) => (p._id || p.id) === requested) || (arr.length === 1 ? arr[0] : null);
         if (preselected) {
           setSelectedPackageId(preselected._id || preselected.id);
         }

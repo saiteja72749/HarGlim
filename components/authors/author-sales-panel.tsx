@@ -69,7 +69,14 @@ export function AuthorSalesPanel({
               <li key={b.bookId || i} className="flex items-center gap-3 rounded-xl border border-[#E2E6DF] p-2.5">
                 {b.coverImage ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={b.coverImage} alt="" className="h-12 w-9 rounded object-cover border border-[#E2E6DF] shrink-0" />
+                  <img
+                    src={b.coverImage}
+                    alt={`Cover of ${b.title}`}
+                    width={36}
+                    height={48}
+                    loading="lazy"
+                    className="h-12 w-9 rounded object-cover border border-[#E2E6DF] shrink-0"
+                  />
                 ) : (
                   <div className="h-12 w-9 rounded bg-[#F8F9F7] border border-[#E2E6DF] flex items-center justify-center shrink-0">
                     <BookOpen className="h-4 w-4 text-[#5C6E6E]" />
@@ -79,7 +86,9 @@ export function AuthorSalesPanel({
                   <Title id={b.bookId} title={b.title} available={Boolean(b.bookId)} />
                   <p className="text-[11px] text-[#5C6E6E]">
                     {b.unitsSold} sold · {formatINR(b.grossRevenue)} revenue
-                    {b.royaltyPercent !== null ? ` · ${b.royaltyPercent}% royalty` : ""}
+                    {b.royaltyPercent !== null
+                      ? ` · ${formatINR(Math.max(0, b.grossRevenue - b.royalty))} printing, platform & delivery`
+                      : ""}
                   </p>
                 </div>
                 <div className="text-right shrink-0">
@@ -124,7 +133,6 @@ export function AuthorSalesPanel({
                     <td className="p-2 text-right tabular-nums">{formatINR(s.unitPrice)}</td>
                     <td className="p-2 text-right tabular-nums text-emerald-700">
                       {formatINR(s.royalty)}
-                      {s.royaltyPercent !== null && <span className="block text-[10px] text-[#5C6E6E]">{s.royaltyPercent}%</span>}
                     </td>
                     <td className="p-2 whitespace-nowrap text-[#5C6E6E]">
                       {s.saleDate ? new Date(s.saleDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}

@@ -27,53 +27,12 @@ import api from "@/lib/api";
 import type { Book } from "@/types";
 import { getBookAuthorInfo } from "@/lib/utils";
 
-import { useSiteContent } from "@/context/site-content-context";
+import { defaultSiteContent, useSiteContent } from "@/context/site-content-context";
+import { flattenFaqs, readSection } from "@/lib/page-content";
+import { fetchPublicStats } from "@/lib/public-stats";
 
-const whyChooseBlocks = [
-  {
-    title: "100% Author Rights & Freedom",
-    description: "You retain total copyright ownership and creative control over your manuscript and book covers.",
-    icon: Feather,
-    highlight: "Author Centric",
-  },
-  {
-    title: "Premium Print & Hardcover Quality",
-    description: "Acid-free archival paper, rich color saturation, and durable matte/gloss hardcover bindings.",
-    icon: Layers,
-    highlight: "Luxury Finish",
-  },
-  {
-    title: "Pan-India Express Distribution",
-    description: "Direct listing across online stores, local bookstore partnerships, and fast door-step delivery.",
-    icon: Truck,
-    highlight: "Fast Delivery",
-  },
-  {
-    title: "Transparent Royalty Settlements",
-    description: "Real-time dashboard reporting on copy sales, transparent split, and automated monthly payouts.",
-    icon: ShieldCheck,
-    highlight: "Guaranteed Payouts",
-  },
-];
+const WHY_CHOOSE_ICONS = [Feather, Layers, Truck, ShieldCheck];
 
-const defaultFaqs = [
-  {
-    question: "How do I publish my manuscript with Harglim Publishers?",
-    answer: "Getting published is simple! Navigate to our 'Publish With Us' page, fill out the manuscript submission form with your book details, sample chapters, and contact information. Our editorial review team will respond within 3 to 5 business days.",
-  },
-  {
-    question: "What royalty percentages do authors earn on book sales?",
-    answer: "Authors earn up to 70% net royalties on print sales and e-books. All earnings are calculated transparently and visible inside your Author Dashboard with automated monthly settlements.",
-  },
-  {
-    question: "Do I retain full copyright ownership of my book?",
-    answer: "Yes, 100%! You retain complete copyright ownership, translation rights, and adaptation rights to your work. Harglim Publishers acts strictly as your printing, distribution, and publishing partner.",
-  },
-  {
-    question: "How long does shipping take for ordered books?",
-    answer: "Orders are processed and printed within 24 to 48 hours. Express shipping across India typically arrives within 3 to 5 business days with live SMS and email tracking.",
-  },
-];
 
 const extractBooks = (data: any): Book[] => {
   const items = data?.data?.books || data?.books || data?.data || data || [];
@@ -82,7 +41,7 @@ const extractBooks = (data: any): Book[] => {
 
 const getOptimizedCoverImage = (src?: string) => {
   if (!src || (!src.startsWith("http") && !src.startsWith("/"))) {
-    return "/logo.webp";
+    return "/logo.png";
   }
 
   if (src.startsWith("https://res.cloudinary.com/") && src.includes("/upload/")) {
@@ -111,18 +70,20 @@ export default function Home() {
   const [faqSearch, setFaqSearch] = useState("");
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
 
-  // Parse FAQs dynamically if provided in site content
-  let activeFaqs = defaultFaqs;
-  if (content?.faqsJson) {
+  // Copy from Admin → Site Content: FAQs (categorised or flat) and the "why choose us" cards.
+  const parseFaqs = (raw?: string) => {
     try {
-      const parsed = JSON.parse(content.faqsJson);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        activeFaqs = parsed;
-      }
+      return flattenFaqs(JSON.parse(raw || ""));
     } catch {
-      // Fallback
+      return [];
     }
-  }
+  };
+  const savedFaqs = parseFaqs(content?.faqsJson);
+  const activeFaqs = savedFaqs.length > 0 ? savedFaqs : parseFaqs(defaultSiteContent.faqsJson);
+  const whyChooseBlocks = readSection<{ title: string; description: string; highlight?: string }>(
+    content,
+    "homeWhyChooseJson"
+  ).map((block, idx) => ({ ...block, icon: WHY_CHOOSE_ICONS[idx % WHY_CHOOSE_ICONS.length] }));
 
   const fetchHomeData = async () => {
     try {
@@ -136,12 +97,12 @@ export default function Home() {
       setFeaturedBooks(featuredList.filter((b: any) => b.isFeatured === true || b.featured === true));
       setLoading(false);
 
-      const [bestsellersRes, categoriesRes, authorsRes, booksCountRes] = await Promise.allSettled([
+      const [bestsellersRes, categoriesRes, authorsRes, statsRes] = await Promise.allSettled([
         // Live backend honours `bestseller=true`; `sort=rating` is ignored (returns default order).
         api.get("/books?bestseller=true&limit=4"),
         api.get("/categories?featured=true&limit=6"),
         api.get("/authors?limit=6"),
-        api.get("/books?limit=1"),
+        fetchPublicStats(),
       ]);
 
       if (bestsellersRes.status === "fulfilled") {
@@ -160,21 +121,7 @@ export default function Home() {
         setAuthors(Array.isArray(items) ? items : []);
       }
 
-      let booksCount = 0;
-      let authorsCount = 0;
-
-      if (booksCountRes.status === "fulfilled") {
-        const total = booksCountRes.value.data?.pagination?.total ?? booksCountRes.value.data?.data?.pagination?.total;
-        if (typeof total === "number") booksCount = total;
-      }
-
-      // The 6-author list carries the full author count in its pagination.
-      if (authorsRes.status === "fulfilled") {
-        const total = authorsRes.value.data?.pagination?.total ?? authorsRes.value.data?.data?.pagination?.total;
-        if (typeof total === "number") authorsCount = total;
-      }
-
-      setLiveStats({ booksCount, authorsCount });
+      setLiveStats(statsRes.status === "fulfilled" ? statsRes.value : { booksCount: 0, authorsCount: 0 });
     } catch (error) {
       console.error("Failed to fetch home page data:", error);
       setError(true);
@@ -336,7 +283,7 @@ export default function Home() {
                               src={heroCover}
                               onError={(e: any) => {
                                 if (e?.target) {
-                                  e.target.src = "/logo.webp";
+                                  e.target.src = "/logo.png";
                                 }
                               }}
                               alt={heroTitle}
@@ -449,7 +396,7 @@ export default function Home() {
                 <span>Curated Selection</span>
               </div>
               <h2 className="text-3xl sm:text-4xl font-serif font-bold text-[#0F3D3E]">
-                Featured Releases
+                {content.homeFeaturedTitle}
               </h2>
             </div>
             <Link href="/books" className="hidden sm:flex items-center gap-1 text-sm font-serif font-bold text-[#0F3D3E] hover:text-[#D4AF37] transition-colors">
@@ -599,7 +546,7 @@ export default function Home() {
                   <span>Reader Favorites</span>
                 </div>
                 <h2 className="text-3xl sm:text-4xl font-serif font-bold text-[#0F3D3E]">
-                  Top Rated This Week
+                  {content.homeBestsellerTitle}
                 </h2>
               </div>
               <Link href="/books" className="hidden sm:flex items-center gap-1 text-sm font-serif font-bold text-[#0F3D3E] hover:text-[#D4AF37] transition-colors">
@@ -768,6 +715,25 @@ export default function Home() {
               </p>
             )}
           </div>
+        </div>
+      </section>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* BOTTOM CTA BANNER (Admin → Site Content → Home: Bottom Banner) */}
+      {/* ------------------------------------------------------------------ */}
+      <section className="py-16 sm:py-20 bg-gradient-to-b from-[#0B2E2F] via-[#0F3D3E] to-[#082223] text-white">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-5">
+          <h2 className="text-3xl sm:text-4xl font-serif font-bold">{content.homeCtaHeading}</h2>
+          <p className="text-sm sm:text-base text-white/80 leading-relaxed">{content.homeCtaSubtitle}</p>
+          <Link href="/publish" className="inline-block pt-2">
+            <Button
+              size="lg"
+              className="bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold h-14 px-8 rounded-full gap-2 text-base"
+            >
+              <span>{content.homeCtaButtonText}</span>
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </Link>
         </div>
       </section>
 

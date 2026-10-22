@@ -3,119 +3,20 @@
 import { motion } from "framer-motion";
 import { Shield, Lock, Eye, Mail, User, Database } from "lucide-react";
 import Link from "next/link";
+import { useSiteContent } from "@/context/site-content-context";
+import { readSection } from "@/lib/page-content";
+
+const SECTION_ICONS = [Shield, Database, Eye, Lock, Mail, User];
 
 export default function PrivacyPolicyPage() {
+  const { content } = useSiteContent();
   const fadeInUp = {
     hidden: { opacity: 0, y: 40 },
     visible: { opacity: 1, y: 0, transition: { duration: 0.6 } },
   };
 
-  const sections = [
-    {
-      title: "1. Introduction",
-      icon: Shield,
-      content: `Harglim Publishers ("Company", "we", "our", or "us") operates the Harglim Publishers website and mobile application (the "Service"). This page informs you of our policies regarding the collection, use, and disclosure of personal data when you use our Service and the choices you have associated with that data. Our Privacy Policy applies to all visitors, users, and others who access the Service. If you do not agree with our policies and practices, please do not use our Service.`,
-    },
-    {
-      title: "2. Information Collection and Use",
-      icon: Database,
-      content: `We collect several different types of information for various purposes to provide and improve our Service to you.
-
-Types of Data Collected:
-• Personal Data: Name, email address, phone number, postal address, payment information, and cookies or similar tracking technologies
-• Book Purchase Information: Books purchased, reading preferences, and order history
-• Author Information: Manuscript details, publishing information, and royalty data
-• Device Information: Browser type, IP address, and operating system
-
-Reasons for Collection:
-• To provide and maintain our Service
-• To process transactions and send related information
-• To provide customer support
-• To monitor usage patterns and improve our Service
-• To detect and prevent fraudulent transactions
-• To send promotional emails and newsletters (with consent)`,
-    },
-    {
-      title: "3. Use of Data",
-      icon: Eye,
-      content: `Harglim Publishers uses the collected data for various purposes:
-
-• Providing and maintaining our Service
-• Notifying you about changes to our Service
-• Providing customer care and support
-• Gathering analysis or valuable information to improve our Service
-• Monitoring the usage of our Service
-• Detecting, preventing and addressing technical issues and fraud
-• With your consent, to provide you with news, special offers and general information
-
-We will not sell, trade, or rent your personal information to third parties without your explicit consent, except as required by law or in cases of emergency.`,
-    },
-    {
-      title: "4. Security of Data",
-      icon: Lock,
-      content: `The security of your data is important to us but remember that no method of transmission over the Internet or method of electronic storage is 100% secure. While we strive to use commercially acceptable means to protect your personal data, we cannot guarantee its absolute security.
-
-Security Measures:
-• SSL/TLS encryption for data in transit
-• Secure password hashing and storage
-• Regular security audits and updates
-• Limited access to personal data
-• Compliance with industry standards
-• Incident response procedures`,
-    },
-    {
-      title: "5. Communication Preferences",
-      icon: Mail,
-      content: `We will send you promotional emails and newsletters with your consent. You can opt out of receiving promotional emails by clicking the "unsubscribe" link in our emails or by logging into your account and adjusting your preferences.
-
-However, we will continue to send you transactional and service-related emails (such as order confirmations, shipping updates, and account notifications) even if you opt out of promotional emails.`,
-    },
-    {
-      title: "6. User Rights",
-      icon: User,
-      content: `You have the following rights regarding your personal data:
-
-• Right to Access: You can request a copy of your personal data
-• Right to Correction: You can request correction of inaccurate data
-• Right to Deletion: You can request deletion of your data (right to be forgotten)
-• Right to Data Portability: You can request your data in a portable format
-• Right to Withdraw Consent: You can withdraw previously given consent
-• Right to Lodge Complaint: You can file a complaint with data protection authorities
-
-To exercise these rights, please contact us at privacy@harglim.com with your request.`,
-    },
-    {
-      title: "7. Third-Party Links",
-      icon: Shield,
-      content: `Our Service may contain links to third-party websites, applications, and services that are not operated by us. This Privacy Policy does not apply to third-party services, and we are not responsible for their privacy practices. We encourage you to review the privacy policies of any third-party services before providing your personal information.`,
-    },
-    {
-      title: "8. Children's Privacy",
-      icon: User,
-      content: `Our Service is not intended for use by children under the age of 13. We do not knowingly collect personal information from children under 13. If we discover that a child under 13 has provided us with personal data, we will delete such information immediately.
-
-If you are a parent or guardian and believe your child has provided us with personal information, please contact us immediately at privacy@harglim.com.`,
-    },
-    {
-      title: "9. Changes to This Privacy Policy",
-      icon: Shield,
-      content: `We may update our Privacy Policy from time to time to reflect changes in our practices or other operational, legal, or regulatory reasons. We will notify you of any changes by posting the new Privacy Policy on this page and updating the "Last Updated" date.
-
-Your continued use of the Service after such modifications constitutes your acknowledgment and acceptance of the updated Privacy Policy.`,
-    },
-    {
-      title: "10. Contact Us",
-      icon: Mail,
-      content: `If you have any questions about this Privacy Policy or our privacy practices, please contact us at:
-
-Harglim Publishers
-Email: privacy@harglim.com
-Address: 123 Publishing Lane, Mumbai, India 400001
-Phone: +91 98765 43210
-
-We will respond to your inquiry within 7 business days.`,
-    },
-  ];
+  const sections = readSection<{ title: string; content: string }>(content, "privacySectionsJson")
+    .map((item, idx) => ({ ...item, icon: SECTION_ICONS[idx % SECTION_ICONS.length] }));
 
   return (
     <div className="bg-background">

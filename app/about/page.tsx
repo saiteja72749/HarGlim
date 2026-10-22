@@ -4,34 +4,12 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import { BookOpen, Users, Target, Heart, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import api from "@/lib/api";
 import { editedContent, useSiteContent } from "@/context/site-content-context";
+import { readSection } from "@/lib/page-content";
+import { fetchPublicStats } from "@/lib/public-stats";
 
-const values = [
-  {
-    icon: Target,
-    title: "Quality Editorial First",
-    description: "We maintain strict editorial standards in editing, typography, cover design, and archival printing so every book stands out.",
-  },
-  {
-    icon: Heart,
-    title: "Author-Centric Values",
-    description: "Our authors retain 100% copyright ownership, receiving transparent monthly royalty settlements and dedicated editorial guidance.",
-  },
-  {
-    icon: Sparkles,
-    title: "Modern Print Innovation",
-    description: "We leverage print-on-demand technology and digital e-book distribution to reach global reader communities seamlessly.",
-  },
-];
+const VALUE_ICONS = [Target, Heart, Sparkles];
 
-const team = [
-  {
-    name: "Sunkarapally Sai Teja",
-    role: "Founder & CEO",
-    image: "/founder.webp",
-  },
-];
 
 export default function AboutPage() {
   const { content } = useSiteContent();
@@ -39,35 +17,16 @@ export default function AboutPage() {
   const aboutSubtitle = editedContent(content, "aboutSubtitle");
   const aboutMission = editedContent(content, "aboutMission");
   const aboutVision = editedContent(content, "aboutVision");
+  const values = readSection<{ title: string; description: string }>(content, "aboutValuesJson").map((value, idx) => ({
+    ...value,
+    icon: VALUE_ICONS[idx % VALUE_ICONS.length],
+  }));
+  const team = readSection<{ name: string; role: string; image?: string; bio?: string }>(content, "aboutTeamJson");
   // null until the backend answers, so the counters never flash "0+" on refresh.
   const [liveStats, setLiveStats] = useState<{ booksCount: number; authorsCount: number } | null>(null);
 
   useEffect(() => {
-    const fetchLiveStats = async () => {
-      try {
-        const [booksRes, authorsRes] = await Promise.allSettled([
-          api.get("/books?limit=1"),
-          api.get("/authors?limit=1"),
-        ]);
-
-        let bCount = 0;
-        let aCount = 0;
-
-        if (booksRes.status === "fulfilled") {
-          const total = booksRes.value.data?.pagination?.total ?? booksRes.value.data?.data?.pagination?.total;
-          if (typeof total === "number") bCount = total;
-        }
-
-        if (authorsRes.status === "fulfilled") {
-          const total = authorsRes.value.data?.pagination?.total ?? authorsRes.value.data?.data?.pagination?.total;
-          if (typeof total === "number") aCount = total;
-        }
-
-        setLiveStats({ booksCount: bCount, authorsCount: aCount });
-      } catch {
-        setLiveStats({ booksCount: 0, authorsCount: 0 });
-      }
-    };
+    const fetchLiveStats = async () => setLiveStats(await fetchPublicStats());
     fetchLiveStats();
   }, []);
 
@@ -124,7 +83,7 @@ export default function AboutPage() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
           <div className="lg:col-span-7 space-y-4">
             <span className="text-xs font-bold uppercase tracking-wider text-[#8A6D1E] block">
-              Empowering Writers Since 2025
+              Empowering Writers
             </span>
             <h2 className="text-3xl sm:text-4xl font-serif font-bold text-[#0F3D3E]">
               Our Story & Mission
@@ -164,10 +123,10 @@ export default function AboutPage() {
           <div className="lg:col-span-5">
             <div className="relative aspect-[4/3] rounded-3xl overflow-hidden shadow-xl border-2 border-[#D4AF37]/30">
               <Image
-                src="/logo.webp"
-                onError={(e: any) => { if (e?.target) e.target.src = "/logo.webp"; }}
+                src="/logo.png"
                 alt="Harglim Library"
                 fill
+                sizes="(max-width: 1024px) 100vw, 42vw"
                 className="object-cover opacity-90 p-4"
               />
             </div>
@@ -201,35 +160,43 @@ export default function AboutPage() {
         </div>
       </section>
 
-      {/* 5. FOUNDER HIGHLIGHT */}
-      <section className="py-16 sm:py-20 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-6">
-        <div className="space-y-2">
-          <span className="text-xs font-bold uppercase tracking-wider text-[#8A6D1E] block">
-            Leadership
-          </span>
-          <h2 className="text-3xl font-serif font-bold text-[#0F3D3E]">
-            Meet Our Founder
-          </h2>
-        </div>
+      {/* 5. TEAM (Admin → Site Content → Page Sections → Team members) */}
+      {team.length > 0 && (
+        <section className="py-16 sm:py-20 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-6">
+          <div className="space-y-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-[#8A6D1E] block">Leadership</span>
+            <h2 className="text-3xl font-serif font-bold text-[#0F3D3E]">{team.length === 1 ? "Meet Our Founder" : "Meet Our Team"}</h2>
+          </div>
 
-        <div className="bg-white border border-[#E2E6DF] rounded-3xl p-8 shadow-xs max-w-md mx-auto space-y-4">
-          <div className="relative h-28 w-28 rounded-full overflow-hidden border-4 border-[#0F3D3E] mx-auto shadow-md">
-            <Image
-              src={team[0].image}
-              alt={team[0].name}
-              fill
-              className="object-cover"
-            />
+          <div className="flex flex-wrap justify-center gap-6">
+            {team.map((member, idx) => (
+              <div key={`${member.name}-${idx}`} className="bg-white border border-[#E2E6DF] rounded-3xl p-8 shadow-xs w-full max-w-xs space-y-4">
+                <div className="relative h-28 w-28 rounded-full overflow-hidden border-4 border-[#0F3D3E] mx-auto shadow-md bg-[#F8F9F7]">
+                  {member.image ? (
+                    // Admin-supplied URLs can be on any host, so a plain img avoids next/image domain config.
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={member.image}
+                      alt={`Portrait of ${member.name}, ${member.role} at Harglim Publishers`}
+                      width={112}
+                      height={112}
+                      loading="lazy"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <Users className="h-10 w-10 text-[#0F3D3E]/40 absolute inset-0 m-auto" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="font-serif font-bold text-xl text-[#0F3D3E]">{member.name}</h3>
+                  <p className="text-xs text-[#8A6D1E] font-bold uppercase tracking-wider mt-0.5">{member.role}</p>
+                </div>
+                {member.bio && <p className="text-xs text-[#5C6E6E] leading-relaxed">{member.bio}</p>}
+              </div>
+            ))}
           </div>
-          <div>
-            <h3 className="font-serif font-bold text-xl text-[#0F3D3E]">{team[0].name}</h3>
-            <p className="text-xs text-[#8A6D1E] font-bold uppercase tracking-wider mt-0.5">{team[0].role}</p>
-          </div>
-          <p className="text-xs text-[#5C6E6E] leading-relaxed">
-            Championing independent authors and building India&apos;s premier literary publishing house.
-          </p>
-        </div>
-      </section>
+        </section>
+      )}
     </div>
   );
 }

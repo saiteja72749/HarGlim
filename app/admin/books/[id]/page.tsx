@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import api from "@/lib/api";
 import { getBookAuthorInfo } from "@/lib/utils";
+import { createAuthorUser } from "@/lib/admin-authors";
 import { ArrowLeft, Save, Upload, Plus } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,8 @@ import toast from "react-hot-toast";
 
 import { fetchBackendCategories, resolveCategoryObjectId, getCategoryDisplayName } from "@/lib/categories";
 import { isValidEmailAddress, normalizeEmailForStorage } from "@/lib/email";
+import { hasCosts, readCosts } from "@/lib/royalty";
+import { RoyaltyCostFields } from "@/components/books/royalty-cost-fields";
 
 type AuthorType = "existing" | "new" | "external";
 
@@ -77,6 +80,9 @@ export default function EditBookPage() {
     isBestseller: false,
     isNewRelease: false,
     royaltyPercentage: "",
+    printingCost: "",
+    platformCharges: "",
+    deliveryCharges: "",
   });
 
   const [originalCategoryId, setOriginalCategoryId] = useState<string>("");
@@ -228,6 +234,9 @@ export default function EditBookPage() {
             isBestseller: Boolean(bookData.isBestseller),
             isNewRelease: Boolean(bookData.isNewRelease),
             royaltyPercentage: bookData.royaltyPercentage?.toString() || "",
+            printingCost: bookData.printingCost?.toString() || "",
+            platformCharges: bookData.platformCharges?.toString() || "",
+            deliveryCharges: bookData.deliveryCharges?.toString() || "",
           });
         } else {
           toast.error("Book not found in database.");
@@ -337,15 +346,11 @@ export default function EditBookPage() {
 
         if (!finalAuthorId) {
           const emailToUse = normalizedAuthorEmail;
-          const tempPassword = `Author#${Math.random().toString(36).slice(-6)}!Aa1`;
 
           try {
-            const adminUserRes = await api.post("/admin/users", {
+            const adminUserRes = await createAuthorUser({
               name: targetAuthorDisplayName,
               email: emailToUse,
-              password: tempPassword,
-              role: "author",
-              isActive: true,
             });
             const uData = adminUserRes?.data?.data?.user || adminUserRes?.data?.user || adminUserRes?.data?.data || adminUserRes?.data;
             finalAuthorId = uData?._id || uData?.id || null;
@@ -418,6 +423,13 @@ export default function EditBookPage() {
           ? Number(formData.royaltyPercentage)
           : undefined,
       };
+
+      // Royalty = MRP − printing − platform − delivery, calculated by the backend (royaltyPerCopy).
+      // Books saved before these charges existed keep their stored percentage until they are filled in.
+      const costs = readCosts(formData);
+      if (hasCosts(costs)) {
+        Object.assign(jsonPayload, costs);
+      }
 
       if (resolvedCategoryObjectId) {
         jsonPayload.category = resolvedCategoryObjectId;
@@ -882,24 +894,16 @@ export default function EditBookPage() {
               </div>
             </div>
 
-            <div className="grid gap-6 md:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="royaltyPercentage" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                  Royalty Percentage
-                </Label>
-                <Input
-                  id="royaltyPercentage"
-                  name="royaltyPercentage"
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={formData.royaltyPercentage}
-                  onChange={handleInputChange}
-                  placeholder="e.g. 30"
-                  className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-sm font-bold font-mono"
-                />
-              </div>
-            </div>
+            <RoyaltyCostFields
+              mrp={formData.price}
+              values={formData}
+              currentPerCopy={
+                formData.royaltyPercentage
+                  ? Math.round(((Number(formData.price) || 0) * Number(formData.royaltyPercentage))) / 100
+                  : null
+              }
+              onChange={(key, value) => setFormData((prev) => ({ ...prev, [key]: value }))}
+            />
 
             <div className="grid gap-6 md:grid-cols-2">
               <div className="space-y-2">

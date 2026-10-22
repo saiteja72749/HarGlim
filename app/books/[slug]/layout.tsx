@@ -1,4 +1,6 @@
 import { Metadata } from 'next';
+import { notFound } from 'next/navigation';
+import { serializeJsonLd } from '@/lib/json-ld';
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -6,10 +8,13 @@ type Props = {
 };
 
 const getBookData = async (slug: string) => {
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
+  const res = await fetch(`${API_URL}/books/${slug}`, { next: { revalidate: 300 } }).catch(() => null);
+  // A missing book is a real 404 (not a 200 page), so search engines drop dead links.
+  // Network or server errors still render the page, which loads the book itself.
+  if (res?.status === 404) notFound();
+  if (!res?.ok) return null;
   try {
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
-    const res = await fetch(`${API_URL}/books/${slug}`, { next: { revalidate: 3600 } });
-    if (!res.ok) return null;
     const data = await res.json();
     return data.data || data;
   } catch {
@@ -100,8 +105,8 @@ export default async function BookLayout({ children, params }: Props) {
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbsJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(breadcrumbsJsonLd) }} />
       {children}
     </>
   );

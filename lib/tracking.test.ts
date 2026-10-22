@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   canAssignCourier,
+  canEditTracking,
+  getShipmentStatusPath,
+  nextTrackingUrl,
   canCancelShipment,
   extractList,
   extractTrackingInfo,
@@ -111,5 +114,28 @@ describe("shipment status machine", () => {
       },
     });
     expect(info).toMatchObject({ trackingNumber: "CP123456789IN", courierName: "India Post", estimatedDelivery: "2026-10-12T18:00:00.000Z" });
+  });
+});
+
+describe("tracking corrections", () => {
+  it("lets the AWB be edited until delivery", () => {
+    expect(canEditTracking("IN_TRANSIT")).toBe(true);
+    expect(canEditTracking("OUT_FOR_DELIVERY")).toBe(true);
+    expect(canEditTracking("DELIVERED")).toBe(false);
+    expect(canEditTracking("CANCELLED")).toBe(false);
+  });
+
+  it("finds the update-status steps back to a shipment's progress", () => {
+    expect(getShipmentStatusPath("COURIER_ASSIGNED", "IN_TRANSIT")).toEqual(["IN_TRANSIT"]);
+    expect(getShipmentStatusPath("COURIER_ASSIGNED", "OUT_FOR_DELIVERY")).toEqual(["IN_TRANSIT", "OUT_FOR_DELIVERY"]);
+    expect(getShipmentStatusPath("IN_TRANSIT", "IN_TRANSIT")).toEqual([]);
+    expect(getShipmentStatusPath("DELIVERED", "IN_TRANSIT")).toEqual([]);
+  });
+
+  it("keeps the tracking URL in step with an edited number", () => {
+    expect(nextTrackingUrl("India Post", "OLD1", "NEW2", "https://x.test/t/OLD1")).toContain("NEW2");
+    // No generated link (digital): an old URL that embedded the previous number is updated.
+    expect(nextTrackingUrl("Digital Delivery", "OLD1", "NEW2", "https://x.test/t/OLD1")).toBe("https://x.test/t/NEW2");
+    expect(nextTrackingUrl("Digital Delivery", "OLD1", "NEW2", "https://x.test/portal")).toBe("https://x.test/portal");
   });
 });

@@ -24,234 +24,36 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { useSiteContent } from "@/context/site-content-context";
+import { defaultSiteContent, editedContent, useSiteContent, type SiteContent } from "@/context/site-content-context";
+import { readSection } from "@/lib/page-content";
+import { findRealPackage, hasCardCopy, normalizePackages, parsePackagesJson, sortPackages } from "@/lib/publish-packages";
+import { fetchPublicStats } from "@/lib/public-stats";
 import { useAuthStore } from "@/store/auth-store";
 
-// Default curated publishing packages for HarGlim Publishers
-// Accepts a package array or the wrapped `[{ packages: [...] }]` shape of CMS packagesJson,
-// and turns text prices like "₹999/-" into numbers. Unwanted packages are archived by an
-// admin (Admin → Publishing Packages), not filtered here.
-const normalizePackages = (raw: any): any[] => {
-  let list: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.packages) ? raw.packages : [];
-  if (list.length > 0 && list.every((item) => Array.isArray(item?.packages))) {
-    list = list.flatMap((item) => item.packages);
-  }
-  return list
-    .filter((p) => p?.name && p.isActive !== false)
-    .map((p) => ({
-      ...p,
-      price: typeof p.price === "number" ? p.price : Number(String(p.price ?? "").replace(/[^0-9.]/g, "")) || 0,
-    }));
-};
+// Built-in package copy lives in one place: the Site Content default (packagesJson).
+// Unwanted packages are archived by an admin (Admin → Publishing Packages), not filtered here.
+const defaultPackages = parsePackagesJson(defaultSiteContent.packagesJson);
 
-const defaultPackages = [
-  {
-    id: "pkg-999",
-    name: "Starter Package",
-    tagline: "Essential e-book & digital publishing starter kit",
-    price: 999,
-    highlighted: false,
-    features: [
-      "ISBN & Barcode Allocation",
-      "Cover Design",
-      "Book formatting & Manuscript design",
-      "E-book & E-certificate",
-      "50% Royalty",
-      "Author copies at printing cost (Lifetime)",
-      "Book available on Amazon and Kindle",
-      "Page limit – 120",
-      "Book launch poster",
-      "Books will be taken to book fairs under HarGlim (if the author pays for copies)"
-    ]
-  },
-  {
-    id: "pkg-1999",
-    name: "Standard Package",
-    tagline: "Standard paperback publishing with 80% royalty share",
-    price: 1999,
-    highlighted: false,
-    features: [
-      "ISBN & Barcode Allocation",
-      "Cover Design",
-      "Book formatting & Manuscript design",
-      "1 Author copy (Paperback)",
-      "Certificate",
-      "80% Royalty",
-      "Author copies at printing cost (Lifetime)",
-      "Book available on Amazon and Kindle",
-      "Page limit – 120",
-      "Book launch poster",
-      "Books will be taken to book fairs under HarGlim (if the author pays for copies)"
-    ]
-  },
-  {
-    id: "pkg-2999",
-    name: "Silver Package",
-    tagline: "100% Royalty & global distribution across 12+ platforms",
-    price: 2999,
-    highlighted: false,
-    features: [
-      "ISBN & Barcode Allocation",
-      "Cover Design",
-      "Book formatting & Manuscript design",
-      "2 Author copies (Paperback)",
-      "Certificate",
-      "100% Royalty",
-      "Author copies at printing cost (Lifetime)",
-      "Book available on Amazon, Kindle, and 12+ International platforms",
-      "Page limit – 150",
-      "Book launch posters",
-      "Books will be taken to book fairs under HarGlim (if the author pays for copies)"
-    ]
-  },
-  {
-    id: "pkg-3499",
-    name: "Gold Package",
-    tagline: "Extended 300 page limit & full global distribution",
-    price: 3499,
-    highlighted: false,
-    features: [
-      "ISBN & Barcode Allocation",
-      "Cover Design",
-      "Book formatting & Manuscript design",
-      "2 Author copies (Paperback)",
-      "Certificate",
-      "100% Royalty",
-      "Author copies at printing cost (Lifetime)",
-      "Book available on Amazon, Kindle, and 12+ International platforms",
-      "Page limit – 300",
-      "Book launch posters",
-      "Books will be taken to book fairs under HarGlim (if the author pays for copies)"
-    ]
-  },
-  {
-    id: "pkg-4999",
-    name: "Platinum Bestseller Package",
-    tagline: "Full promotional kit with video trailer & author interview",
-    price: 4999,
-    highlighted: true,
-    badge: "Most Popular Choice",
-    features: [
-      "ISBN & Barcode Allocation",
-      "Cover Design",
-      "Book formatting & Manuscript design",
-      "4 Author copies (Paperback)",
-      "Certificate",
-      "100% Royalty",
-      "Author copies at printing cost (Lifetime)",
-      "Book available on Amazon, Kindle, and 12+ International platforms",
-      "Page limit – 250",
-      "Book launch posters",
-      "Books will be taken to book fairs under HarGlim (if the author pays for copies)",
-      "Video trailer",
-      "Author interview (Recorded video will be sent to the author and posted on our social media)"
-    ]
-  },
-  {
-    id: "pkg-9999",
-    name: "VIP Executive Mastermind",
-    tagline: "Ultimate publishing package with 1-on-1 dedicated guide & custom bookmarks",
-    price: 9999,
-    highlighted: false,
-    features: [
-      "ISBN & Barcode Allocation",
-      "Cover Design (2 options)",
-      "Professional Customised Book formatting & Manuscript design",
-      "6 Author copies (Paperback)",
-      "Certificate",
-      "100% Royalty",
-      "Author copies at printing cost (Lifetime)",
-      "Book available on Amazon, Kindle, and 12+ International platforms",
-      "Page limit – 300",
-      "Book launch posters",
-      "Books will be taken to book fairs under HarGlim (if the author pays for copies)",
-      "Author interview (Recorded video will be sent to the author and posted on our social media)",
-      "Bookmarks with book cover image & author's signature (30)",
-      "Video trailer",
-      "Dedicated project guide assigned (5 sessions, 1 hour each, complete guidance from scratch)"
-    ]
-  }
-];
+const SERVICE_ICONS = [Edit3, ImageIcon, FileText, Megaphone, Truck, DollarSign];
 
-const publishingServices = [
-  {
-    icon: Edit3,
-    title: "Professional Editorial",
-    description: "Expert developmental editors, copyeditors, and proofreaders refine your narrative for global publication standards.",
-    features: ["Developmental review", "Line editing", "Proofreading", "Style consistency"],
-  },
-  {
-    icon: ImageIcon,
-    title: "Bespoke Cover Design",
-    description: "Eye-catching, original cover artwork designed by luxury publishing graphic artists.",
-    features: ["Original illustration", "Typography hierarchy", "Hardcover & paperback formats", "3D digital mockups"],
-  },
-  {
-    icon: FileText,
-    title: "Interior Typesetting",
-    description: "Elegant page layout and interior typography crafted for effortless reading across print and e-readers.",
-    features: ["Custom font sizing", "EPUB & Kindle formats", "Print-ready PDFs", "Chapter flourishes"],
-  },
-  {
-    icon: Megaphone,
-    title: "Marketing & Launch Campaign",
-    description: "Multi-channel marketing strategy to launch your book into bestseller lists.",
-    features: ["Social media campaign", "Press release distribution", "Author brand kit", "Bookstore pitching"],
-  },
-  {
-    icon: Truck,
-    title: "Nationwide & Global Distribution",
-    description: "Direct listing across Amazon, Flipkart, online marketplaces, and brick-and-mortar bookstores.",
-    features: ["Amazon Kindle & Prime", "Flipkart listing", "International distribution", "Direct order fulfillment"],
-  },
-  {
-    icon: DollarSign,
-    title: "Transparent Royalties",
-    description: "Industry-leading royalty shares with real-time Dashboard tracking and monthly automated payouts.",
-    features: ["Up to 70% net royalties", "Monthly bank payouts", "Transparent Dashboard", "Zero hidden deductions"],
-  },
-];
-
-const stepGuide = [
-  {
-    step: 1,
-    title: "Submit Manuscript",
-    description: "Upload your draft manuscript through our secure author portal in minutes.",
-  },
-  {
-    step: 2,
-    title: "Editorial Evaluation",
-    description: "Senior editors review your submission and provide detailed feedback within 7 days.",
-  },
-  {
-    step: 3,
-    title: "Editing & Design",
-    description: "Collaborate closely with dedicated editors and cover designers to perfect your book.",
-  },
-  {
-    step: 4,
-    title: "Publish & Launch",
-    description: "Your book goes live across global retail networks with automated monthly royalty payouts.",
-  },
-];
 
 export default function PublishPage() {
   const { content } = useSiteContent();
+  const publishingServices = readSection<{ title: string; description: string; features?: string[] }>(
+    content,
+    "publishServicesJson"
+  ).map((service, idx) => ({ ...service, features: service.features || [], icon: SERVICE_ICONS[idx % SERVICE_ICONS.length] }));
+  const stepGuide = readSection<{ title: string; description: string }>(content, "publishStepsJson").map((step, idx) => ({
+    ...step,
+    step: idx + 1,
+  }));
   const role = useAuthStore((state) => state.user?.role);
   const [packages, setPackages] = useState<any[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(true);
   const [authorsCount, setAuthorsCount] = useState(0);
 
   useEffect(() => {
-    const fetchAuthorsCount = async () => {
-      try {
-        const { data } = await api.get("/authors?limit=1");
-        const total = data?.pagination?.total ?? data?.data?.pagination?.total;
-        if (typeof total === "number") setAuthorsCount(total);
-      } catch {
-        // Keep zero on failure
-      }
-    };
+    const fetchAuthorsCount = async () => setAuthorsCount((await fetchPublicStats()).authorsCount);
     fetchAuthorsCount();
   }, []);
 
@@ -259,23 +61,37 @@ export default function PublishPage() {
     const fetchPackages = async () => {
       setLoadingPackages(true);
       try {
-        // GET /publish-packages is the package database (active only, sorted by price).
+        // GET /publish-packages is the package database (active only, by sortOrder then price).
         // Its _id is what manuscript submission sends as packageId.
-        const { data } = await api.get("/publish-packages").catch(() => ({ data: { data: [] } }));
+        const { data } = await api
+          .get("/publish-packages", { cache: "no-store" } as any)
+          .catch(() => ({ data: { data: [] } }));
         const realPkgs = normalizePackages(data?.data ?? data).map((p) => ({ ...p, isRealPackage: true }));
-        if (realPkgs.length > 0) {
-          setPackages(realPkgs);
+
+        // Once an admin has given the real packages their card copy (tagline / highlighted /
+        // badge / sortOrder), they are the single source and Site Content packagesJson is unused.
+        if (realPkgs.some(hasCardCopy)) {
+          setPackages(sortPackages(realPkgs));
           return;
         }
 
-        // No real packages yet: CMS packagesJson is display copy only (never a packageId source).
-        let sitePkgs: any[] = [];
-        try {
-          sitePkgs = content?.packagesJson ? normalizePackages(JSON.parse(content.packagesJson)) : [];
-        } catch {
-          sitePkgs = [];
+        // Site Content packagesJson is what the admin edits for this page, so once it differs from
+        // the built-in default it drives the cards. Each card is linked to the real package with the
+        // same _id/id, else the same name, for its packageId (never by price alone).
+        const sitePkgs = parsePackagesJson(
+          editedContent({ packagesJson: content?.packagesJson } as SiteContent, "packagesJson")
+        );
+        if (sitePkgs.length > 0) {
+          setPackages(
+            sitePkgs.map((sp) => {
+              const real = findRealPackage(sp, realPkgs);
+              return real ? { ...sp, _id: real._id, isRealPackage: true } : sp;
+            })
+          );
+          return;
         }
-        setPackages(sitePkgs.length > 0 ? sitePkgs : defaultPackages);
+
+        setPackages(realPkgs.length > 0 ? realPkgs : defaultPackages);
       } catch {
         setPackages(defaultPackages);
       } finally {
@@ -313,11 +129,11 @@ export default function PublishPage() {
             </div>
 
             <h1 className="text-4xl sm:text-5xl md:text-6xl font-serif font-bold text-white tracking-tight leading-tight">
-              Turn Your Manuscript Into a Published Book
+              {content.publishTitle}
             </h1>
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mx-auto lg:mx-0 font-light leading-relaxed">
-              From professional editing to cover design and global retail distribution — we handle everything so you can focus on writing.
+              {content.publishSubtitle}
             </p>
 
             {/* CTAs */}
@@ -377,10 +193,10 @@ export default function PublishPage() {
               className="relative w-full max-w-sm aspect-[3/4] rounded-3xl overflow-hidden shadow-2xl border-4 border-[#D4AF37]/40 bg-[#0F3D3E]"
             >
               <Image
-                src="/logo.webp"
-                onError={(e: any) => { if (e?.target) e.target.src = "/logo.webp"; }}
+                src="/logo.png"
                 alt="Book Publishing Mockup"
                 fill
+                sizes="(max-width: 768px) 100vw, 384px"
                 className="object-cover opacity-90"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent p-6 flex flex-col justify-end text-white">
@@ -548,7 +364,7 @@ export default function PublishPage() {
                   {isHighlighted && (
                     <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
                       <Badge className="bg-[#D4AF37] text-[#0F3D3E] font-serif font-bold text-xs px-4 py-1 rounded-full shadow-md">
-                        ⭐ Most Popular Choice
+                        ⭐ {pkg.badge || "Most Popular Choice"}
                       </Badge>
                     </div>
                   )}
@@ -611,7 +427,7 @@ export default function PublishPage() {
             Your Story Deserves to Be Published
           </h2>
           <p className="text-sm sm:text-base text-white/80 max-w-xl mx-auto font-light leading-relaxed">
-            Limited editorial slots available for new authors this month. Submit your manuscript today for priority evaluation.
+            Submit your manuscript and our editorial team will review it and guide you through every step to publication.
           </p>
           <Link href="/dashboard/become-author" className="inline-block">
             <Button

@@ -58,7 +58,7 @@ export default function CategoryDetailPage() {
             active: true,
             featured: false,
             bookCount: bookList.length,
-            image: "/logo.webp",
+            image: "/logo.png",
           } as any);
         }
       } catch (err) {

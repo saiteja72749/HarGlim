@@ -3,8 +3,13 @@
 import { motion } from "framer-motion";
 import { ArrowRight, Briefcase, Users, Heart, Zap, Coffee, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useSiteContent } from "@/context/site-content-context";
+import { readSection } from "@/lib/page-content";
+
+const BENEFIT_ICONS = [Heart, Globe, Zap, Coffee];
 
 export default function CareersPage() {
+  const { content } = useSiteContent();
   const fadeInUp = {
     hidden: { opacity: 0, y: 40 },
     visible: { opacity: 1, y: 0, transition: { duration: 0.6 } },
@@ -18,28 +23,10 @@ export default function CareersPage() {
     },
   };
 
-  const benefits = [
-    {
-      icon: Heart,
-      title: "Comprehensive Health",
-      description: "Full medical, dental, and vision coverage for you and your dependents.",
-    },
-    {
-      icon: Globe,
-      title: "Remote First",
-      description: "Work from anywhere in India. We believe in outcomes, not hours at a desk.",
-    },
-    {
-      icon: Zap,
-      title: "Learning Budget",
-      description: "Annual stipend for courses, books, and conferences to further your career.",
-    },
-    {
-      icon: Coffee,
-      title: "Wellness Perks",
-      description: "Monthly allowance for gym memberships, mental health apps, or wellness activities.",
-    },
-  ];
+  // Only what the admin lists under Site Content → Page Sections → Careers; empty hides the section.
+  const benefits = readSection<{ title: string; description: string }>(content, "careersBenefitsJson")
+    .map((item, idx) => ({ ...item, icon: BENEFIT_ICONS[idx % BENEFIT_ICONS.length] }));
+  const careersEmail = content.careersEmail || content.contactEmail;
 
   return (
     <div className="bg-background min-h-screen">
@@ -84,48 +71,50 @@ export default function CareersPage() {
       </section>
 
       {/* Culture & Benefits */}
-      <section className="py-24 bg-background">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <motion.div
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true }}
-            variants={fadeInUp}
-            className="text-center mb-16"
-          >
-            <h2 className="text-4xl md:text-5xl font-serif font-bold text-foreground mb-6">
-              Why Join Harglim?
-            </h2>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              We&apos;re building a culture where creativity thrives, bold ideas are celebrated, and every team member can do their best work.
-            </p>
-          </motion.div>
+      {benefits.length > 0 && (
+        <section className="py-24 bg-background">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true }}
+              variants={fadeInUp}
+              className="text-center mb-16"
+            >
+              <h2 className="text-4xl md:text-5xl font-serif font-bold text-foreground mb-6">
+                Why Join Harglim?
+              </h2>
+              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+                We&apos;re building a culture where creativity thrives, bold ideas are celebrated, and every team member can do their best work.
+              </p>
+            </motion.div>
 
-          <motion.div
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true }}
-            variants={staggerContainer}
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8"
-          >
-            {benefits.map((benefit, index) => (
-              <motion.div
-                key={index}
-                variants={fadeInUp}
-                className="bg-card p-8 rounded-2xl border border-border hover:border-primary/50 hover:shadow-xl transition-all duration-300 group"
-              >
-                <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mb-6 group-hover:bg-primary group-hover:text-primary-foreground transition-colors duration-300 text-primary">
-                  <benefit.icon className="h-7 w-7" />
-                </div>
-                <h3 className="text-xl font-bold text-foreground mb-3">{benefit.title}</h3>
-                <p className="text-muted-foreground leading-relaxed">
-                  {benefit.description}
-                </p>
-              </motion.div>
-            ))}
-          </motion.div>
-        </div>
-      </section>
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true }}
+              variants={staggerContainer}
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8"
+            >
+              {benefits.map((benefit, index) => (
+                <motion.div
+                  key={index}
+                  variants={fadeInUp}
+                  className="bg-card p-8 rounded-2xl border border-border hover:border-primary/50 hover:shadow-xl transition-all duration-300 group"
+                >
+                  <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mb-6 group-hover:bg-primary group-hover:text-primary-foreground transition-colors duration-300 text-primary">
+                    <benefit.icon className="h-7 w-7" />
+                  </div>
+                  <h3 className="text-xl font-bold text-foreground mb-3">{benefit.title}</h3>
+                  <p className="text-muted-foreground leading-relaxed">
+                    {benefit.description}
+                  </p>
+                </motion.div>
+              ))}
+            </motion.div>
+          </div>
+        </section>
+      )}
 
       {/* Image Banner */}
       <section className="py-12 bg-muted/30">
@@ -163,7 +152,7 @@ export default function CareersPage() {
               Open Positions
             </h2>
             <p className="text-lg text-muted-foreground mb-8">
-              We currently don&apos;t have any open positions. Please check back later or send your resume to <a href="mailto:careers@harglim.com" className="text-primary hover:underline">careers@harglim.com</a>.
+              We currently don&apos;t have any open positions. Please check back later or send your resume to <a href={`mailto:${careersEmail}`} className="text-primary hover:underline">{careersEmail}</a>.
             </p>
             <div className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-muted/50 mb-6">
               <Users className="h-10 w-10 text-muted-foreground" />

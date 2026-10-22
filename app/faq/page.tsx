@@ -5,123 +5,28 @@ import { motion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { editedContent, useSiteContent } from "@/context/site-content-context";
+import { defaultSiteContent, useSiteContent } from "@/context/site-content-context";
 
-const defaultFaqCategories = [
-  {
-    category: "General Questions",
-    items: [
-      {
-        question: "What is Harglim Publishers?",
-        answer:
-          "Harglim Publishers is a modern, author-friendly publishing platform that empowers writers to publish and distribute their books globally while maintaining creative control and earning competitive royalties.",
-      },
-      {
-        question: "Do I need an agent to publish with Harglim?",
-        answer:
-          "No, we work directly with authors. You don't need a literary agent to publish with us. Simply create an account and submit your manuscript through our platform.",
-      },
-      {
-        question: "What genres do you accept?",
-        answer:
-          "We accept all genres including fiction, non-fiction, romance, mystery, science fiction, fantasy, self-help, biography, and more. Our focus is on quality content in any category.",
-      },
-      {
-        question: "Is there a publishing fee?",
-        answer:
-          "We offer flexible publishing options. We provide free self-publishing services, and also offer premium publishing packages with professional editing, cover design, and marketing support.",
-      },
-    ],
-  },
-  {
-    category: "Submission & Publishing",
-    items: [
-      {
-        question: "How do I submit my manuscript?",
-        answer:
-          'Create an author account, go to your dashboard, and use the "Submit Manuscript" button. Upload your manuscript in Word or PDF format and fill out the submission form.',
-      },
-      {
-        question: "How long does the review process take?",
-        answer:
-          "Our initial review takes 7-14 days. If selected for publication, the complete process from submission to launch typically takes 2-4 weeks depending on required revisions.",
-      },
-      {
-        question: "What if my manuscript is rejected?",
-        answer:
-          "We provide constructive feedback on rejected manuscripts. Many authors revise and resubmit. We welcome second submissions after addressing our feedback.",
-      },
-      {
-        question: "Do you accept translated works?",
-        answer:
-          "Yes, we accept quality translations. Please ensure the translation rights are secured and include documentation of rights with your submission.",
-      },
-    ],
-  },
-  {
-    category: "Books & Distribution",
-    items: [
-      {
-        question: "Where will my book be available?",
-        answer:
-          "Your book will be available on Harglim Publishers platform, major online retailers (Amazon, Goodreads), and can be ordered through independent bookstores worldwide.",
-      },
-      {
-        question: "Can I print physical copies of my book?",
-        answer:
-          "Yes! We provide print-on-demand services. Physical copies can be printed in small batches or as orders come in, reducing printing costs.",
-      },
-      {
-        question: "Can I publish in multiple formats?",
-        answer:
-          "Yes, we support e-book (EPUB, PDF), paperback, hardcover, and audiobook formats. You can publish in one format initially and add others later.",
-      },
-      {
-        question: "Can I change my book after publishing?",
-        answer:
-          "Yes, you can update your manuscript, cover design, or book details. Changes typically go live within 24-48 hours.",
-      },
-    ],
-  },
-  {
-    category: "Rights & Copyright",
-    items: [
-      {
-        question: "Do I retain copyright of my book?",
-        answer:
-          "Yes, you retain full copyright. You grant us permission to publish and distribute, but you remain the sole copyright holder and owner of your work.",
-      },
-      {
-        question: "Can I sell my book elsewhere?",
-        answer:
-          "You can publish simultaneously with other platforms. We don't require exclusivity unless you choose our exclusive distribution program for enhanced royalties.",
-      },
-      {
-        question: "What if I want to remove my book?",
-        answer:
-          "You can unpublish your book anytime from your author dashboard. Published copies remain active, but new orders won't be processed after unpublishing.",
-      },
-    ],
-  },
-];
 
 export default function FAQPage() {
   const [openIndex, setOpenIndex] = useState<number | null>(0);
-  // FAQs come from the shared site content (GET /content → faq / faqsJson), loaded once by
-  // SiteContentProvider; the categories above are shown until an admin saves FAQs.
+  // FAQs come from the shared site content (GET /content → faq / faqsJson, edited in Admin →
+  // Site Content). Categorised [{ category, items }] or a flat question list both work.
   const { content } = useSiteContent();
   const faqCategories = useMemo(() => {
-    const raw = editedContent(content, "faqsJson");
-    if (!raw) return defaultFaqCategories;
-    try {
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed) || parsed.length === 0) return defaultFaqCategories;
-      return parsed.some((item: any) => Array.isArray(item?.items))
-        ? parsed
-        : [{ category: "Frequently Asked Questions", items: parsed }];
-    } catch {
-      return defaultFaqCategories;
-    }
+    const toCategories = (raw?: string): { category: string; items: { question: string; answer: string }[] }[] => {
+      try {
+        const parsed = JSON.parse(raw || "");
+        if (!Array.isArray(parsed) || parsed.length === 0) return [];
+        return parsed.some((item: any) => Array.isArray(item?.items))
+          ? parsed
+          : [{ category: "Frequently Asked Questions", items: parsed }];
+      } catch {
+        return [];
+      }
+    };
+    const saved = toCategories(content?.faqsJson);
+    return saved.length > 0 ? saved : toCategories(defaultSiteContent.faqsJson);
   }, [content]);
 
   const fadeInUp = {

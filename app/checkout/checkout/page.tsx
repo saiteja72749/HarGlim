@@ -506,7 +506,13 @@ export default function CheckoutStepPage() {
                     <div className="aspect-square bg-white w-48 mx-auto rounded-2xl border-2 border-dashed border-[#E2E6DF] flex items-center justify-center mb-4 overflow-hidden shadow-xs">
                       {qrCodeDataUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element -- client-generated data URI; next/image adds no benefit here.
-                        <img src={qrCodeDataUrl} alt="UPI payment QR" className="w-full h-full object-contain p-2" />
+                        <img
+                          src={qrCodeDataUrl}
+                          alt="UPI payment QR"
+                          width={192}
+                          height={192}
+                          className="w-full h-full object-contain p-2"
+                        />
                       ) : (
                         <QrCode className="h-24 w-24 text-muted-foreground/30" />
                       )}

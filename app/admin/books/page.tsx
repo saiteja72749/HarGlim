@@ -356,7 +356,7 @@ export default function AdminBooksPage() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem asChild>
-                            <Link href={`/books/${book.id || book._id || book.slug}`}>
+                            <Link href={`/books/${book.slug || book._id || book.id}`}>
                               <Eye className="mr-2 h-4 w-4" />
                               View
                             </Link>
