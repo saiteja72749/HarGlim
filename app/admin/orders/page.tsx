@@ -5,12 +5,17 @@ import { useState, useEffect } from "react";
 import api from "@/lib/api";
 import { DELIVERY_PLANS, resolveCourierTrackingUrl } from "@/lib/couriers";
 import {
-  canAssignCourier,
+  canEditTracking,
   extractList,
   extractTrackingInfo,
   getShipmentLabel,
+  getShipmentStatusPath,
+  mergeShipmentsIntoOrders,
+  nextTrackingUrl,
+  normalizeShipmentStatus,
   shipmentBelongsToOrder,
 } from "@/lib/tracking";
+import { assignCourier } from "@/lib/shipment-actions";
 import { ErrorState } from "@/components/ui/error-state";
 import {
   Search,
@@ -135,6 +140,9 @@ function OrderItemsCell({ items }: { items: any[] }) {
             <img
               src={book?.coverImage || "/placeholder-book.svg"}
               alt=""
+              width={28}
+              height={40}
+              loading="lazy"
               className="h-10 w-7 rounded object-cover border border-[#E2E6DF] shrink-0 bg-[#F8F9F7]"
             />
             <div className="min-w-0">
@@ -304,8 +312,13 @@ export default function AdminOrdersPage() {
       if (statusFilter !== "all") params.status = statusFilter.toUpperCase();
       if (debouncedSearch) params.search = debouncedSearch;
 
-      const { data } = await api.get("/admin/orders", { params, cache: "no-store" } as any);
-      setOrders(extractList(data, "orders"));
+      // Tracking lives on the Shipment, not the Order, so shipments are merged in; without them
+      // the Tracking ID dialog reopened with the old value and saved IDs never showed here.
+      const [{ data }, shipmentsRes] = await Promise.all([
+        api.get("/admin/orders", { params, cache: "no-store" } as any),
+        api.get("/admin/shipments", { params: { limit: 100 }, cache: "no-store" } as any).catch(() => null),
+      ]);
+      setOrders(mergeShipmentsIntoOrders(extractList(data, "orders"), extractList(shipmentsRes?.data, "shipments")));
       setTotalOrders(typeof data?.pagination?.total === "number" ? data.pagination.total : null);
     } catch (err: any) {
       const status = err?.response?.status;
@@ -475,7 +488,7 @@ export default function AdminOrdersPage() {
         );
         return;
       }
-      if (!canAssignCourier(shipment.status)) {
+      if (!canEditTracking(shipment.status)) {
         toast.error(
           `This shipment is already "${getShipmentLabel(shipment.status)}". Update its progress from Shipments & Courier.`,
           { duration: 6000 }
@@ -485,23 +498,31 @@ export default function AdminOrdersPage() {
 
       // provider must be "manual" (courier adapters are placeholders); the backend builds the
       // tracking URL for India Post / Delhivery / BlueDart / DTDC / Ekart.
-      await api.post(`/admin/shipments/${shipmentId}/assign-courier`, {
-        provider: "manual",
-        courierName: courierInput.trim(),
-        serviceName: courierInput.trim(),
-        trackingNumber: finalTrackingNumber,
-        trackingUrl: resolvedTrackingUrl || undefined,
-      });
+      await assignCourier(
+        shipment,
+        {
+          provider: "manual",
+          courierName: courierInput.trim(),
+          serviceName: courierInput.trim(),
+          trackingNumber: finalTrackingNumber,
+          trackingUrl: resolvedTrackingUrl || undefined,
+        },
+        "admin-orders"
+      );
 
       // Mark it dispatched via the shipment (COURIER_ASSIGNED -> IN_TRANSIT). The backend then
-      // syncs the order to SHIPPED; the order status must not be updated separately.
+      // syncs the order to SHIPPED; the order status must not be updated separately. A shipment
+      // that is already in transit (only its AWB was corrected) needs no step.
+      const currentStatus = normalizeShipmentStatus(shipment.status) === "CREATED" ? "COURIER_ASSIGNED" : shipment.status;
       if (markDispatched) {
-        await api.post(`/admin/shipments/${shipmentId}/update-status`, {
-          status: "IN_TRANSIT",
-          description: `Dispatched via ${courierInput.trim()}`,
-          occurredAt: new Date().toISOString(),
-          metadata: { source: "admin-orders" },
-        });
+        for (const status of getShipmentStatusPath(currentStatus, "IN_TRANSIT")) {
+          await api.post(`/admin/shipments/${shipmentId}/update-status`, {
+            status,
+            description: `Dispatched via ${courierInput.trim()}`,
+            occurredAt: new Date().toISOString(),
+            metadata: { source: "admin-orders" },
+          });
+        }
       }
 
       toast.success(
@@ -802,10 +823,10 @@ export default function AdminOrdersPage() {
                                 setTrackingModalOpen(true);
                               }}
                               className="border-[#D4AF37] text-[#0F3D3E] hover:bg-[#D4AF37]/10 text-[11px] h-7 px-2.5 rounded-lg gap-1 font-semibold"
-                              title="Add Tracking ID"
+                              title={extractTrackingInfo(order).trackingNumber ? "Edit Tracking ID" : "Add Tracking ID"}
                             >
                               <Truck className="h-3 w-3 text-[#D4AF37]" />
-                              <span>Tracking ID</span>
+                              <span className="font-mono">{extractTrackingInfo(order).trackingNumber || "Tracking ID"}</span>
                             </Button>
                           </div>
                         </TableCell>
@@ -891,9 +912,8 @@ export default function AdminOrdersPage() {
                 value={trackingNumberInput}
                 onChange={(e) => {
                   const val = e.target.value;
+                  setTrackingUrlInput(nextTrackingUrl(courierInput, trackingNumberInput.trim(), val.trim(), trackingUrlInput));
                   setTrackingNumberInput(val);
-                  const autoUrl = resolveCourierTrackingUrl(courierInput, val);
-                  if (autoUrl) setTrackingUrlInput(autoUrl);
                 }}
                 className="font-mono text-sm border-[#E2E6DF] rounded-xl h-11"
               />

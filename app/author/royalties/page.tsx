@@ -17,17 +17,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuthStore } from "@/store/auth-store";
 import { useHashSection } from "@/hooks/use-hash-section";
 import toast from "react-hot-toast";
+import { listMyManualRoyalties, type ManualRoyaltyStatement } from "@/lib/manual-royalties";
+import { ManualRoyaltyTable } from "@/components/royalties/manual-royalty-table";
 
 export default function AuthorRoyaltiesPage() {
   const { user } = useAuthStore();
   const [royaltyEntries, setRoyaltyEntries] = useState<any[]>([]);
   const [settlements, setSettlements] = useState<any[]>([]);
+  // Royalty statements the publisher entered by hand (Admin → Manual Royalties).
+  const [manualStatements, setManualStatements] = useState<ManualRoyaltyStatement[]>([]);
   const [loading, setLoading] = useState(true);
   // "/author/royalties#settlements" (sidebar: Royalty Settlements) opens the settlements tab.
   const hash = useHashSection(!loading);
   const [activeTab, setActiveTab] = useState("sales");
   useEffect(() => {
-    setActiveTab(hash === "settlements" ? "settlements" : "sales");
+    setActiveTab(hash === "settlements" || hash === "statements" ? hash : "sales");
   }, [hash]);
   const [summaryData, setSummaryData] = useState<any>(null);
   const [openSettlementId, setOpenSettlementId] = useState<string | null>(null);
@@ -38,10 +42,12 @@ export default function AuthorRoyaltiesPage() {
     try {
       // Both lists are paginated (default 10); without a limit the totals only covered page 1.
       const listConfig = { params: { page: 1, limit: 100 }, cache: "no-store" } as any;
-      const [royaltiesRes, settlementsRes] = await Promise.allSettled([
+      const [royaltiesRes, settlementsRes, manualRes] = await Promise.allSettled([
         api.get("/authors/me/royalties", listConfig),
         api.get("/authors/me/royalty-settlements", listConfig),
+        listMyManualRoyalties(),
       ]);
+      setManualStatements(manualRes.status === "fulfilled" ? manualRes.value.filter((m) => m.status !== "VOID") : []);
 
       if (royaltiesRes.status === "fulfilled") {
         const rData = royaltiesRes.value.data?.data || royaltiesRes.value.data || [];
@@ -76,7 +82,7 @@ export default function AuthorRoyaltiesPage() {
       toast.error("No entries available to export.");
       return;
     }
-    const headers = ["Book Title", "Order", "Copies Sold", "Unit Price (INR)", "Line Revenue (INR)", "Royalty %", "Royalty (INR)", "Date"];
+    const headers = ["Book Title", "Order", "Copies Sold", "Unit Price (INR)", "Line Revenue (INR)", "Printing, Platform & Delivery (INR)", "Royalty (INR)", "Date"];
     // Quote every cell and double inner quotes so titles with commas/quotes stay in one column.
     const cell = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
     const rows = royaltyEntries.map((e) => [
@@ -85,7 +91,7 @@ export default function AuthorRoyaltiesPage() {
       getQty(e),
       getUnitPrice(e),
       getLineRevenue(e),
-      getRoyaltyPercent(e) ?? "unknown",
+      getRoyaltyPercent(e) !== null ? getDeductions(e) : "unknown",
       getRoyalty(e),
       getDate(e) ? new Date(getDate(e)).toLocaleDateString("en-IN") : "",
     ]);
@@ -202,6 +208,9 @@ export default function AuthorRoyaltiesPage() {
           <TabsTrigger value="settlements" className="rounded-lg text-xs font-semibold">
             Payout Settlements ({settlements.length})
           </TabsTrigger>
+          <TabsTrigger value="statements" className="rounded-lg text-xs font-semibold">
+            Publisher Statements ({manualStatements.length})
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="sales">
@@ -226,7 +235,7 @@ export default function AuthorRoyaltiesPage() {
                       <th className="py-3.5 px-4 text-center">Copies</th>
                       <th className="py-3.5 px-4 text-right">Price</th>
                       <th className="py-3.5 px-4 text-right">Revenue</th>
-                      <th className="py-3.5 px-4 text-right">Rate</th>
+                      <th className="py-3.5 px-4 text-right">Charges</th>
                       <th className="py-3.5 px-4 text-right">Royalty</th>
                       <th className="py-3.5 px-4 text-right">Date</th>
                     </tr>
@@ -246,7 +255,7 @@ export default function AuthorRoyaltiesPage() {
                         <td className="py-3 px-4 text-right text-[#5C6E6E]">₹{getUnitPrice(e).toLocaleString("en-IN")}</td>
                         <td className="py-3 px-4 text-right text-[#5C6E6E]">₹{getLineRevenue(e).toLocaleString("en-IN")}</td>
                         <td className="py-3 px-4 text-right text-[#5C6E6E]">
-                          {getRoyaltyPercent(e) !== null ? `${getRoyaltyPercent(e)}%` : (
+                          {getRoyaltyPercent(e) !== null ? `₹${getDeductions(e).toLocaleString("en-IN")}` : (
                             <span className="text-amber-700" title="Historical sale recorded before royalty rates were snapshotted">Unknown</span>
                           )}
                         </td>
@@ -336,6 +345,44 @@ export default function AuthorRoyaltiesPage() {
             )}
           </div>
         </TabsContent>
+
+        <TabsContent value="statements">
+          <div className="border border-[#E2E6DF] rounded-2xl bg-white overflow-hidden shadow-xs">
+            <div className="p-4 border-b border-[#E2E6DF] flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold text-[#0F3D3E] font-serif">Royalty Statements from the Publisher</h2>
+                <p className="text-[11px] text-[#5C6E6E]">For your information. Payouts are listed under Payout Settlements.</p>
+              </div>
+              {manualStatements.length > 0 && (
+                <span className="text-sm font-bold text-emerald-700 tabular-nums">
+                  ₹{manualStatements.reduce((sum, m) => sum + m.totalRoyalty, 0).toLocaleString("en-IN")} total
+                </span>
+              )}
+            </div>
+            {manualStatements.length === 0 ? (
+              <div className="py-16 text-center text-[#5C6E6E]">
+                <p className="text-xs">Sales and royalty details the publisher shares about your books (for example book fair or Amazon sales) appear here.</p>
+              </div>
+            ) : (
+              <div className="p-4 space-y-5">
+                {manualStatements.map((m) => (
+                  <div key={m.id} className="space-y-2">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-[#5C6E6E]">
+                      <span>
+                        {m.periodStart || m.periodEnd
+                          ? `${m.periodStart ? new Date(m.periodStart).toLocaleDateString("en-IN") : ""} – ${m.periodEnd ? new Date(m.periodEnd).toLocaleDateString("en-IN") : ""}`
+                          : "Royalty statement"}
+                        {m.createdAt ? ` · recorded ${new Date(m.createdAt).toLocaleDateString("en-IN")}` : ""}
+                      </span>
+                      {m.note && <span className="italic">{m.note}</span>}
+                    </div>
+                    <ManualRoyaltyTable statement={m} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </TabsContent>
       </Tabs>
 
       <SettlementDetailDialog settlementId={openSettlementId} onClose={() => setOpenSettlementId(null)} />
@@ -362,6 +409,8 @@ const getRoyaltyPercent = (e: any): number | null => {
   const p = e.royaltyPercentage ?? e.royaltyPercentageSnapshot ?? e.royaltyRate;
   return p === null || p === undefined || p === "" ? null : Number(p);
 };
+// Printing + platform + delivery charges taken out of the line before the author's royalty.
+const getDeductions = (e: any) => Math.max(0, Math.round((getLineRevenue(e) - getRoyalty(e)) * 100) / 100);
 const getDate = (e: any) => e.date || e.soldAt || e.paidAt || e.createdAt || "";
 
 const getSettlementAmount = (s: any) => num(s.totalRoyalty, s.amount, s.totalAmount, s.payoutAmount);

@@ -212,7 +212,14 @@ function TrackOrderContent() {
                       return (
                         <li key={item._id || i} className="flex items-center gap-3 p-3">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={book?.coverImage || "/placeholder-book.svg"} alt="" className="h-12 w-9 rounded object-cover border border-[#E2E6DF]" />
+                          <img
+                            src={book?.coverImage || "/placeholder-book.svg"}
+                            alt=""
+                            width={36}
+                            height={48}
+                            loading="lazy"
+                            className="h-12 w-9 rounded object-cover border border-[#E2E6DF]"
+                          />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-[#0F3D3E] truncate">
                               {book?.title ?? item.title ?? "Book no longer available"}

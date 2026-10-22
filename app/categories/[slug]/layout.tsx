@@ -1,4 +1,6 @@
 import { Metadata } from 'next';
+import { notFound } from 'next/navigation';
+import { serializeJsonLd } from '@/lib/json-ld';
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -6,10 +8,12 @@ type Props = {
 };
 
 const getCategoryData = async (slug: string) => {
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
+  const res = await fetch(`${API_URL}/categories/${slug}`, { next: { revalidate: 300 } }).catch(() => null);
+  // A missing category is a real 404; network or server errors still render the page.
+  if (res?.status === 404) notFound();
+  if (!res?.ok) return null;
   try {
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
-    const res = await fetch(`${API_URL}/categories/${slug}`, { next: { revalidate: 3600 } });
-    if (!res.ok) return null;
     const data = await res.json();
     return data.data || data;
   } catch {
@@ -84,8 +88,8 @@ export default async function CategoryLayout({ children, params }: Props) {
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(collectionJsonLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbsJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(collectionJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(breadcrumbsJsonLd) }} />
       {children}
     </>
   );

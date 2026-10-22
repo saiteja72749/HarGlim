@@ -36,9 +36,15 @@ export function invalidateApiCache(match: string | RegExp) {
 const rawGet = api.get.bind(api);
 api.get = ((url: string, config: any = {}) => {
   const noStore = config?.cache === 'no-store' || config?.headers?.['Cache-Control'] === 'no-store';
+  const hasAuthorizationHeader = Boolean(
+    config?.headers?.Authorization || config?.headers?.authorization
+  );
+  const hasSessionToken =
+    typeof window !== 'undefined' && Boolean(useAuthStore.getState().token);
+  const cacheable = !noStore && !hasAuthorizationHeader && !hasSessionToken;
   const cacheKey = getCacheKey(url, config?.params);
 
-  if (!noStore) {
+  if (cacheable) {
     const cached = responseCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       return Promise.resolve(cached.response);
@@ -59,7 +65,7 @@ api.get = ((url: string, config: any = {}) => {
         const cached = responseCache.get(cacheKey);
         if (cached) return cached.response;
       }
-      if (!noStore && response.status >= 200 && response.status < 300) {
+      if (cacheable && response.status >= 200 && response.status < 300) {
         responseCache.set(cacheKey, { response, expiresAt: Date.now() + GET_CACHE_MS });
       }
       return response;
@@ -68,7 +74,7 @@ api.get = ((url: string, config: any = {}) => {
       inflightGetRequests.delete(cacheKey);
     });
 
-  if (!noStore) {
+  if (cacheable) {
     inflightGetRequests.set(cacheKey, request);
   }
 
@@ -76,6 +82,7 @@ api.get = ((url: string, config: any = {}) => {
 }) as typeof api.get;
 
 let isRefreshing = false;
+let refreshingSessionToken: string | null = null;
 let failedQueue: Array<{ resolve: (token: string) => void; reject: (err: any) => void }> = [];
 
 const processQueue = (error: any, token: string | null = null) => {
@@ -128,7 +135,11 @@ api.interceptors.response.use(
       !originalRequest.url?.includes('/auth/google') &&
       !originalRequest.url?.includes('/auth/refresh')
     ) {
+      const currentSession = useAuthStore.getState();
       if (isRefreshing) {
+        if (currentSession.refreshToken !== refreshingSessionToken) {
+          return Promise.reject(error);
+        }
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
         })
@@ -142,19 +153,24 @@ api.interceptors.response.use(
       originalRequest._retry = true;
       isRefreshing = true;
 
-      const { refreshToken, logout, login, user } = useAuthStore.getState();
+      const { refreshToken, logout, login, user } = currentSession;
 
       if (!refreshToken) {
         logout();
         isRefreshing = false;
         return Promise.reject(error);
       }
+      refreshingSessionToken = refreshToken;
 
       try {
         const { data } = await axios.post(`${API_URL}/auth/refresh`, { refreshToken });
         const newAccessToken = data?.data?.token || data?.token;
         const newRefreshToken = data?.data?.refreshToken || data?.refreshToken || refreshToken;
         const expiresAt = data?.data?.refreshTokenExpiresAt || data?.refreshTokenExpiresAt;
+
+        if (useAuthStore.getState().refreshToken !== refreshToken) {
+          throw new Error('Session changed during token refresh');
+        }
 
         if (newAccessToken && user) {
           login(user, newAccessToken, newRefreshToken, expiresAt);
@@ -166,10 +182,13 @@ api.interceptors.response.use(
         }
       } catch (refreshErr) {
         processQueue(refreshErr, null);
-        logout();
+        if (useAuthStore.getState().refreshToken === refreshToken) {
+          logout();
+        }
         return Promise.reject(refreshErr);
       } finally {
         isRefreshing = false;
+        refreshingSessionToken = null;
       }
     }
 
@@ -218,11 +237,15 @@ api.interceptors.response.use(
  * Bootstrap / Sync User Context (Capabilities, States, User info)
  * Call this immediately after Google or Password login.
  */
-let contextRequest: Promise<UserContextData | null> | null = null;
+let contextRequest: {
+  token: string;
+  promise: Promise<UserContextData | null>;
+} | null = null;
 
 export async function bootstrapUserContext(overrideToken?: string): Promise<UserContextData | null> {
-  // Collapse concurrent callers (layout mount + page action) into one request.
-  if (contextRequest && !overrideToken) return contextRequest;
+  const requestToken = overrideToken || useAuthStore.getState().token;
+  if (!requestToken) return null;
+  if (contextRequest?.token === requestToken) return contextRequest.promise;
 
   const { setContextStatus } = useAuthStore.getState();
   setContextStatus('loading');
@@ -238,6 +261,8 @@ export async function bootstrapUserContext(overrideToken?: string): Promise<User
       const { data } = await api.get('/users/me/context', { headers, cache: 'no-store' } as any);
       const contextData: UserContextData = data?.data || data;
 
+      if (useAuthStore.getState().token !== requestToken) return null;
+
       if (contextData && contextData.capabilities) {
         useAuthStore.getState().setUserContext(contextData);
         setContextStatus('ready');
@@ -246,16 +271,20 @@ export async function bootstrapUserContext(overrideToken?: string): Promise<User
       setContextStatus('error');
       return null;
     } catch (error) {
-      console.error('Failed to fetch user context:', error);
-      setContextStatus('error');
+      if (useAuthStore.getState().token === requestToken) {
+        console.error('Failed to fetch user context:', error);
+        setContextStatus('error');
+      }
       return null;
-    } finally {
-      contextRequest = null;
     }
   })();
 
-  contextRequest = request;
-  return request;
+  contextRequest = { token: requestToken, promise: request };
+  try {
+    return await request;
+  } finally {
+    if (contextRequest?.promise === request) contextRequest = null;
+  }
 }
 
 export default api;

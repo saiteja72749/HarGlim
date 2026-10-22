@@ -113,3 +113,15 @@ export function getBookAuthorInfo(book: any): {
   return { name: "Harglim Author", id: null, hasProfile: false };
 }
 
+
+/**
+ * Throwaway password for author accounts an admin creates; it is never shown, and the author
+ * sets their own through Forgot Password. Uses the browser CSPRNG, not Math.random.
+ */
+export function generateTempPassword(): string {
+  const bytes = new Uint8Array(18);
+  crypto.getRandomValues(bytes);
+  const body = Array.from(bytes, (b) => b.toString(36).padStart(2, "0")).join("").slice(0, 20);
+  // Satisfies upper/lower/digit/symbol password rules.
+  return `Hg#${body}Aa1`;
+}

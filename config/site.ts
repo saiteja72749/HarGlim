@@ -1,7 +1,7 @@
 export const siteConfig = {
   name: "Harglim Publishers",
-  description: "Empowering authors and delighting readers since 2020. We bring stories to life with professional publishing services.",
-  url: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+  description: "Helping authors publish their work and connecting readers with stories from emerging writers.",
+  url: process.env.NEXT_PUBLIC_APP_URL || "https://harglim.com",
   contact: {
     email: "harglimpublication@gmail.com",
     supportEmail: "harglim.support@gmail.com",

@@ -9,7 +9,6 @@ import {
   Users,
   ShoppingBag,
   FileText,
-  DollarSign,
   Menu,
   BookOpen,
   X,
@@ -70,7 +69,9 @@ const sidebarSections = [
   {
     title: "FINANCE & AUDIT",
     items: [
-      { href: "/admin/settlements", label: "Royalty Settlements", icon: DollarSign },
+      // Temporarily hidden until manual-royalty deployment is validated; restore this entry if settlements return.
+      // { href: "/admin/settlements", label: "Royalty Settlements", icon: DollarSign },
+      { href: "/admin/royalties", label: "Manual Royalties", icon: FileText },
       { href: "/admin/invoices", label: "Invoices", icon: Receipt },
       { href: "/admin/analytics", label: "Platform Analytics", icon: BarChart3 },
       { href: "/admin/notifications", label: "Notifications Log", icon: Bell },
@@ -151,7 +152,7 @@ export default function AdminLayout({
                 {user?.email && <p className="text-[10px] text-white/60 truncate">{user.email}</p>}
                 <div className="mt-1">
                   <span className="inline-block px-2 py-0.5 text-[9px] uppercase font-bold tracking-wider rounded bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40">
-                    Super Admin
+                    {user?.role?.replace(/_/g, " ") || "Admin"}
                   </span>
                 </div>
               </div>
@@ -238,7 +239,7 @@ export default function AdminLayout({
               >
                 <Menu className="h-5 w-5" />
               </Button>
-              <span className="font-serif font-bold text-lg text-[#0F3D3E]">
+              <span className="min-w-0 truncate font-serif font-bold text-sm sm:text-lg text-[#0F3D3E]">
                 Publishing Operations Control Panel
               </span>
             </div>

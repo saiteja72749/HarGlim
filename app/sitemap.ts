@@ -1,7 +1,33 @@
 import { MetadataRoute } from 'next';
 
+type SitemapRecord = {
+  slug?: string;
+  _id?: string;
+  updatedAt?: string;
+  name?: string;
+};
+
+function isSitemapRecord(value: unknown): value is SitemapRecord {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    (record.slug === undefined || typeof record.slug === 'string') &&
+    (record._id === undefined || typeof record._id === 'string') &&
+    (record.updatedAt === undefined || typeof record.updatedAt === 'string') &&
+    (record.name === undefined || typeof record.name === 'string')
+  );
+}
+
+function getRecords(value: unknown): SitemapRecord[] {
+  if (Array.isArray(value)) return value.filter(isSitemapRecord);
+  if (typeof value === 'object' && value !== null && 'data' in value) {
+    return getRecords(value.data);
+  }
+  return [];
+}
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://harglim.com'; // Fallback to production URL if env is missing
+  const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://harglim.com').replace(/\/+$/, '');
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
 
   try {
@@ -25,51 +51,59 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     if (categoriesRes && !categoriesRes.ok) console.error(`sitemap: categories request returned ${categoriesRes.status}`);
     if (authorsRes && !authorsRes.ok) console.error(`sitemap: authors request returned ${authorsRes.status}`);
 
-    const booksData = booksRes && booksRes.ok ? await booksRes.json() : { data: [] };
-    const categoriesData = categoriesRes && categoriesRes.ok ? await categoriesRes.json() : { data: [] };
-    const authorsData = authorsRes && authorsRes.ok ? await authorsRes.json() : { data: [] };
-
-    const books = Array.isArray(booksData?.data) ? booksData.data : (Array.isArray(booksData) ? booksData : []);
-    const categories = Array.isArray(categoriesData?.data) ? categoriesData.data : (Array.isArray(categoriesData) ? categoriesData : []);
-    const authors = Array.isArray(authorsData?.data) ? authorsData.data : (Array.isArray(authorsData) ? authorsData : []);
+    const [booksData, categoriesData, authorsData] = await Promise.all([
+      booksRes?.ok ? booksRes.json() as Promise<unknown> : [],
+      categoriesRes?.ok ? categoriesRes.json() as Promise<unknown> : [],
+      authorsRes?.ok ? authorsRes.json() as Promise<unknown> : [],
+    ]);
+    const books = getRecords(booksData);
+    const categories = getRecords(categoriesData);
+    const authors = getRecords(authorsData);
 
     const sitemapEntries: MetadataRoute.Sitemap = [
-      { url: `${baseUrl}`, lastModified: new Date() },
-      { url: `${baseUrl}/about`, lastModified: new Date() },
-      { url: `${baseUrl}/contact`, lastModified: new Date() },
-      { url: `${baseUrl}/publish`, lastModified: new Date() },
-      { url: `${baseUrl}/books`, lastModified: new Date() },
-      { url: `${baseUrl}/authors`, lastModified: new Date() },
-      { url: `${baseUrl}/categories`, lastModified: new Date() },
+      { url: `${baseUrl}/` },
+      { url: `${baseUrl}/about` },
+      { url: `${baseUrl}/author-guidelines` },
+      { url: `${baseUrl}/careers` },
+      { url: `${baseUrl}/contact` },
+      { url: `${baseUrl}/faq` },
+      { url: `${baseUrl}/publish` },
+      { url: `${baseUrl}/royalty-info` },
+      { url: `${baseUrl}/returns` },
+      { url: `${baseUrl}/terms` },
+      { url: `${baseUrl}/privacy` },
+      { url: `${baseUrl}/books` },
+      { url: `${baseUrl}/authors` },
+      { url: `${baseUrl}/categories` },
     ];
 
     // Add books
-    books.forEach((book: any) => {
+    books.forEach((book) => {
       if (book.slug || book._id) {
         sitemapEntries.push({
           url: `${baseUrl}/books/${book.slug || book._id}`,
-          lastModified: new Date(book.updatedAt || new Date()),
+          ...(book.updatedAt ? { lastModified: new Date(book.updatedAt) } : {}),
         });
       }
     });
 
     // Add categories
-    categories.forEach((cat: any) => {
-      if (cat.slug || cat.name) {
-        const slug = cat.slug || cat.name.toLowerCase().replace(/ /g, '-');
+    categories.forEach((cat) => {
+      const slug = cat.slug || cat.name?.toLowerCase().replace(/ /g, '-');
+      if (slug) {
         sitemapEntries.push({
           url: `${baseUrl}/categories/${slug}`,
-          lastModified: new Date(cat.updatedAt || new Date()),
+          ...(cat.updatedAt ? { lastModified: new Date(cat.updatedAt) } : {}),
         });
       }
     });
 
     // Add authors
-    authors.forEach((author: any) => {
+    authors.forEach((author) => {
       if (author._id) {
         sitemapEntries.push({
           url: `${baseUrl}/authors/${author._id}`,
-          lastModified: new Date(author.updatedAt || new Date()),
+          ...(author.updatedAt ? { lastModified: new Date(author.updatedAt) } : {}),
         });
       }
     });
@@ -78,8 +112,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   } catch (error) {
     console.error('sitemap: falling back to static sitemap after unexpected error', error);
     return [
-      { url: `${baseUrl}`, lastModified: new Date() },
-      { url: `${baseUrl}/books`, lastModified: new Date() },
+      { url: `${baseUrl}/` },
+      { url: `${baseUrl}/books` },
     ];
   }
 }

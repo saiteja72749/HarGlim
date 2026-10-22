@@ -1,5 +1,6 @@
 import coreWebVitals from 'eslint-config-next/core-web-vitals';
 import nextTypescript from 'eslint-config-next/typescript';
+import reactHooks from 'eslint-plugin-react-hooks';
 
 const eslintConfig = [
   ...coreWebVitals,
@@ -8,6 +9,7 @@ const eslintConfig = [
     ignores: [
       'node_modules/**',
       '.next/**',
+      '.netlify/**',
       'tests-e2e/**',
       'playwright-report/**',
       'test-results/**',
@@ -15,6 +17,9 @@ const eslintConfig = [
     ],
   },
   {
+    plugins: {
+      'react-hooks': reactHooks,
+    },
     rules: {
       // Respect the `_`-prefix convention for intentionally-unused
       // bindings (matches tsconfig's noUnusedLocals/noUnusedParameters).

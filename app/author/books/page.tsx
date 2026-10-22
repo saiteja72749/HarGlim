@@ -15,6 +15,7 @@ import api from "@/lib/api";
 import { extractList } from "@/lib/tracking";
 import { useAuthStore } from "@/store/auth-store";
 import toast from "react-hot-toast";
+import { bookRoyaltyPerCopy } from "@/lib/royalty";
 import { getCategoryDisplayName } from "@/lib/categories";
 
 export default function AuthorBooksPage() {
@@ -199,9 +200,8 @@ const isPublished = (book: any) => String(book.status || "").toLowerCase() === "
 
 function BookRow({ book, index }: { book: any; index: number }) {
   const priceVal = book.mrp || book.price || 0;
-  // royaltyPercentage is set by the publisher; never invent one when it is missing.
-  const royaltyPerc = typeof book.royaltyPercentage === "number" ? book.royaltyPercentage : null;
-  const unitRoyalty = royaltyPerc !== null ? Math.round((priceVal * royaltyPerc) / 100) : null;
+  // MRP − printing − platform − delivery, set by the publisher; never invented when missing.
+  const unitRoyalty = bookRoyaltyPerCopy(book);
   const knownRoyalty =
     book.performance?.knownRoyalty ??
     book.performance?.knownAccruedRoyalty ??
@@ -218,7 +218,7 @@ function BookRow({ book, index }: { book: any; index: number }) {
       <TableCell>
         <div className="flex items-center gap-3">
           <Image
-            src={book.coverImage && (book.coverImage.startsWith("http") || book.coverImage.startsWith("/")) ? book.coverImage : "/logo.webp"}
+            src={book.coverImage && (book.coverImage.startsWith("http") || book.coverImage.startsWith("/")) ? book.coverImage : "/logo.png"}
             alt={book.title}
             width={40}
             height={56}
@@ -244,10 +244,7 @@ function BookRow({ book, index }: { book: any; index: number }) {
       </TableCell>
       <TableCell>
         {unitRoyalty !== null ? (
-          <>
-            <span className="font-mono font-bold text-emerald-700">₹{unitRoyalty}</span>
-            <span className="text-[10px] text-[#5C6E6E] block font-mono">({royaltyPerc}%)</span>
-          </>
+          <span className="font-mono font-bold text-emerald-700">₹{unitRoyalty.toLocaleString("en-IN")}</span>
         ) : (
           <span className="text-[11px] text-[#5C6E6E] italic">Set on approval</span>
         )}

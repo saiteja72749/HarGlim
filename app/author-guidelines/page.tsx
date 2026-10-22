@@ -11,6 +11,9 @@ import {
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { editedContent, useSiteContent } from "@/context/site-content-context";
+import { readSection } from "@/lib/page-content";
+
+const GUIDELINE_ICONS = [FileText, BookOpen, Users];
 
 export default function AuthorGuidelinesPage() {
   const { content } = useSiteContent();
@@ -20,78 +23,13 @@ export default function AuthorGuidelinesPage() {
     visible: { opacity: 1, y: 0, transition: { duration: 0.6 } },
   };
 
-  const guidelines = [
-    {
-      title: "Manuscript Requirements",
-      icon: FileText,
-      items: [
-        "Minimum 30,000 words for novels",
-        "Minimum 20,000 words for non-fiction",
-        "Microsoft Word (.doc, .docx) or PDF format",
-        "Double-spaced, 12pt font (Times New Roman or Arial)",
-        "Standard margins (1 inch on all sides)",
-        "Single paragraph indentation, not tab indentation",
-      ],
-    },
-    {
-      title: "Content Guidelines",
-      icon: BookOpen,
-      items: [
-        "Original, unpublished work only",
-        "No plagiarism or copyright infringement",
-        "Appropriate for the target audience",
-        "Professional quality writing",
-        "Clear narrative structure and flow",
-        "Proper grammar and spelling throughout",
-      ],
-    },
-    {
-      title: "Writing Standards",
-      icon: Users,
-      items: [
-        "Consistent voice and tone",
-        "Well-developed characters and plot",
-        "Engaging opening and compelling ending",
-        "Proper chapter breaks and organization",
-        "Minimal plot holes or inconsistencies",
-        "Age-appropriate content for target market",
-      ],
-    },
-  ];
+  const guidelines = readSection<{ title: string; items?: string[] }>(content, "guidelinesSectionsJson")
+    .map((item) => ({ ...item, items: item.items || [] }))
+    .map((item, idx) => ({ ...item, icon: GUIDELINE_ICONS[idx % GUIDELINE_ICONS.length] }));
 
-  const submissionSteps = [
-    {
-      step: 1,
-      title: "Create Account",
-      description:
-        "Register on Harglim Publishers and set up your author profile",
-    },
-    {
-      step: 2,
-      title: "Submit Manuscript",
-      description: "Upload your manuscript through the author dashboard",
-    },
-    {
-      step: 3,
-      title: "Initial Review",
-      description: "Our team reviews your work (7-14 days)",
-    },
-    {
-      step: 4,
-      title: "Editor Feedback",
-      description: "Receive detailed feedback and revision suggestions",
-    },
-    {
-      step: 5,
-      title: "Revisions",
-      description: "Make necessary revisions and resubmit",
-    },
-    {
-      step: 6,
-      title: "Publication",
-      description: "Final approval and launch on our platform",
-    },
-  ];
+  const submissionSteps = readSection<{ title: string; description: string }>(content, "guidelinesStepsJson").map(
+    (item, idx) => ({ ...item, step: idx + 1 })
+  );
 
   return (
     <div className="bg-background">

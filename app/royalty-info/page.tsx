@@ -9,6 +9,9 @@ import {
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { editedContent, useSiteContent } from "@/context/site-content-context";
+import { readSection } from "@/lib/page-content";
+
+const SCHEDULE_ICONS = [TrendingUp, Calendar, DollarSign];
 
 export default function RoyaltyInfoPage() {
   const { content } = useSiteContent();
@@ -18,100 +21,24 @@ export default function RoyaltyInfoPage() {
     visible: { opacity: 1, y: 0, transition: { duration: 0.6 } },
   };
 
+  // Royalty per copy = MRP − printing cost − platform charges − delivery charges.
   const royaltyStructure = [
-    {
-      format: "Paperback",
-      percentage: "40%",
-      description: "Standard royalty rate for printed editions",
-    },
-    {
-      format: "Hardcover",
-      percentage: "45%",
-      description: "Premium hardcover edition royalty",
-    },
-    {
-      format: "E-Book",
-      percentage: "50%",
-      description: "Highest royalty rate for digital editions",
-    },
-    {
-      format: "Audiobook",
-      percentage: "35%",
-      description: "Royalty for narrated audiobook versions",
-    },
+    { sign: "", label: "MRP", description: "The printed price of your book" },
+    { sign: "−", label: "Printing cost", description: "Cost of printing and binding each copy" },
+    { sign: "−", label: "Platform charges", description: "Payment gateway and marketplace fees" },
+    { sign: "−", label: "Delivery charges", description: "Packing and shipping the copy to the reader" },
+    { sign: "=", label: "Your royalty", description: "Everything that remains is paid to you" },
   ];
 
-  const paymentSchedule = [
-    {
-      period: "Monthly",
-      description: "Sales data tracked daily and reported monthly",
-      icon: Calendar,
-    },
-    {
-      period: "Quarterly Payments",
-      description: "Royalties paid every three months",
-      icon: DollarSign,
-    },
-    {
-      period: "Minimum $50",
-      description: "Payments processed only when royalties exceed $50",
-      icon: TrendingUp,
-    },
-  ];
+  const paymentSchedule = readSection<{ title: string; description: string }>(content, "royaltyScheduleJson")
+    .map((item, idx) => ({ ...item, icon: SCHEDULE_ICONS[idx % SCHEDULE_ICONS.length] }));
 
-  const faqItems = [
-    {
-      question: "When do I receive my royalties?",
-      answer:
-        "Royalties are calculated monthly and paid quarterly. We process payments only when your accumulated royalties reach the minimum threshold of $50.",
-    },
-    {
-      question: "How are sales tracked?",
-      answer:
-        "Sales are tracked in real-time through our digital platform. You can view detailed sales reports, breakdowns by region, and revenue trends in your author dashboard.",
-    },
-    {
-      question: "Can royalty rates increase?",
-      answer:
-        "Yes! Bestselling authors (over 1,000 sales/month) can qualify for enhanced royalty rates. Contact our partnership team for more details.",
-    },
-    {
-      question: "What about international sales?",
-      answer:
-        "International sales are tracked separately and paid at the same royalty rate. We handle currency conversion and pay in INR or USD based on your preference.",
-    },
-    {
-      question: "Are there any deductions from royalties?",
-      answer:
-        "Royalties are net after production, distribution, and platform costs. No other deductions are applied.",
-    },
-    {
-      question: "How do I track my sales?",
-      answer:
-        "Log into your author dashboard anytime to view real-time sales data, earnings, and detailed analytics for each of your books.",
-    },
-  ];
+  const faqItems = readSection<{ question: string; answer: string }>(content, "royaltyFaqsJson");
 
-  const earningExample = [
-    {
-      scenario: "Paperback Sale",
-      retail: "₹399",
-      royalty: "₹160 (40%)",
-      note: "10 sales/month = ₹1,600",
-    },
-    {
-      scenario: "E-Book Sale",
-      retail: "₹199",
-      royalty: "₹100 (50%)",
-      note: "20 sales/month = ₹2,000",
-    },
-    {
-      scenario: "Hardcover Sale",
-      retail: "₹599",
-      royalty: "₹270 (45%)",
-      note: "5 sales/month = ₹1,350",
-    },
-  ];
+  const earningExample = readSection<{ scenario: string; retail: string; charges: string; royalty: string; note: string }>(
+    content,
+    "royaltyExamplesJson"
+  );
 
   return (
     <div className="bg-background">
@@ -146,14 +73,14 @@ export default function RoyaltyInfoPage() {
             className="text-center mb-16"
           >
             <h2 className="text-4xl font-serif font-bold text-foreground mb-4">
-              Royalty Rates by Format
+              How Your Royalty Is Calculated
             </h2>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              Competitive rates that reward your success
+              No fixed percentage: you earn what is left of the MRP after three charges
             </p>
           </motion.div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
             {royaltyStructure.map((item, index) => (
               <motion.div
                 key={index}
@@ -164,12 +91,12 @@ export default function RoyaltyInfoPage() {
                 className="bg-card rounded-2xl border border-border p-8 text-center hover:shadow-xl transition-all"
               >
                 <div className="mb-4">
-                  <div className="text-5xl font-bold text-secondary mb-2">
-                    {item.percentage}
+                  <div className="text-5xl font-bold text-secondary mb-2 h-12">
+                    {item.sign}
                   </div>
                 </div>
                 <h3 className="text-2xl font-bold text-foreground mb-3">
-                  {item.format}
+                  {item.label}
                 </h3>
                 <p className="text-muted-foreground">{item.description}</p>
               </motion.div>
@@ -208,7 +135,7 @@ export default function RoyaltyInfoPage() {
               >
                 <item.icon className="h-12 w-12 text-primary mb-4" />
                 <h3 className="text-2xl font-bold text-foreground mb-3">
-                  {item.period}
+                  {item.title}
                 </h3>
                 <p className="text-muted-foreground">{item.description}</p>
               </motion.div>
@@ -231,7 +158,7 @@ export default function RoyaltyInfoPage() {
               Earning Examples
             </h2>
             <p className="text-lg text-muted-foreground">
-              See what you could earn with different sales volumes
+              Illustrative figures; actual charges depend on each book&apos;s size and format
             </p>
           </motion.div>
 
@@ -250,7 +177,10 @@ export default function RoyaltyInfoPage() {
                       Scenario
                     </th>
                     <th className="px-6 py-4 text-left font-bold text-foreground">
-                      Retail Price
+                      MRP
+                    </th>
+                    <th className="px-6 py-4 text-left font-bold text-foreground">
+                      Printing, Platform &amp; Delivery
                     </th>
                     <th className="px-6 py-4 text-left font-bold text-foreground">
                       Your Royalty
@@ -271,6 +201,9 @@ export default function RoyaltyInfoPage() {
                       </td>
                       <td className="px-6 py-4 text-muted-foreground">
                         {row.retail}
+                      </td>
+                      <td className="px-6 py-4 text-muted-foreground">
+                        − {row.charges}
                       </td>
                       <td className="px-6 py-4 text-secondary font-bold">
                         {row.royalty}

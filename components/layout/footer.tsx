@@ -79,7 +79,7 @@ export function Footer() {
               </span>
             </Link>
             <p className="text-white/70 mb-4 max-w-sm">
-              Empowering authors and delighting readers since 2020. We bring
+              Empowering authors and delighting readers. We bring
               stories to life with professional publishing services.
             </p>
             <div className="space-y-2 text-sm text-white/70">

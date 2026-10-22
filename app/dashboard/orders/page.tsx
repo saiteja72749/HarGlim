@@ -1094,7 +1094,13 @@ function OrderPaymentQr({ userId, order, payment }: { userId: string; order: any
     <div className="flex flex-col items-center bg-white p-3 rounded-xl border-2 border-[#D4AF37] shadow-sm w-40 shrink-0">
       {state === "ready" ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={qr} alt={`UPI QR for order ${order.orderNumber || ""}`} className="h-32 w-32 object-contain" />
+        <img
+          src={qr}
+          alt={`UPI QR for order ${order.orderNumber || ""}`}
+          width={128}
+          height={128}
+          className="h-32 w-32 object-contain"
+        />
       ) : state === "loading" ? (
         <div className="h-32 w-32 flex items-center justify-center">
           <span className="h-6 w-6 border-2 border-[#0F3D3E] border-t-transparent rounded-full animate-spin" />

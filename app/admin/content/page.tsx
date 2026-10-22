@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import { useSiteContent, SiteContent, defaultSiteContent } from "@/context/site-content-context";
+import { PAGE_SECTION_FIELDS, pageSectionDefaults } from "@/lib/page-content";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,7 @@ import {
   Trash2,
   CheckCircle2,
   Loader2,
+  LayoutList,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuthStore } from "@/store/auth-store";
@@ -35,14 +37,24 @@ export default function AdminContentPage() {
   const [formData, setFormData] = useState<SiteContent>(globalContent);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
-  const [activeTab, setActiveTab] = useState<"home" | "contact" | "publish" | "about" | "admin-profile">("home");
+  const [activeTab, setActiveTab] = useState<"home" | "contact" | "publish" | "about" | "sections" | "admin-profile">("home");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Public GET /content leaves out admin-only fields, so the admin photo is read from
+  // GET /admin/content; without it every save would send an empty photo and clear it.
+  const [adminProfileImage, setAdminProfileImage] = useState("");
+  useEffect(() => {
+    api
+      .get("/admin/content", { cache: "no-store" } as any)
+      .then(({ data }) => setAdminProfileImage((data?.data ?? data)?.adminProfileImage || ""))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (globalContent) {
-      setFormData(globalContent);
+      setFormData({ ...globalContent, adminProfileImage });
     }
-  }, [globalContent]);
+  }, [globalContent, adminProfileImage]);
 
   const handlePhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -117,6 +129,17 @@ export default function AdminContentPage() {
       return;
     }
 
+    // Validate Page Sections JSON (each must be a list)
+    for (const field of PAGE_SECTION_FIELDS) {
+      try {
+        if (!Array.isArray(JSON.parse(formData[field.key] || "[]"))) throw new Error("not a list");
+      } catch {
+        setActiveTab("sections");
+        toast.error(`${field.page} → ${field.label}: must be a valid JSON list.`);
+        return;
+      }
+    }
+
     // Validate FAQs JSON
     try {
       if (formData.faqsJson) {
@@ -136,8 +159,20 @@ export default function AdminContentPage() {
           profilePicture: formData.adminProfileImage,
         });
       }
-      await updateContent(formData);
-      toast.success("Site content saved & updated live globally!");
+      const notSaved = await updateContent(formData);
+      setAdminProfileImage(formData.adminProfileImage || "");
+      if (notSaved.length > 0) {
+        // The editor now shows what the backend stored, so these fields reverted.
+        console.warn("Site content fields not stored by the backend:", notSaved);
+        toast.error(
+          `Saved, but the server did not keep ${notSaved.length} field(s): ${notSaved.slice(0, 5).join(", ")}${
+            notSaved.length > 5 ? ", …" : ""
+          }. They still show the previous value.`,
+          { duration: 10000 }
+        );
+      } else {
+        toast.success("Site content saved & updated live globally!");
+      }
     } catch (err) {
       console.error("Failed to update site content:", err);
       toast.error("Failed to save site content.");
@@ -236,6 +271,18 @@ export default function AdminContentPage() {
         >
           <HelpCircle className="h-4 w-4" />
           <span>About Us & FAQs</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("sections")}
+          className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition-all whitespace-nowrap ${
+            activeTab === "sections"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <LayoutList className="h-4 w-4" />
+          <span>Page Sections</span>
         </button>
 
         <button
@@ -414,6 +461,16 @@ export default function AdminContentPage() {
                     onChange={(e) => setFormData({ ...formData, contactHours: e.target.value })}
                   />
                 </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="careersEmail">Careers Email (Careers page)</Label>
+                  <Input
+                    id="careersEmail"
+                    type="email"
+                    value={formData.careersEmail}
+                    onChange={(e) => setFormData({ ...formData, careersEmail: e.target.value })}
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -539,8 +596,8 @@ export default function AdminContentPage() {
               <div>
                 <CardTitle className="text-lg">Publishing Packages (JSON Format)</CardTitle>
                 <CardDescription>
-                  Display copy only. The Publish page shows it only while no real package exists. Packages authors can
-                  select (and that are saved on manuscripts) are managed in{" "}
+                  These cards are shown on the Publish page as soon as you save. Each card is linked by name (or
+                  price) to a package authors can select on manuscript submission, managed in{" "}
                   <a href="/admin/packages" className="font-semibold text-[#8A6D1E] underline underline-offset-2">
                     Publishing Packages
                   </a>
@@ -711,7 +768,11 @@ export default function AdminContentPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Frequently Asked Questions (JSON Format)</CardTitle>
-              <CardDescription>JSON array of questions and answers for the FAQ page.</CardDescription>
+              <CardDescription>
+                Used by the FAQ page and the home page. Either categories{" "}
+                <code>[{"{"} &quot;category&quot;, &quot;items&quot;: [{"{"} &quot;question&quot;, &quot;answer&quot; {"}"}] {"}"}]</code> or a
+                flat list of <code>{"{"} &quot;question&quot;, &quot;answer&quot; {"}"}</code>.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -725,6 +786,60 @@ export default function AdminContentPage() {
               </div>
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {/* ---------------- PAGE SECTIONS: long-form copy for every public page ---------------- */}
+      {activeTab === "sections" && (
+        <div className="space-y-6">
+          <p className="text-sm text-muted-foreground">
+            Lists shown on the public pages. Each box is JSON in the shape shown; icons are assigned automatically in
+            order. Click <strong>Save All Changes</strong> at the top to publish.
+          </p>
+          {PAGE_SECTION_FIELDS.map((field) => {
+            const value = formData[field.key] ?? "";
+            let status: { ok: boolean; text: string };
+            try {
+              const parsed = JSON.parse(value || "[]");
+              status = Array.isArray(parsed)
+                ? { ok: true, text: `Valid · ${parsed.length} item${parsed.length === 1 ? "" : "s"}` }
+                : { ok: false, text: "Must be a JSON list [ ... ]" };
+            } catch {
+              status = { ok: false, text: "Invalid JSON" };
+            }
+            return (
+              <Card key={field.key}>
+                <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-lg">
+                      {field.page} · {field.label}
+                    </CardTitle>
+                    <CardDescription className="font-mono text-[11px]">{field.shape}</CardDescription>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-xs gap-1.5"
+                    onClick={() => setFormData({ ...formData, [field.key]: pageSectionDefaults[field.key] })}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    Restore default
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <Textarea
+                    id={field.key}
+                    rows={10}
+                    className="font-mono text-xs bg-muted/30"
+                    value={value}
+                    onChange={(e) => setFormData({ ...formData, [field.key]: e.target.value })}
+                  />
+                  <p className={`text-xs font-semibold ${status.ok ? "text-emerald-700" : "text-destructive"}`}>{status.text}</p>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
 

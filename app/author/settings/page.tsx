@@ -326,6 +326,9 @@ export default function AuthorSettingsPage() {
                       <img
                         src={profileForm.profileImage || imagePreview}
                         alt={profileForm.name || "Author"}
+                        width={96}
+                        height={96}
+                        loading="lazy"
                         className="h-full w-full object-cover"
                         onError={() => setImgError(true)}
                       />
@@ -393,6 +396,8 @@ export default function AuthorSettingsPage() {
                         <img
                           src={imagePreview || profileForm.profileImage}
                           alt={profileForm.name || "Author Preview"}
+                          width={96}
+                          height={96}
                           className="h-full w-full object-cover"
                           onError={() => setImgError(true)}
                         />

@@ -29,7 +29,7 @@ export function BookCard({
 
   const initialImage = book.coverImage && (book.coverImage.startsWith("http") || book.coverImage.startsWith("/"))
     ? book.coverImage
-    : "/logo.webp";
+    : "/logo.png";
   const [imgSrc, setImgSrc] = useState<string>(initialImage);
   const [imageLoaded, setImageLoaded] = useState<boolean>(false);
   const [canHover, setCanHover] = useState<boolean>(false);
@@ -37,7 +37,7 @@ export function BookCard({
   useEffect(() => {
     const validSrc = book.coverImage && (book.coverImage.startsWith("http") || book.coverImage.startsWith("/"))
       ? book.coverImage
-      : "/logo.webp";
+      : "/logo.png";
     setImgSrc(validSrc);
   }, [book.coverImage]);
 
@@ -140,7 +140,7 @@ export function BookCard({
             
             <Image
               src={imgSrc}
-              onError={() => setImgSrc("/logo.webp")}
+              onError={() => setImgSrc("/logo.png")}
               alt={book.title}
               fill
               className={cn(
@@ -203,7 +203,7 @@ export function BookCard({
 
             <Image
               src={imgSrc}
-              onError={() => setImgSrc("/logo.webp")}
+              onError={() => setImgSrc("/logo.png")}
               alt={book.title}
               fill
               className={cn(
@@ -254,7 +254,7 @@ export function BookCard({
 
           <Image
             src={imgSrc}
-            onError={() => setImgSrc("/logo.webp")}
+            onError={() => setImgSrc("/logo.png")}
             alt={book.title}
             fill
             className={cn(

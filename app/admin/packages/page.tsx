@@ -4,7 +4,9 @@ import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import api from "@/lib/api";
 import { ErrorState } from "@/components/ui/error-state";
-import { Package, Search, Plus, Edit2, Archive, ArchiveRestore, Loader2, X } from "lucide-react";
+import { Package, Search, Plus, Edit2, Archive, ArchiveRestore, Loader2, X, Download } from "lucide-react";
+import { useSiteContent } from "@/context/site-content-context";
+import { packagesToImport, parsePackagesJson } from "@/lib/publish-packages";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,8 +17,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import toast from "react-hot-toast";
 
 // Real publishing package records (GET/POST/PATCH/DELETE /admin/publish-packages).
-// These are what authors pick on manuscript submission (sent as packageId); the CMS
-// packagesJson under Site Content is display copy only and is not managed here.
+// These are what authors pick on manuscript submission (sent as packageId). tagline / highlighted /
+// badge / sortOrder are the Publish page card copy (BACKEND_ALIGNMENT_REPORT.md §5); once the backend
+// stores them, the Publish page reads packages only from here instead of Site Content packagesJson.
 
 type PublishPackage = {
   _id: string;
@@ -25,6 +28,10 @@ type PublishPackage = {
   price: number;
   features: string[];
   isActive: boolean;
+  tagline?: string;
+  highlighted?: boolean;
+  badge?: string;
+  sortOrder?: number;
   updatedAt?: string;
 };
 
@@ -32,12 +39,23 @@ type StatusFilter = "all" | "active" | "archived";
 type SortOrder = "price_asc" | "price_desc";
 
 const PAGE_SIZE = 20;
-const emptyForm = { name: "", description: "", price: "", features: "", isActive: true };
+const emptyForm = {
+  name: "",
+  description: "",
+  price: "",
+  features: "",
+  isActive: true,
+  tagline: "",
+  highlighted: false,
+  badge: "",
+  sortOrder: "",
+};
 
 const formatPrice = (price: number) => `₹${Number(price || 0).toLocaleString("en-IN")}`;
 const errorMessage = (err: any, fallback: string) => err?.response?.data?.message || fallback;
 
 export default function AdminPackagesPage() {
+  const { content: siteContent } = useSiteContent();
   const [packages, setPackages] = useState<PublishPackage[]>([]);
   const [pagination, setPagination] = useState({ total: 0, page: 1, pages: 1 });
   const [loading, setLoading] = useState(true);
@@ -106,6 +124,10 @@ export default function AdminPackagesPage() {
       price: String(pkg.price ?? ""),
       features: (pkg.features || []).join("\n"),
       isActive: pkg.isActive !== false,
+      tagline: pkg.tagline || "",
+      highlighted: Boolean(pkg.highlighted),
+      badge: pkg.badge || "",
+      sortOrder: pkg.sortOrder != null ? String(pkg.sortOrder) : "",
     });
     setIsModalOpen(true);
   };
@@ -134,6 +156,11 @@ export default function AdminPackagesPage() {
         .map((line) => line.trim())
         .filter(Boolean),
       isActive: formData.isActive,
+      tagline: formData.tagline.trim(),
+      highlighted: formData.highlighted,
+      // Empty string (not undefined) so clearing the badge on edit is saved.
+      badge: formData.badge.trim(),
+      sortOrder: formData.sortOrder.trim() === "" ? undefined : Number(formData.sortOrder),
     };
 
     setSubmitting(true);
@@ -152,6 +179,70 @@ export default function AdminPackagesPage() {
       toast.error(errorMessage(err, "Could not save the package."));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // One click to turn the Publish page cards (Site Content packagesJson) into real packages,
+  // so authors can pick them on submission. Existing packages with the same name are left alone.
+  const [importing, setImporting] = useState(false);
+  const handleImportFromSiteContent = async () => {
+    const cards = parsePackagesJson(siteContent.packagesJson);
+    if (cards.length === 0) {
+      toast.error("Site Content → Publish has no package cards to import.");
+      return;
+    }
+
+    setImporting(true);
+    try {
+      const { data } = await api.get("/admin/publish-packages", { params: { limit: 100 }, cache: "no-store" } as any);
+      const existing: PublishPackage[] = Array.isArray(data?.data) ? data.data : [];
+      const toCreate = packagesToImport(cards, existing);
+      const notOnSite = existing.filter(
+        (pkg) => pkg.isActive && !cards.some((card) => card.name.trim().toLowerCase() === pkg.name.trim().toLowerCase())
+      );
+
+      if (toCreate.length === 0) {
+        toast.success("Every Publish page card already has a package with the same name.");
+      } else if (
+        window.confirm(
+          `Create ${toCreate.length} package(s) from the Publish page cards?\n\n${toCreate
+            .map((p) => `• ${p.name} — ${formatPrice(p.price)}`)
+            .join("\n")}\n\nThey are shown on the Publish page in this order.`
+        )
+      ) {
+        let created = 0;
+        for (const payload of toCreate) {
+          try {
+            await api.post("/admin/publish-packages", payload);
+            created++;
+          } catch (err: any) {
+            toast.error(`${payload.name}: ${errorMessage(err, "could not be created.")}`);
+          }
+        }
+        if (created > 0) toast.success(`${created} package(s) created.`);
+      }
+
+      // Packages not on the Publish page (e.g. demo data) would still be offered to authors.
+      if (
+        notOnSite.length > 0 &&
+        window.confirm(
+          `These active packages are not on the Publish page:\n\n${notOnSite
+            .map((p) => `• ${p.name} — ${formatPrice(p.price)}`)
+            .join("\n")}\n\nArchive them so authors can no longer pick them?`
+        )
+      ) {
+        for (const pkg of notOnSite) {
+          await api.delete(`/admin/publish-packages/${pkg._id}`).catch((err) => {
+            toast.error(`${pkg.name}: ${errorMessage(err, "could not be archived.")}`);
+          });
+        }
+      }
+      fetchPackages();
+    } catch (err: any) {
+      console.error("Failed to import publish packages:", err);
+      toast.error(errorMessage(err, "Could not import the packages."));
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -211,10 +302,22 @@ export default function AdminPackagesPage() {
             The packages authors choose when they submit a manuscript. Active packages also appear on the Publish page.
           </p>
         </div>
-        <Button onClick={openCreateModal} className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-bold gap-2 shadow-xs">
-          <Plus className="h-4 w-4" />
-          <span>Add Package</span>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={handleImportFromSiteContent}
+            disabled={importing}
+            className="font-bold gap-2"
+            title="Create a package for each Publish page card in Site Content"
+          >
+            {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            <span>Import from Site Content</span>
+          </Button>
+          <Button onClick={openCreateModal} className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-bold gap-2 shadow-xs">
+            <Plus className="h-4 w-4" />
+            <span>Add Package</span>
+          </Button>
+        </div>
       </div>
 
       <Card className="border border-[#E2E6DF] bg-white rounded-2xl shadow-2xs">
@@ -471,6 +574,53 @@ export default function AdminPackagesPage() {
                   onChange={(e) => setFormData({ ...formData, features: e.target.value })}
                   className="bg-[#F8F9F7] h-32 text-xs"
                 />
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="pkgTagline" className="font-bold uppercase tracking-wider text-[#5C6E6E] block">
+                  Card tagline (Publish page)
+                </label>
+                <Input
+                  id="pkgTagline"
+                  placeholder="Essential e-book & digital publishing starter kit"
+                  value={formData.tagline}
+                  onChange={(e) => setFormData({ ...formData, tagline: e.target.value })}
+                  className="bg-[#F8F9F7]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label htmlFor="pkgBadge" className="font-bold uppercase tracking-wider text-[#5C6E6E] block">
+                    Badge text
+                  </label>
+                  <Input
+                    id="pkgBadge"
+                    placeholder="Most Popular Choice"
+                    value={formData.badge}
+                    onChange={(e) => setFormData({ ...formData, badge: e.target.value })}
+                    className="bg-[#F8F9F7]"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label htmlFor="pkgSortOrder" className="font-bold uppercase tracking-wider text-[#5C6E6E] block">
+                    Display order
+                  </label>
+                  <Input
+                    id="pkgSortOrder"
+                    type="number"
+                    step="1"
+                    placeholder="1"
+                    value={formData.sortOrder}
+                    onChange={(e) => setFormData({ ...formData, sortOrder: e.target.value })}
+                    className="bg-[#F8F9F7]"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <span className="font-bold text-[#0F3D3E]">Highlight on Publish page</span>
+                <Switch checked={formData.highlighted} onCheckedChange={(val) => setFormData({ ...formData, highlighted: val })} />
               </div>
 
               <div className="flex items-center justify-between pt-1">

@@ -375,12 +375,21 @@ export default function AdminAuthorsPage() {
                       <ExternalLink className="h-3.5 w-3.5" />
                       <span>View Public Author Page</span>
                     </Link>
+                    {/* Temporarily hidden until manual-royalty deployment is validated; restore this action if settlements return.
                     <Link
                       href={`/admin/settlements`}
                       className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#0F3D3E]/10 hover:bg-[#0F3D3E]/20 font-bold text-[#0F3D3E]"
                     >
                       <DollarSign className="h-3.5 w-3.5" />
                       <span>Process Royalty Settlement</span>
+                    </Link>
+                    */}
+                    <Link
+                      href={`/admin/royalties?authorId=${encodeURIComponent(selectedAuthorId || "")}`}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#D4AF37]/15 hover:bg-[#D4AF37]/25 font-bold text-[#0F3D3E]"
+                    >
+                      <DollarSign className="h-3.5 w-3.5" />
+                      <span>Add Manual Royalty</span>
                     </Link>
                   </div>
                 </>

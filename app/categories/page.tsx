@@ -57,7 +57,7 @@ const getCategoryImage = (cat: any) => {
   if (cat.image && (cat.image.startsWith("http") || cat.image.startsWith("/")) && !cat.image.includes("placeholder")) {
     return cat.image;
   }
-  return "/logo.webp";
+  return "/logo.png";
 };
 
 export default function CategoriesPage() {
@@ -252,9 +252,10 @@ export default function CategoriesPage() {
                       <div className="relative aspect-[16/10] overflow-hidden bg-[#0F3D3E]">
                         <Image
                           src={bgImg}
-                          onError={(e: any) => { if (e?.target) e.target.src = "/logo.webp"; }}
+                          onError={(e: any) => { if (e?.target) e.target.src = "/logo.png"; }}
                           alt={category.name}
                           fill
+                          sizes="(max-width: 768px) 100vw, 50vw"
                           className="object-cover group-hover:scale-110 transition-transform duration-500 opacity-80"
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
@@ -300,6 +301,7 @@ export default function CategoriesPage() {
                           src={bgImg}
                           alt={category.name}
                           fill
+                          sizes="(max-width: 768px) 100vw, 50vw"
                           className="object-cover grayscale"
                         />
                         <div className="absolute inset-0 bg-black/60" />

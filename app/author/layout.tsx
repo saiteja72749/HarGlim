@@ -237,7 +237,7 @@ export default function AuthorLayout({
               >
                 <Menu className="h-5 w-5" />
               </Button>
-              <span className="font-serif font-bold text-lg text-[#0F3D3E]">
+              <span className="min-w-0 truncate font-serif font-bold text-sm sm:text-lg text-[#0F3D3E]">
                 Author Workspace & Publication Management
               </span>
             </div>

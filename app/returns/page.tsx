@@ -11,103 +11,27 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { useSiteContent } from "@/context/site-content-context";
+import { readSection } from "@/lib/page-content";
+
+const RETURN_ICONS = [Package, CheckCircle, DollarSign, Clock];
 
 export default function ReturnsPolicyPage() {
+  const { content } = useSiteContent();
   const fadeInUp = {
     hidden: { opacity: 0, y: 40 },
     visible: { opacity: 1, y: 0, transition: { duration: 0.6 } },
   };
 
-  const returnProcess = [
-    {
-      step: 1,
-      title: "Initiate Return",
-      description:
-        "Contact our support team within 30 days of receipt with your order number and reason for return.",
-      icon: Package,
-    },
-    {
-      step: 2,
-      title: "Approval",
-      description:
-        "We review your return request and provide you with a prepaid return shipping label.",
-      icon: CheckCircle,
-    },
-    {
-      step: 3,
-      title: "Ship Back",
-      description:
-        "Pack the book securely and ship it back using the provided label within 10 days.",
-      icon: DollarSign,
-    },
-    {
-      step: 4,
-      title: "Receive & Refund",
-      description:
-        "Once we receive and inspect the book, we process your refund within 5-7 business days.",
-      icon: Clock,
-    },
-  ];
+  const returnProcess = readSection<{ title: string; description: string }>(content, "returnsStepsJson").map(
+    (item, idx) => ({ ...item, step: idx + 1, icon: RETURN_ICONS[idx % RETURN_ICONS.length] })
+  );
 
-  const eligibleReasons = [
-    "Damaged or defective book",
-    "Book arrived in incorrect condition",
-    "Wrong book was sent",
-    "Book not as described in the listing",
-    "Printing quality issues",
-  ];
+  const eligibleReasons = readSection<string>(content, "returnsEligibleJson");
 
-  const nonEligibleReasons = [
-    "Change of mind (without defect)",
-    "Book shows signs of excessive reading or wear",
-    "Missing original packaging",
-    "Book has personal annotations",
-    "Damage caused after receipt",
-    "Item purchased more than 30 days ago",
-  ];
+  const nonEligibleReasons = readSection<string>(content, "returnsNotEligibleJson");
 
-  const faqItems = [
-    {
-      question: "What is the return window?",
-      answer:
-        "You have 30 days from the date of delivery to initiate a return. Return requests made after 30 days will not be accepted.",
-    },
-    {
-      question: "How do I know if my book is eligible for return?",
-      answer:
-        "Your book is eligible if it's defective, damaged, incorrect, or not as described. Books with signs of normal wear, personal use, or modifications are not eligible.",
-    },
-    {
-      question: "Do I need to pay for return shipping?",
-      answer:
-        "For eligible returns, we provide a prepaid return shipping label. You won't need to pay for return shipping.",
-    },
-    {
-      question: "Will I get a full refund?",
-      answer:
-        "Yes, for approved returns, you'll receive a full refund of the purchase price. This includes the original shipping cost.",
-    },
-    {
-      question: "How long does the refund process take?",
-      answer:
-        "Once we receive your returned book and verify its condition, we process the refund within 5-7 business days.",
-    },
-    {
-      question: "Can I exchange a book instead of returning it?",
-      answer:
-        "For defective books, we can arrange an exchange. Contact support to discuss exchange options.",
-    },
-    {
-      question: "What if my package is lost in transit?",
-      answer:
-        "Use the tracking number provided to file a claim with the carrier. Contact our support team for assistance.",
-    },
-    {
-      question: "Can I return e-books or digital products?",
-      answer:
-        "Digital products cannot be returned once downloaded. Physical books can be returned according to this policy.",
-    },
-  ];
+  const faqItems = readSection<{ question: string; answer: string }>(content, "returnsFaqsJson");
 
   return (
     <div className="bg-background">
