@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   defaultSiteContent,
   fromBackendContent,
+  invalidJsonField,
   toBackendPayload,
   unsavedKeys,
   type SiteContent,
@@ -63,6 +64,14 @@ describe("site content backend mapping", () => {
       expect.arrayContaining(["homeCtaHeading", "careersEmail", "aboutValuesJson", "socialFacebook"])
     );
     expect(unsavedKeys(edited, merged)).not.toContain("homeTitle");
+  });
+
+  it("flags the first Json field the backend would reject", () => {
+    expect(invalidJsonField(defaultSiteContent)).toBeNull();
+    expect(invalidJsonField({ faqsJson: '[{"q":1}]', aboutTeamJson: "{bad" })).toMatchObject({ key: "aboutTeamJson" });
+    expect(invalidJsonField({ termsSectionsJson: '{"a":1}' })).toEqual({ key: "termsSectionsJson", reason: "must be a JSON list [ … ]" });
+    expect(invalidJsonField({ privacySectionsJson: JSON.stringify(["x".repeat(110 * 1024)]) })).toMatchObject({ reason: "is larger than 100 KB" });
+    expect(invalidJsonField({ homeTitle: "{not json but not a Json key" })).toBeNull();
   });
 
   it("prefers flat keys over the content bag and ignores stored legacy defaults", () => {

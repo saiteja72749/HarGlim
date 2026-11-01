@@ -1,20 +1,32 @@
+import toast from "react-hot-toast";
 import api from "@/lib/api";
-import { generateTempPassword } from "@/lib/utils";
+
+/** Internal placeholder address for an author without an email; no invitation can reach it. */
+const isPlaceholderEmail = (email?: string) => /@harglim\.internal$/i.test(email || "");
 
 /**
- * POST /admin/users for a new author account.
- *
- * Sent without a password first so the backend can email the author an invite to set their own
- * (BACKEND_ALIGNMENT_REPORT.md §6). While the backend still requires a password, the 400 about it
- * triggers one retry with a throwaway password; the author then uses Forgot Password.
+ * Tells the admin whether the invitation email went out. POST /admin/users answers
+ * { invited, emailSent }; emailSent=false means the account exists but the mail failed.
  */
-export async function createAuthorUser(user: { name: string; email: string }) {
-  const body = { ...user, role: "author", isActive: true };
-  try {
-    return await api.post("/admin/users", body);
-  } catch (err: any) {
-    const message = JSON.stringify(err?.response?.data ?? "");
-    if (err?.response?.status !== 400 || !/password/i.test(message)) throw err;
-    return api.post("/admin/users", { ...body, password: generateTempPassword() });
+export function announceInvite(user: { email?: string; invited?: boolean; emailSent?: boolean } | null | undefined) {
+  if (!user?.invited || isPlaceholderEmail(user.email)) return;
+  if (user.emailSent === false) {
+    toast.error(`The invitation email to ${user.email} could not be sent. Use Resend Invite in Users & Accounts.`, { duration: 8000 });
+  } else {
+    toast.success(`Invitation sent to ${user.email}. The set-password link is valid for 7 days.`, { duration: 6000 });
   }
+}
+
+/** POST /admin/users without a password: the backend emails the author a set-password link. */
+export async function createAuthorUser(user: { name: string; email: string }) {
+  const res = await api.post("/admin/users", { ...user, role: "author", isActive: true });
+  announceInvite(res.data?.data);
+  return res;
+}
+
+/** POST /admin/users/{id}/resend-invite. 409 once the author has already set a password. */
+export async function resendAuthorInvite(userId: string) {
+  const { data } = await api.post(`/admin/users/${userId}/resend-invite`);
+  announceInvite(data?.data);
+  return data?.data;
 }

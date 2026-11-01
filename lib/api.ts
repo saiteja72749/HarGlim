@@ -105,6 +105,11 @@ api.interceptors.request.use(
         config.headers.Authorization = `Bearer ${state.token}`;
       }
     }
+    // With the instance's JSON default, axios would turn FormData into the JSON text
+    // {"document":{}} and the file would be lost. The browser sets multipart and its boundary.
+    if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+      config.headers.setContentType(false);
+    }
     return config;
   },
   (error) => {

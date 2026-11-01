@@ -1,9 +1,14 @@
+import api from "@/lib/api";
+import { notifyLiveChange, onLiveChange } from "@/lib/live-sync";
+
 /**
- * Publishing packages, shared by the Publish page and Admin → Publishing Packages.
+ * Publishing packages: one source of truth, the backend PublishPackage records.
  *
- * GET /publish-packages (public) and /admin/publish-packages hold the real records; their `_id`
- * is the packageId sent on manuscript submission. Site Content `packagesJson` is the older copy
- * of the Publish page cards, used until the real packages carry their own card copy.
+ *   Admin → Publishing Packages  →  POST/PATCH/DELETE /admin/publish-packages
+ *   Publish page, manuscript form →  GET /publish-packages (active only)
+ *
+ * A package's `_id` is the packageId sent on manuscript submission. Site Content `packagesJson`
+ * is legacy card text; it is only read by the admin's one-time "Import from Site Content".
  */
 
 export type PackageCard = {
@@ -18,7 +23,7 @@ export type PackageCard = {
   badge?: string;
   sortOrder?: number;
   isActive?: boolean;
-  isRealPackage?: boolean;
+  updatedAt?: string;
 };
 
 /**
@@ -48,25 +53,96 @@ export function parsePackagesJson(json: string | undefined): PackageCard[] {
   }
 }
 
-/**
- * True once an admin has given a real package its Publish page card copy. The backend returns
- * tagline / highlighted / badge / sortOrder on every package (empty by default), so their mere
- * presence says nothing; only filled-in values switch the Publish page to the real packages.
- */
-export const hasCardCopy = (p: Partial<PackageCard>) =>
-  Boolean(p.tagline?.trim() || p.badge?.trim() || p.highlighted === true || (typeof p.sortOrder === "number" && p.sortOrder > 0));
-
 const sortKey = (p: PackageCard) => (typeof p.sortOrder === "number" && p.sortOrder > 0 ? p.sortOrder : Number.MAX_SAFE_INTEGER);
 
-/** Real packages in Publish page order: sortOrder first (unset last), then price. */
-export const sortPackages = (list: PackageCard[]) => [...list].sort((a, b) => sortKey(a) - sortKey(b) || a.price - b.price);
+/** Display order everywhere (Publish page, manuscript form, admin list): sortOrder 1, 2, … then unset, then price. */
+export const sortPackages = <T extends PackageCard>(list: T[]) => [...list].sort((a, b) => sortKey(a) - sortKey(b) || a.price - b.price);
+
+/** Active packages in display order. Throws when the request fails, so pages can show a retry. */
+export async function fetchPublicPackages(): Promise<PackageCard[]> {
+  const { data } = await api.get("/publish-packages", { cache: "no-store" } as any);
+  return sortPackages(normalizePackages(data?.data ?? data));
+}
+
+/** Reload packages when an admin saves them in another tab, or when this tab regains focus. */
+export const onPackagesChanged = (reload: () => void) => onLiveChange("publish-packages", reload);
+
+/** Called by the admin page after every successful create, edit, archive or restore. */
+export const notifyPackagesChanged = () => notifyLiveChange("publish-packages");
+
+export type PackageForm = {
+  name: string;
+  description: string;
+  price: string;
+  features: string;
+  isActive: boolean;
+  tagline: string;
+  highlighted: boolean;
+  badge: string;
+  sortOrder: string;
+};
+
+export const emptyPackageForm: PackageForm = {
+  name: "",
+  description: "",
+  price: "",
+  features: "",
+  isActive: true,
+  tagline: "",
+  highlighted: false,
+  badge: "",
+  sortOrder: "",
+};
+
+/** The form as a card, for the admin's live preview. */
+export const formToCard = (form: PackageForm): PackageCard => ({
+  name: form.name,
+  description: form.description,
+  tagline: form.tagline,
+  price: Number(form.price) || 0,
+  features: form.features.split("\n").map((line) => line.trim()).filter(Boolean),
+  highlighted: form.highlighted,
+  badge: form.badge,
+});
+
+/**
+ * Validates the admin form against the backend contract (PublishPackageCreateRequest) and returns
+ * the request body, or the first problem to show.
+ */
+export function packagePayload(
+  form: PackageForm,
+  others: Pick<PackageCard, "_id" | "name">[]
+): { error: string } | { payload: Record<string, unknown> } {
+  const name = form.name.trim();
+  const description = form.description.trim();
+  const price = Number(form.price);
+  const sortOrder = form.sortOrder.trim() === "" ? 0 : Number(form.sortOrder);
+
+  if (!name) return { error: "Name is required." };
+  if (others.some((p) => p.name.trim().toLowerCase() === name.toLowerCase())) {
+    return { error: `A package named "${name}" already exists.` };
+  }
+  if (!description) return { error: "Description is required." };
+  if (form.price.trim() === "" || !Number.isFinite(price) || price < 0) return { error: "Price must be a number of 0 or more." };
+  if (!Number.isInteger(sortOrder) || sortOrder < 0) return { error: "Display order must be a whole number of 0 or more." };
+
+  return {
+    payload: {
+      name,
+      description,
+      price,
+      features: form.features.split("\n").map((line) => line.trim()).filter(Boolean),
+      isActive: form.isActive,
+      tagline: form.tagline.trim(),
+      highlighted: form.highlighted,
+      // Empty strings (not undefined) so clearing a field on edit is saved.
+      badge: form.highlighted ? form.badge.trim() : "",
+      sortOrder,
+    },
+  };
+}
 
 const nameKey = (v: unknown) => String(v ?? "").trim().toLowerCase();
-
-/** The real package with the card's _id/id, else the same name. Never by price alone. */
-export const findRealPackage = (card: PackageCard, real: PackageCard[]) =>
-  real.find((rp) => (card._id || card.id) && rp._id === (card._id || card.id)) ||
-  real.find((rp) => nameKey(rp.name) === nameKey(card.name));
 
 /**
  * Create payloads for the Site Content cards that have no real package of the same name yet.
@@ -83,7 +159,7 @@ export function packagesToImport(cards: PackageCard[], existing: PackageCard[]) 
       features: card.features,
       tagline: card.tagline?.trim() || "",
       highlighted: Boolean(card.highlighted),
-      badge: card.badge?.trim() || "",
+      badge: card.highlighted ? card.badge?.trim() || "" : "",
       sortOrder,
       isActive: true,
     }));

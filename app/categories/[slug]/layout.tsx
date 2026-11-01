@@ -1,5 +1,6 @@
 import { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { fetchRecord, MISSING, notFoundMetadata } from '@/lib/fetch-record';
 import { serializeJsonLd } from '@/lib/json-ld';
 
 type Props = {
@@ -7,25 +8,14 @@ type Props = {
   children: React.ReactNode;
 };
 
-const getCategoryData = async (slug: string) => {
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
-  const res = await fetch(`${API_URL}/categories/${slug}`, { next: { revalidate: 300 } }).catch(() => null);
-  // A missing category is a real 404; network or server errors still render the page.
-  if (res?.status === 404) notFound();
-  if (!res?.ok) return null;
-  try {
-    const data = await res.json();
-    return data.data || data;
-  } catch {
-    return null;
-  }
-};
+const getCategoryData = (slug: string) => fetchRecord(`/categories/${slug}`);
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const resolvedParams = await params;
   const slug = resolvedParams.slug;
   const category = await getCategoryData(slug);
   
+  if (category === MISSING) return notFoundMetadata;
   if (!category) return {};
   const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://harglim.com';
 
@@ -51,6 +41,7 @@ export default async function CategoryLayout({ children, params }: Props) {
   const category = await getCategoryData(resolvedParams.slug);
   const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://harglim.com';
 
+  if (category === MISSING) notFound();
   if (!category) return <>{children}</>;
 
   const collectionJsonLd = {

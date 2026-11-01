@@ -23,6 +23,8 @@ export interface AuthorSale {
   grossRevenue: number;
   royaltyPercent: number | null;
   royalty: number;
+  /** HISTORICAL_RATE_UNAVAILABLE: no rate was stored for this sale; show "Unavailable", not ₹0. */
+  royaltyUnavailable: boolean;
   royaltyStatus: string;
   saleDate: string;
   orderStatus: string;
@@ -37,6 +39,7 @@ export interface AuthorTopBook {
   grossRevenue: number;
   royalty: number;
   royaltyPercent: number | null;
+  royaltyPerCopy: number | null;
   unresolvedLegacySales: number;
 }
 
@@ -91,6 +94,7 @@ export function normalizeAuthorDashboard(payload: any): AuthorDashboardSummary {
       grossRevenue: num(b.grossBookRevenue, b.grossRevenue),
       royalty: num(b.knownAccruedRoyalty, b.accruedRoyalty, b.royalty),
       royaltyPercent: optionalNum(b.currentRoyaltyPercentage ?? b.royaltyPercentage),
+      royaltyPerCopy: optionalNum(b.royaltyPerCopy),
       unresolvedLegacySales: num(b.unresolvedLegacySales),
     };
   });
@@ -107,6 +111,7 @@ export function normalizeAuthorDashboard(payload: any): AuthorDashboardSummary {
       grossRevenue: num(s.grossRevenue, num(s.unitPrice) * num(s.quantity, 1)),
       royaltyPercent: optionalNum(s.royaltyPercentageSnapshot),
       royalty: num(s.accruedRoyalty, s.royaltyAmount),
+      royaltyUnavailable: String(s.royaltyStatus || "").toUpperCase() === "HISTORICAL_RATE_UNAVAILABLE",
       royaltyStatus: String(s.royaltyStatus || ""),
       saleDate: s.saleDate || s.createdAt || "",
       orderStatus: String(s.status || ""),

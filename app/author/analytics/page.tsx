@@ -18,6 +18,9 @@ import api from "@/lib/api";
 import { extractList } from "@/lib/tracking";
 import { useAuthStore } from "@/store/auth-store";
 import { useHashSection } from "@/hooks/use-hash-section";
+import { authorPanelProblem } from "@/lib/author-panel";
+import { onLiveChange } from "@/lib/live-sync";
+import { AuthorDataNotice } from "@/components/authors/author-data-notice";
 
 const RANGES = [
   { value: "7d", label: "7 days" },
@@ -39,7 +42,7 @@ const num = (...values: any[]) => {
 const perfTitle = (b: any) => b.title || b.book?.title || "Untitled";
 const perfUnits = (b: any) => num(b.unitsSold, b.totalSales, b.sales);
 const perfGross = (b: any) => num(b.grossRevenue, b.grossBookRevenue, b.revenue);
-const perfRoyalty = (b: any) => num(b.knownRoyalty, b.royalty, b.royaltyEarned, b.accruedRoyalty);
+const perfRoyalty = (b: any) => num(b.knownAccruedRoyalty, b.knownRoyalty, b.royalty, b.royaltyEarned, b.accruedRoyalty);
 const perfStatus = (b: any) => String(b.status || b.publishingStatus || b.book?.status || "").toLowerCase();
 const perfRating = (b: any) => num(b.ratings, b.rating, b.book?.ratings);
 
@@ -50,6 +53,7 @@ export default function AnalyticsPage() {
   const [range, setRange] = useState("30d");
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [performanceData, setPerformanceData] = useState<any[]>([]);
+  const [problem, setProblem] = useState<string | null>(null);
 
   const fetchAnalytics = useCallback(async () => {
     if (!user) return;
@@ -61,6 +65,12 @@ export default function AnalyticsPage() {
         api.get("/authors/me/books/performance", noStore),
       ]);
 
+      setProblem(
+        authorPanelProblem([
+          { label: "sales analytics", result: analyticsRes },
+          { label: "book performance", result: perfRes },
+        ])
+      );
       if (analyticsRes.status === "fulfilled") {
         setAnalyticsData(analyticsRes.value.data?.data || analyticsRes.value.data);
       }
@@ -76,6 +86,8 @@ export default function AnalyticsPage() {
 
   useEffect(() => {
     fetchAnalytics();
+    // Coming back to the tab reloads, so new sales show without a refresh.
+    return onLiveChange("author-data", fetchAnalytics);
   }, [fetchAnalytics]);
 
   const summary = { ...(analyticsData || {}), ...(analyticsData?.summary || {}), ...(analyticsData?.totals || {}) };
@@ -89,10 +101,22 @@ export default function AnalyticsPage() {
   const seriesRows = Array.isArray(series) ? series : [];
 
   const publishedCount = performanceData.filter((b) => perfStatus(b) === "published").length;
-  const totalUnits = num(summary.unitsSold, summary.totalUnitsSold, performanceData.reduce((s, b) => s + perfUnits(b), 0));
-  const grossRevenue = num(summary.grossBookRevenue, summary.grossRevenue, summary.revenue, performanceData.reduce((s, b) => s + perfGross(b), 0));
-  const royalty = num(summary.royalty, summary.accruedKnown, summary.knownRoyalty, performanceData.reduce((s, b) => s + perfRoyalty(b), 0));
-  const unresolved = num(summary.historicalUnresolvedSales, summary.unresolvedSales, summary.historicalUnresolvedCount);
+  // The cards say "last N days", so they add up the server's series for that range. Lifetime
+  // per-book figures are only the fallback when the series did not load.
+  const rangeLoaded = Array.isArray(analyticsData?.series);
+  const sumSeries = (pick: (row: any) => number) => seriesRows.reduce((sum, row) => sum + pick(row), 0);
+  const totalUnits = rangeLoaded
+    ? sumSeries((r) => num(r.units, r.unitsSold, r.quantity))
+    : num(summary.unitsSold, summary.totalUnitsSold, performanceData.reduce((s, b) => s + perfUnits(b), 0));
+  const grossRevenue = rangeLoaded
+    ? sumSeries((r) => num(r.revenue, r.grossRevenue))
+    : num(summary.grossBookRevenue, summary.grossRevenue, summary.revenue, performanceData.reduce((s, b) => s + perfGross(b), 0));
+  const royalty = rangeLoaded
+    ? sumSeries((r) => num(r.knownRoyalty, r.royalty, r.royaltyAmount))
+    : num(summary.royalty, summary.accruedKnown, summary.knownRoyalty, performanceData.reduce((s, b) => s + perfRoyalty(b), 0));
+  const unresolved = rangeLoaded
+    ? sumSeries((r) => num(r.unresolvedLegacyCount))
+    : num(summary.historicalUnresolvedSales, summary.unresolvedSales, summary.historicalUnresolvedCount);
   const rated = performanceData.filter((b) => perfRating(b) > 0);
   const avgRating = rated.length ? rated.reduce((s, b) => s + perfRating(b), 0) / rated.length : 0;
 
@@ -117,6 +141,7 @@ export default function AnalyticsPage() {
 
   return (
     <div className="space-y-8">
+      <AuthorDataNotice message={problem} onRetry={fetchAnalytics} />
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold font-serif lg:text-3xl text-foreground">Author Analytics</h1>
