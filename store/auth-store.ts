@@ -64,15 +64,18 @@ export const useAuthStore = create<AuthState>()(
         }),
 
       setUserContext: (userContext: UserContextData) =>
-        set((state: AuthState) => ({
-          userContext,
-          user: state.user ? {
-            ...state.user,
-            role: userContext.user.role || state.user.role,
-            profileImage: userContext.user.profilePicture || state.user.profileImage,
-          } : null,
-          authStatus: 'authenticated',
-        })),
+        set((state: AuthState) => {
+          const role = userContext.user.role || state.user?.role;
+          const profileImage = userContext.user.profilePicture || state.user?.profileImage;
+          // Keep the same object when nothing changed: pages refetch on [user], and a 403 refreshes
+          // the context, so a new object each time would loop 403 → refresh → refetch → 403.
+          const unchanged = state.user?.role === role && state.user?.profileImage === profileImage;
+          return {
+            userContext,
+            user: state.user ? (unchanged ? state.user : { ...state.user, role, profileImage }) : null,
+            authStatus: 'authenticated',
+          };
+        }),
 
       setAuthStatus: (authStatus: AuthStatus) =>
         set({ authStatus }),

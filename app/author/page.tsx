@@ -22,6 +22,9 @@ import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
 import { normalizeAuthorDashboard, type AuthorDashboardSummary } from "@/lib/author-dashboard";
 import { AuthorSalesPanel } from "@/components/authors/author-sales-panel";
+import { AuthorDataNotice } from "@/components/authors/author-data-notice";
+import { authorPanelProblem } from "@/lib/author-panel";
+import { onLiveChange } from "@/lib/live-sync";
 
 type AuthorDashboardData = {
   totalBooks: number;
@@ -106,6 +109,7 @@ export default function AuthorDashboard() {
   const [loading, setLoading] = useState(true);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [salesSummary, setSalesSummary] = useState<AuthorDashboardSummary | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
 
   const fetchDashboardData = useCallback(async () => {
     if (!user) return;
@@ -123,6 +127,12 @@ export default function AuthorDashboard() {
 
       const summary = dashboardRes.status === "fulfilled" ? normalizeAuthorDashboard(dashboardRes.value.data) : null;
       setSalesSummary(summary);
+      setProblem(
+        authorPanelProblem([
+          { label: "your dashboard", result: dashboardRes },
+          { label: "your book list", result: booksRes },
+        ])
+      );
       const authorBooks =
         booksRes.status === "fulfilled" ? extractList(booksRes.value.data, ["books", "items"]) : [];
 
@@ -149,8 +159,9 @@ export default function AuthorDashboard() {
       );
 
       const nextData: AuthorDashboardData = {
-        totalBooks: summary?.books.total || authorBooks.length,
-        publishedBooks: summary?.books.total ? summary.books.published : publishedBooksList.length,
+        // The server's counts; the list is only a fallback when the dashboard did not load.
+        totalBooks: summary ? summary.books.total : authorBooks.length,
+        publishedBooks: summary ? summary.books.published : publishedBooksList.length,
         manuscriptsCount: manuscripts.length,
         pendingCount: statusCounts.pending,
         processingCount: statusCounts.processing,
@@ -177,6 +188,8 @@ export default function AuthorDashboard() {
 
   useEffect(() => {
     fetchDashboardData();
+    // Coming back to the tab reloads, so changes made by the admin show without a refresh.
+    return onLiveChange("author-data", fetchDashboardData);
   }, [fetchDashboardData]);
 
   const statCards = useMemo(
@@ -248,7 +261,8 @@ export default function AuthorDashboard() {
     [dashboardData]
   );
 
-  if (loading) {
+  // Spinner only before the first load; later reloads update the figures in place.
+  if (loading && !lastSyncedAt) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-[#0F3D3E]" />
@@ -258,6 +272,7 @@ export default function AuthorDashboard() {
 
   return (
     <div className="space-y-8 text-[#0F3D3E] font-sans">
+      <AuthorDataNotice message={problem} onRetry={fetchDashboardData} />
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E2E6DF] pb-5">
         <div>
           <h1 className="text-2xl sm:text-3xl font-serif font-bold text-[#0F3D3E]">

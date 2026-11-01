@@ -1,5 +1,6 @@
 import { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { fetchRecord, MISSING, notFoundMetadata } from '@/lib/fetch-record';
 import { serializeJsonLd } from '@/lib/json-ld';
 
 type Props = {
@@ -7,26 +8,14 @@ type Props = {
   children: React.ReactNode;
 };
 
-const getBookData = async (slug: string) => {
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
-  const res = await fetch(`${API_URL}/books/${slug}`, { next: { revalidate: 300 } }).catch(() => null);
-  // A missing book is a real 404 (not a 200 page), so search engines drop dead links.
-  // Network or server errors still render the page, which loads the book itself.
-  if (res?.status === 404) notFound();
-  if (!res?.ok) return null;
-  try {
-    const data = await res.json();
-    return data.data || data;
-  } catch {
-    return null;
-  }
-};
+const getBookData = (slug: string) => fetchRecord(`/books/${slug}`);
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const resolvedParams = await params;
   const slug = resolvedParams.slug;
   const book = await getBookData(slug);
   
+  if (book === MISSING) return notFoundMetadata;
   if (!book) return {};
   const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://harglim.com';
 
@@ -56,6 +45,7 @@ export default async function BookLayout({ children, params }: Props) {
   const book = await getBookData(resolvedParams.slug);
   const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://harglim.com';
 
+  if (book === MISSING) notFound();
   if (!book) return <>{children}</>;
 
   const jsonLd = {

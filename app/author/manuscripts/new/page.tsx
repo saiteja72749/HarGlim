@@ -28,6 +28,7 @@ import toast from "react-hot-toast";
 import Link from "next/link";
 import api from "@/lib/api";
 import { fetchBackendCategories } from "@/lib/categories";
+import { fetchPublicPackages } from "@/lib/publish-packages";
 
 // Backend default upload limit (UPLOAD_MAX_BYTES) is 25MB.
 const MAX_MANUSCRIPT_BYTES = 25 * 1024 * 1024;
@@ -66,9 +67,8 @@ export default function NewManuscriptPage() {
     const fetchPackages = async () => {
       setLoadingPackages(true);
       try {
-        const res = await api.get("/publish-packages");
-        const list = res.data?.data || res.data || [];
-        const arr = (Array.isArray(list) ? list : []).filter((p: any) => p?.isActive !== false);
+        // Same packages, in the same order, as the Publish page.
+        const arr: any[] = await fetchPublicPackages();
         setPackages(arr);
         // The Publish page links here with ?packageId=<_id> for the card the author chose.
         const requested = new URLSearchParams(window.location.search).get("packageId");

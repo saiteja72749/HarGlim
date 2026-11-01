@@ -1,5 +1,7 @@
 # Backend alignment report
 
+> **Status (1 Nov 2026):** the backend team reports all items below delivered and deployed, and the frontend is integrated with that handover. This file is kept as the record of what was asked. **Open question:** what exact URL does the invitation / forgot-password email link to? The frontend serves `/reset-password/<token>`, `/reset-password?token=<token>` and the same under `/set-password`; the page calls `PUT /auth/reset-password/{token}`. Please confirm the email uses one of these.
+
 **For:** the backend developer
 **Frontend state:** done for every item below. Each screen already calls the routes and sends or reads the fields described here, and falls back safely while the backend part is missing. Ship the backend side and it works; no further frontend change is needed unless noted.
 
@@ -144,11 +146,13 @@ Admins must be able to fix a wrong AWB after a shipment is `PICKED_UP`, `IN_TRAN
 
 ## 5. Publishing packages: one source of truth
 
-Today the package card copy (tagline, features, highlighted badge) is edited as `packagesJson` in Site Content. Each card is matched to a `/publish-packages` record by `_id`, then by name, to get the `packageId` sent on manuscript submission. Matching by price was removed: the stored "Professional ₹4999" card matched the unrelated "Demo Starter Publishing" (₹4999) record. Live `/publish-packages` currently holds only the two demo packages, so no Publish page card links to a real package until an admin creates them in Admin → Publishing Packages.
+> **Backend:** done in `defc669` (`tagline`, `highlighted`, `badge`, `sortOrder` stored and returned). **Frontend:** done.
 
-**Required:**
-- Add `tagline: string`, `highlighted: boolean`, `badge?: string` and `sortOrder: number` to `PublishPackage`. Accept them on `POST`/`PATCH /admin/publish-packages` and return them on `GET /publish-packages`.
-- **Frontend:** done. Admin → Publishing Packages already sends `tagline`, `highlighted`, `badge` and `sortOrder`. As soon as `GET /publish-packages` returns any of these fields, the Publish page shows packages only from it, sorted by `sortOrder`, and stops using `packagesJson`. After that, admins should re-save each package to fill in its card copy.
+The `PublishPackage` records are the only source. Admin → Publishing Packages creates, edits, orders (sortOrder 1, 2, 3 …), highlights (one at a time) and archives them, with a live card preview, and re-reads each package after saving to confirm the backend kept every field. The Publish page and the author's manuscript form show exactly the active records, in the same order, and each card sends its own `_id` as `packageId`. Site Content `packagesJson` is no longer edited or shown; it is only read by the one-time **Import from Site Content** button.
+
+**Data still needed (22 Oct 2026):** production holds only the two seeded demo packages. An admin imports or adds the real packages and archives the demos. Please make sure no seed script re-creates the demos on production.
+
+**Open question:** submission without `packageId` defaults to the first active package. The frontend now always sends one; consider returning 400 instead.
 
 ---
 
@@ -194,6 +198,33 @@ Please add their request and response schemas to the handover.
 - **`GET /authors/{id}` with a malformed id returns 500** ("Cast to ObjectId failed"). Return 404. The frontend now 404s non-ObjectId author URLs itself.
 - **`GET /books/{id}` with a Mongo `_id` returns 404**; only the slug works. Either accept both, or confirm every book has a slug (the frontend links by slug).
 - **Missing routes** (404 on the live server): `GET /stats/public` (§7) and `/authors/me/manual-royalties` (§1).
+
+---
+
+## 10. Author Spotlight photos (new route)
+
+> **Frontend:** done. The Publish page shows 6 photos under the packages, and `/spotlight` shows all of them with infinite scroll and a lightbox (`lib/spotlights.ts`, `components/spotlight/`). Until this route exists, both show a "couldn't load" state.
+
+**Live check (2026-10-30):** `GET /api/spotlights/` returns 404 "Route not found".
+
+| Method | Path | Auth | Response |
+| --- | --- | --- | --- |
+| GET | `/spotlights/` | Public | `{ data: [{ _id, image, thumbnail, author_name, caption }], pagination: { page, limit, total, pages } }`, newest first |
+
+- Accept `page` and `limit` (frontend asks for 6 on the Publish page and 24 per page on `/spotlight`). Without `pagination` the frontend stops when a page brings nothing new.
+- `image` is the full photo; `thumbnail` a small square-friendly version (≈400 px). If there is no thumbnail, send `image` in both.
+- Admins upload and remove photos (admin routes and storage are backend-side; no admin UI is built for them yet).
+
+---
+
+## 11. Author panel: books an admin created for an author
+
+Authors report that a book an admin created in their name does not show in their panel.
+
+- `GET /authors/me/books` is documented as "List author **owned book drafts**". Please make it return **every book whose `author` is the caller**, whoever created it (admin or author), with its status.
+- `GET /authors/me/dashboard` → `books.total/published/draft` must count the same set.
+- The dashboard, analytics, performance and royalty routes require an *active author dashboard entitlement* when the paid feature is on. Authors created by an admin (`POST /admin/users`, role `author`) may not have one, so these calls are refused. Please grant the entitlement when an admin creates an author or assigns them a book, or confirm the paid feature is off.
+- **Frontend (done):** the panel now merges `/authors/me/books` with `/authors/me/books/performance` and the dashboard's `topBooks`, so such books appear wherever any endpoint knows them. It also shows the server's reason (e.g. no dashboard access) instead of zeros, and reloads when the author returns to the tab.
 
 ---
 

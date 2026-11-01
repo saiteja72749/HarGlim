@@ -35,10 +35,17 @@ const nextConfig = {
     buildActivity: false,
     appIsrStatus: false,
   },
+  async redirects() {
+    return [
+      // Same page as /reset-password: invitation emails may say "set password".
+      { source: '/set-password/:token', destination: '/reset-password/:token', permanent: false },
+      { source: '/set-password', destination: '/reset-password', permanent: false },
+    ]
+  },
   async headers() {
     return [
       {
-        source: '/:privateRoute(admin|author|dashboard|checkout|cart|login|register|forgot-password|track-order)/:path*',
+        source: '/:privateRoute(admin|author|dashboard|checkout|cart|login|register|forgot-password|reset-password|track-order)/:path*',
         headers: [
           { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
         ],

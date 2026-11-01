@@ -3,7 +3,9 @@ import { BookX, ArrowRight, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export const metadata = {
-  title: "Page Not Found",
+  // Absolute: when a book, author or category page calls notFound() the root title template
+  // is not applied, so the site name is spelled out to keep every 404 title the same.
+  title: { absolute: "Page Not Found | Harglim Publishers" },
 };
 
 export default function NotFound() {

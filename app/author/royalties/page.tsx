@@ -19,6 +19,10 @@ import { useHashSection } from "@/hooks/use-hash-section";
 import toast from "react-hot-toast";
 import { listMyManualRoyalties, type ManualRoyaltyStatement } from "@/lib/manual-royalties";
 import { ManualRoyaltyTable } from "@/components/royalties/manual-royalty-table";
+import { AuthorDataNotice } from "@/components/authors/author-data-notice";
+import { authorPanelProblem } from "@/lib/author-panel";
+import { fetchRoyaltyHistory, isRoyaltyUnavailable, type RoyaltyHistory } from "@/lib/author-royalties";
+import { onLiveChange } from "@/lib/live-sync";
 
 export default function AuthorRoyaltiesPage() {
   const { user } = useAuthStore();
@@ -33,27 +37,32 @@ export default function AuthorRoyaltiesPage() {
   useEffect(() => {
     setActiveTab(hash === "settlements" || hash === "statements" ? hash : "sales");
   }, [hash]);
-  const [summaryData, setSummaryData] = useState<any>(null);
+  const [summaryData, setSummaryData] = useState<RoyaltyHistory | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [openSettlementId, setOpenSettlementId] = useState<string | null>(null);
 
   const fetchRoyalties = async () => {
     if (!user) return;
     setLoading(true);
     try {
-      // Both lists are paginated (default 10); without a limit the totals only covered page 1.
       const listConfig = { params: { page: 1, limit: 100 }, cache: "no-store" } as any;
       const [royaltiesRes, settlementsRes, manualRes] = await Promise.allSettled([
-        api.get("/authors/me/royalties", listConfig),
+        fetchRoyaltyHistory(),
         api.get("/authors/me/royalty-settlements", listConfig),
         listMyManualRoyalties(),
       ]);
       setManualStatements(manualRes.status === "fulfilled" ? manualRes.value.filter((m) => m.status !== "VOID") : []);
+      setProblem(
+        authorPanelProblem([
+          { label: "royalty history", result: royaltiesRes },
+          { label: "settlements", result: settlementsRes },
+        ])
+      );
 
       if (royaltiesRes.status === "fulfilled") {
-        const rData = royaltiesRes.value.data?.data || royaltiesRes.value.data || [];
-        setSummaryData(Array.isArray(rData) ? royaltiesRes.value.data?.summary || null : rData.summary || rData);
-        const entries = rData.earnings || rData.items || rData.royalties || rData.lines || (Array.isArray(rData) ? rData : []);
-        setRoyaltyEntries(Array.isArray(entries) ? entries : []);
+        setSummaryData(royaltiesRes.value);
+        setRoyaltyEntries(royaltiesRes.value.entries);
       }
 
       if (settlementsRes.status === "fulfilled") {
@@ -65,17 +74,19 @@ export default function AuthorRoyaltiesPage() {
       console.error("Failed to fetch royalties:", err);
     } finally {
       setLoading(false);
+      setLoadedOnce(true);
     }
   };
 
   useEffect(() => {
     fetchRoyalties();
+    // Coming back to the tab reloads, so new royalties and settlements show without a refresh.
+    return onLiveChange("author-data", fetchRoyalties);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  const totalEarnings =
-    summaryData?.totalEarned ??
-    summaryData?.totalRoyalty ??
-    royaltyEntries.reduce((sum, item) => sum + getRoyalty(item), 0);
+  // The server's total (accruedKnown); never summed in the browser.
+  const totalEarnings = summaryData?.totalRoyalty ?? 0;
 
   const handleExportCSV = () => {
     if (!royaltyEntries || royaltyEntries.length === 0) {
@@ -91,8 +102,8 @@ export default function AuthorRoyaltiesPage() {
       getQty(e),
       getUnitPrice(e),
       getLineRevenue(e),
-      getRoyaltyPercent(e) !== null ? getDeductions(e) : "unknown",
-      getRoyalty(e),
+      isRoyaltyUnavailable(e) ? "Unavailable" : getDeductions(e),
+      isRoyaltyUnavailable(e) ? "Unavailable" : getRoyalty(e),
       getDate(e) ? new Date(getDate(e)).toLocaleDateString("en-IN") : "",
     ]);
 
@@ -108,7 +119,8 @@ export default function AuthorRoyaltiesPage() {
     toast.success("Royalty statement exported as CSV! 📄");
   };
 
-  if (loading) {
+  // Spinner only before the first load; later reloads update the figures in place.
+  if (loading && !loadedOnce) {
     return (
       <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3">
         <RefreshCw className="h-8 w-8 animate-spin text-[#0F3D3E]" />
@@ -119,6 +131,7 @@ export default function AuthorRoyaltiesPage() {
 
   return (
     <div className="space-y-8 text-[#0F3D3E] font-sans max-w-5xl mx-auto">
+      <AuthorDataNotice message={problem} onRetry={fetchRoyalties} />
       {/* 1. Header & Export CTA */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E2E6DF] pb-5">
         <div>
@@ -189,7 +202,7 @@ export default function AuthorRoyaltiesPage() {
               Recorded Sales Transactions
             </span>
             <p className="text-3xl font-serif font-bold text-[#0F3D3E]">
-              {royaltyEntries.length}
+              {summaryData?.totalLines ?? royaltyEntries.length}
             </p>
             <p className="text-[11px] text-[#5C6E6E]">Server verified entries</p>
           </div>
@@ -255,12 +268,19 @@ export default function AuthorRoyaltiesPage() {
                         <td className="py-3 px-4 text-right text-[#5C6E6E]">₹{getUnitPrice(e).toLocaleString("en-IN")}</td>
                         <td className="py-3 px-4 text-right text-[#5C6E6E]">₹{getLineRevenue(e).toLocaleString("en-IN")}</td>
                         <td className="py-3 px-4 text-right text-[#5C6E6E]">
-                          {getRoyaltyPercent(e) !== null ? `₹${getDeductions(e).toLocaleString("en-IN")}` : (
-                            <span className="text-amber-700" title="Historical sale recorded before royalty rates were snapshotted">Unknown</span>
+                          {!isRoyaltyUnavailable(e) ? `₹${getDeductions(e).toLocaleString("en-IN")}` : (
+                            <span className="text-amber-700" title="Historical sale recorded before royalty rates were snapshotted">Unavailable</span>
                           )}
                         </td>
                         <td className="py-3 px-4 text-right font-bold text-emerald-700">
-                          ₹{getRoyalty(e).toLocaleString("en-IN")}
+                          {isRoyaltyUnavailable(e) ? (
+                            <span className="font-semibold text-amber-700" title="Historical sale recorded before royalty rates were snapshotted">Unavailable</span>
+                          ) : (
+                            `₹${getRoyalty(e).toLocaleString("en-IN")}`
+                          )}
+                          {getPerCopy(e) !== null && (
+                            <span className="block text-[10px] font-normal text-[#5C6E6E]">₹{getPerCopy(e)!.toLocaleString("en-IN")} per copy</span>
+                          )}
                         </td>
                         <td className="py-3 px-4 text-right text-[11px] text-[#5C6E6E]">
                           {getDate(e) ? new Date(getDate(e)).toLocaleDateString("en-IN") : "—"}
@@ -402,16 +422,16 @@ const num = (...values: any[]) => {
 const getTitle = (e: any) => e.bookTitle || e.book?.title || e.title || "Book";
 const getQty = (e: any) => num(e.quantity, e.copiesSold, e.qty, 1);
 const getUnitPrice = (e: any) => num(e.unitPrice, e.price, e.amountPerBook, e.mrp);
-const getLineRevenue = (e: any) => num(e.lineTotal, e.grossAmount, e.totalRevenue, e.revenue, getUnitPrice(e) * getQty(e));
+const getLineRevenue = (e: any) => num(e.grossBookRevenue, e.lineTotal, e.grossAmount, e.totalRevenue, e.revenue, getUnitPrice(e) * getQty(e));
 const getRoyalty = (e: any) => num(e.royaltyAmount, e.royalty, e.amount);
-const getRoyaltyPercent = (e: any): number | null => {
-  if (String(e.royaltyStatus || e.status || "").toUpperCase() === "HISTORICAL_RATE_UNAVAILABLE") return null;
-  const p = e.royaltyPercentage ?? e.royaltyPercentageSnapshot ?? e.royaltyRate;
-  return p === null || p === undefined || p === "" ? null : Number(p);
+// The per-copy royalty stored on the sale; the book's current value is never used for old sales.
+const getPerCopy = (e: any): number | null => {
+  const v = e.royaltyPerCopySnapshot;
+  return v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
 };
 // Printing + platform + delivery charges taken out of the line before the author's royalty.
 const getDeductions = (e: any) => Math.max(0, Math.round((getLineRevenue(e) - getRoyalty(e)) * 100) / 100);
-const getDate = (e: any) => e.date || e.soldAt || e.paidAt || e.createdAt || "";
+const getDate = (e: any) => e.saleDate || e.date || e.soldAt || e.paidAt || e.createdAt || "";
 
 const getSettlementAmount = (s: any) => num(s.totalRoyalty, s.amount, s.totalAmount, s.payoutAmount);
 const getSettlementStatus = (s: any) => {

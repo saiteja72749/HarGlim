@@ -17,6 +17,9 @@ import { useAuthStore } from "@/store/auth-store";
 import toast from "react-hot-toast";
 import { bookRoyaltyPerCopy } from "@/lib/royalty";
 import { getCategoryDisplayName } from "@/lib/categories";
+import { authorPanelProblem } from "@/lib/author-panel";
+import { onLiveChange } from "@/lib/live-sync";
+import { AuthorDataNotice } from "@/components/authors/author-data-notice";
 
 export default function AuthorBooksPage() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -24,31 +27,47 @@ export default function AuthorBooksPage() {
   const { user } = useAuthStore();
   const [isLoading, setIsLoading] = useState(true);
 
+  const [problem, setProblem] = useState<string | null>(null);
+
   const fetchBooks = useCallback(async () => {
     if (!user) return;
     setIsLoading(true);
     try {
       const noStore = { cache: "no-store" } as any;
-      const [resMe, resPerformance, resDashboard] = await Promise.all([
-        api.get("/authors/me/books", { params: { limit: 100 }, ...noStore }).catch(() => null),
-        api.get("/authors/me/books/performance", noStore).catch(() => null),
+      const [meResult, performanceResult, dashboardResult] = await Promise.allSettled([
+        api.get("/authors/me/books", { params: { limit: 100 }, ...noStore }),
+        api.get("/authors/me/books/performance", noStore),
         // GET /authors/me/books carries no sales fields; the dashboard's topBooks[] does
         // (unitsSold, grossBookRevenue, knownAccruedRoyalty), so it backs up /performance.
-        api.get("/authors/me/dashboard", noStore).catch(() => null),
+        api.get("/authors/me/dashboard", noStore),
       ]);
-      const fetchedBooks: any[] = extractList(resMe?.data, "books");
+      setProblem(
+        authorPanelProblem([
+          { label: "your book list", result: meResult },
+          { label: "book sales", result: performanceResult },
+          { label: "your dashboard", result: dashboardResult },
+        ])
+      );
+      const resMe = meResult.status === "fulfilled" ? meResult.value : null;
+      const resPerformance = performanceResult.status === "fulfilled" ? performanceResult.value : null;
+      const resDashboard = dashboardResult.status === "fulfilled" ? dashboardResult.value : null;
 
       // Sales/revenue/royalty live on the performance endpoint, keyed by book id.
       const performanceById = new Map<string, any>();
       const dashboardTopBooks = resDashboard?.data?.data?.topBooks ?? resDashboard?.data?.topBooks;
+      const performanceRows = extractList(resPerformance?.data, "books");
+      const topBookRows = Array.isArray(dashboardTopBooks) ? dashboardTopBooks : [];
       const addPerformanceRows = (rows: any[]) =>
         rows.forEach((row: any) => {
           const id = String(row.bookId || row.book?._id || row.book || row._id || "");
           if (id) performanceById.set(id, { ...(performanceById.get(id) || {}), ...row });
         });
-      addPerformanceRows(extractList(resPerformance?.data, "books"));
+      addPerformanceRows(performanceRows);
       // Applied last: the dashboard figures are the ones the royalty ledger is built from.
-      addPerformanceRows(Array.isArray(dashboardTopBooks) ? dashboardTopBooks : []);
+      addPerformanceRows(topBookRows);
+
+      // Every book assigned to the author, whoever created it, including zero-sale books.
+      const fetchedBooks: any[] = extractList(resMe?.data, "books");
 
       setBooks(
         fetchedBooks.map((book) => ({
@@ -66,6 +85,8 @@ export default function AuthorBooksPage() {
 
   useEffect(() => {
     fetchBooks();
+    // Coming back to the tab reloads, so changes made by the admin show without a refresh.
+    return onLiveChange("author-data", fetchBooks);
   }, [fetchBooks]);
 
   const filteredBooks = books.filter((book) =>
@@ -96,6 +117,8 @@ export default function AuthorBooksPage() {
           </Link>
         </Button>
       </div>
+
+      <AuthorDataNotice message={problem} onRetry={fetchBooks} />
 
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
         <StatCard icon={<BookOpen className="h-5 w-5 text-[#0F3D3E]" />} value={`${publishedCount} / ${books.length}`} label="Published / Total" />

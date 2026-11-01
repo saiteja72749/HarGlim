@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Image from "next/image";
-import { useSiteContent, SiteContent, defaultSiteContent } from "@/context/site-content-context";
+import { useSiteContent, SiteContent, defaultSiteContent, invalidJsonField } from "@/context/site-content-context";
 import { PAGE_SECTION_FIELDS, pageSectionDefaults } from "@/lib/page-content";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,26 +19,47 @@ import {
   BookOpen,
   HelpCircle,
   Megaphone,
-  Sparkles,
   Camera,
   Upload,
   Trash2,
   CheckCircle2,
   Loader2,
   LayoutList,
+  Package,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
 
+type SaveStatus = "saved" | "pending" | "saving" | "invalid" | "error";
+
+const sameContent = (a: SiteContent, b: SiteContent) => JSON.stringify(a) === JSON.stringify(b);
+
 export default function AdminContentPage() {
-  const { content: globalContent, updateContent, resetContent, loading } = useSiteContent();
+  const { content: globalContent, updateContent, loading } = useSiteContent();
   const { user, setUser } = useAuthStore();
   const [formData, setFormData] = useState<SiteContent>(globalContent);
-  const [isSaving, setIsSaving] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [activeTab, setActiveTab] = useState<"home" | "contact" | "publish" | "about" | "sections" | "admin-profile">("home");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Saved only when the admin presses Save Changes, then read back from the server.
+  // `baseline` is the last content the server confirmed; the form is "unsaved" while it differs.
+  const baselineRef = useRef<SiteContent>(globalContent);
+  const [baseline, setBaseline] = useState<SiteContent>(globalContent);
+  const commitBaseline = (next: SiteContent) => {
+    baselineRef.current = next;
+    setBaseline(next);
+  };
+  const formRef = useRef<SiteContent>(formData);
+  useEffect(() => {
+    formRef.current = formData;
+  }, [formData]);
+  const savingRef = useRef(false);
+  const failedRef = useRef<SiteContent | null>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+  const [statusDetail, setStatusDetail] = useState("");
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
 
   // Public GET /content leaves out admin-only fields, so the admin photo is read from
   // GET /admin/content; without it every save would send an empty photo and clear it.
@@ -50,11 +71,80 @@ export default function AdminContentPage() {
       .catch(() => {});
   }, []);
 
+  // Server content (first load, a save, or another admin's save) replaces the form only while it
+  // has no unsaved edits, so nothing being typed is ever overwritten.
   useEffect(() => {
-    if (globalContent) {
-      setFormData({ ...globalContent, adminProfileImage });
+    if (!globalContent) return;
+    const next = { ...globalContent, adminProfileImage };
+    if (sameContent(formRef.current, baselineRef.current)) {
+      commitBaseline(next);
+      setFormData(next);
     }
   }, [globalContent, adminProfileImage]);
+
+  const saveNow = useCallback(
+    async (data: SiteContent) => {
+      if (savingRef.current) return;
+      savingRef.current = true;
+      failedRef.current = null;
+      setSaveStatus("saving");
+      try {
+        if (data.adminProfileImage !== baselineRef.current.adminProfileImage && user) {
+          setUser({ ...user, profileImage: data.adminProfileImage, profilePicture: data.adminProfileImage });
+        }
+        const { stored, notSaved, verified } = await updateContent(data);
+        const confirmed = { ...stored, adminProfileImage: data.adminProfileImage };
+        commitBaseline(confirmed);
+        setAdminProfileImage(data.adminProfileImage || "");
+        // Still what was sent: show exactly what the server stored (dropped fields revert visibly).
+        if (sameContent(formRef.current, data)) setFormData(confirmed);
+        setLastSavedAt(new Date());
+
+        if (notSaved.length > 0) {
+          console.warn("Site content fields not stored by the backend:", notSaved);
+          setSaveStatus("error");
+          setStatusDetail(`Server did not keep: ${notSaved.join(", ")}`);
+        } else {
+          setSaveStatus("saved");
+          setStatusDetail(verified ? "" : "Saved; could not re-read it to verify");
+          toast.success("Saved. The website now shows your changes.");
+        }
+      } catch (err: any) {
+        console.error("Failed to update site content:", err);
+        failedRef.current = data;
+        setSaveStatus("error");
+        setStatusDetail(err?.response?.data?.message || "Could not reach the server. Your edits are kept here.");
+        toast.error("Not saved. Your edits are kept; press Retry Save.");
+      } finally {
+        savingRef.current = false;
+        // Edits typed while saving stay unsaved until the next Save Changes.
+        if (!sameContent(formRef.current, baselineRef.current) && !failedRef.current) setSaveStatus("pending");
+      }
+    },
+    [updateContent, user, setUser]
+  );
+
+  // Nothing is saved until the admin presses Save Changes; this only shows whether there are
+  // unsaved edits. A failed save keeps its error until the next edit.
+  useEffect(() => {
+    if (loading || savingRef.current) return;
+    if (sameContent(formData, baselineRef.current)) {
+      setSaveStatus((s) => (s === "pending" ? "saved" : s));
+      return;
+    }
+    if (failedRef.current && sameContent(formData, failedRef.current)) return;
+    setSaveStatus("pending");
+    setStatusDetail("");
+  }, [formData, loading]);
+
+  // Leaving the page with edits not yet on the server asks first.
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (!sameContent(formRef.current, baselineRef.current) || savingRef.current) e.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, []);
 
   const handlePhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -115,78 +205,48 @@ export default function AdminContentPage() {
         profilePicture: "",
       });
     }
-    toast.success("Admin profile picture removed.");
+    toast.success("Profile picture removed. Press Save Changes to keep it removed.");
   };
 
-  const handleSave = async () => {
-    // Validate Packages JSON
-    try {
-      if (formData.packagesJson) {
-        JSON.parse(formData.packagesJson);
-      }
-    } catch {
-      toast.error("Invalid JSON in Publishing Packages. Check your syntax.");
+  /** The only way content reaches the website: validate, save, then read it back. */
+  const handleSave = () => {
+    const invalid = invalidJsonField(formData);
+    if (invalid) {
+      if (PAGE_SECTION_FIELDS.some((f) => f.key === invalid.key)) setActiveTab("sections");
+      setSaveStatus("invalid");
+      setStatusDetail(`${String(invalid.key)} ${invalid.reason}. Fix it, then press Save Changes again.`);
+      toast.error(`${String(invalid.key)} ${invalid.reason}.`);
       return;
     }
-
-    // Validate Page Sections JSON (each must be a list)
-    for (const field of PAGE_SECTION_FIELDS) {
-      try {
-        if (!Array.isArray(JSON.parse(formData[field.key] || "[]"))) throw new Error("not a list");
-      } catch {
-        setActiveTab("sections");
-        toast.error(`${field.page} → ${field.label}: must be a valid JSON list.`);
-        return;
-      }
-    }
-
-    // Validate FAQs JSON
-    try {
-      if (formData.faqsJson) {
-        JSON.parse(formData.faqsJson);
-      }
-    } catch {
-      toast.error("Invalid JSON in FAQ section. Check your syntax.");
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      if (formData.adminProfileImage && user) {
-        setUser({
-          ...user,
-          profileImage: formData.adminProfileImage,
-          profilePicture: formData.adminProfileImage,
-        });
-      }
-      const notSaved = await updateContent(formData);
-      setAdminProfileImage(formData.adminProfileImage || "");
-      if (notSaved.length > 0) {
-        // The editor now shows what the backend stored, so these fields reverted.
-        console.warn("Site content fields not stored by the backend:", notSaved);
-        toast.error(
-          `Saved, but the server did not keep ${notSaved.length} field(s): ${notSaved.slice(0, 5).join(", ")}${
-            notSaved.length > 5 ? ", …" : ""
-          }. They still show the previous value.`,
-          { duration: 10000 }
-        );
-      } else {
-        toast.success("Site content saved & updated live globally!");
-      }
-    } catch (err) {
-      console.error("Failed to update site content:", err);
-      toast.error("Failed to save site content.");
-    } finally {
-      setIsSaving(false);
-    }
+    saveNow(formData);
   };
 
+  /** Puts the built-in text into the form; the website changes only after Save Changes. */
   const handleReset = () => {
-    if (window.confirm("Are you sure you want to reset all site content to defaults?")) {
-      resetContent();
-      setFormData(defaultSiteContent);
-      toast.success("Site content reset to original defaults.");
+    if (window.confirm("Fill every field with the built-in default text? Nothing changes on the website until you press Save Changes.")) {
+      setFormData({ ...defaultSiteContent, adminProfileImage: formData.adminProfileImage });
     }
+  };
+
+  /** Throws away unsaved edits and shows the live content again. */
+  const handleDiscard = () => {
+    if (window.confirm("Discard your unsaved changes?")) {
+      failedRef.current = null;
+      setStatusDetail("");
+      setFormData(baselineRef.current);
+    }
+  };
+
+  const hasUnsaved = !sameContent(formData, baseline);
+  const statusView: Record<SaveStatus, { text: string; className: string }> = {
+    saved: {
+      text: lastSavedAt ? `Saved and live · ${lastSavedAt.toLocaleTimeString()}` : "Website is up to date",
+      className: "text-emerald-700 bg-emerald-50 border-emerald-200",
+    },
+    pending: { text: "Unsaved changes — press Save Changes", className: "text-amber-700 bg-amber-50 border-amber-200" },
+    saving: { text: "Saving…", className: "text-sky-700 bg-sky-50 border-sky-200" },
+    invalid: { text: "Not saved: invalid JSON", className: "text-rose-700 bg-rose-50 border-rose-200" },
+    error: { text: "Not saved", className: "text-rose-700 bg-rose-50 border-rose-200" },
   };
 
   if (loading) {
@@ -207,21 +267,54 @@ export default function AdminContentPage() {
             Global Site Content Editor
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Edit text across the website. Click save to publish changes live instantly.
+            Edit any tab, then press Save Changes. The website updates as soon as the save is confirmed.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <Button variant="outline" onClick={handleReset} size="sm" className="gap-1.5 text-xs">
-            <RotateCcw className="h-4 w-4" />
-            Reset Defaults
-          </Button>
-          <Button onClick={handleSave} disabled={isSaving} className="gap-2 bg-primary text-primary-foreground font-bold shadow-md">
-            <Save className="h-4 w-4" />
-            {isSaving ? "Publishing..." : "Save All Changes"}
-          </Button>
+        <div className="flex flex-col items-start sm:items-end gap-2">
+          <div
+            role="status"
+            aria-live="polite"
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${statusView[saveStatus].className}`}
+          >
+            {saveStatus === "saving" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : saveStatus === "saved" ? (
+              <CheckCircle2 className="h-3.5 w-3.5" />
+            ) : null}
+            {statusView[saveStatus].text}
+          </div>
+          <div className="flex items-center gap-3">
+            <Button variant="outline" onClick={handleReset} size="sm" className="gap-1.5 text-xs">
+              <RotateCcw className="h-4 w-4" />
+              Reset Defaults
+            </Button>
+            {hasUnsaved && saveStatus !== "saving" && (
+              <Button variant="outline" onClick={handleDiscard} size="sm" className="text-xs">
+                Discard
+              </Button>
+            )}
+            <Button
+              onClick={handleSave}
+              disabled={saveStatus === "saving" || (!hasUnsaved && saveStatus !== "error")}
+              className="gap-2 bg-primary text-primary-foreground font-bold shadow-md"
+            >
+              {saveStatus === "saving" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              {saveStatus === "saving" ? "Saving..." : saveStatus === "error" ? "Retry Save" : "Save Changes"}
+            </Button>
+          </div>
         </div>
       </div>
+
+      {statusDetail && (saveStatus === "error" || saveStatus === "invalid" || saveStatus === "saved") && (
+        <div
+          className={`rounded-xl border px-4 py-2 text-xs ${
+            saveStatus === "saved" ? "border-amber-200 bg-amber-50 text-amber-800" : "border-rose-200 bg-rose-50 text-rose-800"
+          }`}
+        >
+          {statusDetail}
+        </div>
+      )}
 
       {/* Tabs Navigation */}
       <div className="flex border-b border-border gap-2 sm:gap-6 overflow-x-auto pb-1">
@@ -592,97 +685,20 @@ export default function AdminContentPage() {
           </Card>
 
           <Card>
-            <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div>
-                <CardTitle className="text-lg">Publishing Packages (JSON Format)</CardTitle>
-                <CardDescription>
-                  These cards are shown on the Publish page as soon as you save. Each card is linked by name (or
-                  price) to a package authors can select on manuscript submission, managed in{" "}
-                  <a href="/admin/packages" className="font-semibold text-[#8A6D1E] underline underline-offset-2">
-                    Publishing Packages
-                  </a>
-                  .
-                </CardDescription>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="text-xs gap-1 bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-300 hover:bg-amber-500/20"
-                  onClick={() => {
-                    setFormData((prev) => ({
-                      ...prev,
-                      packagesJson: defaultSiteContent.packagesJson,
-                    }));
-                    toast.success("Loaded official HarGlim 6 packages (₹999 to ₹9,999) into editor!");
-                  }}
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  Pre-fill HarGlim Official Packages
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="text-xs"
-                  onClick={() => {
-                    try {
-                      const parsed = JSON.parse(formData.packagesJson);
-                      setFormData((prev) => ({
-                        ...prev,
-                        packagesJson: JSON.stringify(parsed, null, 2),
-                      }));
-                      toast.success("JSON formatted successfully!");
-                    } catch (err: any) {
-                      toast.error("Cannot format: Invalid JSON syntax (" + err.message + ")");
-                    }
-                  }}
-                >
-                  Format JSON
-                </Button>
-              </div>
+            <CardHeader>
+              <CardTitle className="text-lg">Publishing Packages</CardTitle>
+              <CardDescription>
+                Packages are managed in one place, Admin → Publishing Packages. What you save there is exactly what the
+                Publish page and the author&apos;s manuscript form show, with a live preview while you edit.
+              </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {(() => {
-                let isValid = true;
-                let errorMsg = "";
-                let count = 0;
-                try {
-                  const parsed = JSON.parse(formData.packagesJson);
-                  if (Array.isArray(parsed)) {
-                    count = parsed.length;
-                  } else {
-                    isValid = false;
-                    errorMsg = "Root JSON must be an array of package objects";
-                  }
-                } catch (e: any) {
-                  isValid = false;
-                  errorMsg = e.message;
-                }
-
-                return (
-                  <div className="flex items-center justify-between text-xs px-3 py-1.5 rounded-lg border bg-muted/40 font-mono">
-                    <span className="flex items-center gap-2">
-                      <span className={`h-2 w-2 rounded-full ${isValid ? "bg-emerald-500" : "bg-destructive animate-pulse"}`} />
-                      <span>Syntax Status: {isValid ? `Valid JSON (${count} packages configured)` : `Invalid JSON Syntax`}</span>
-                    </span>
-                    {!isValid && <span className="text-destructive font-semibold truncate max-w-xs">{errorMsg}</span>}
-                  </div>
-                );
-              })()}
-
-              <div className="space-y-2">
-                <Textarea
-                  id="packagesJson"
-                  rows={14}
-                  className="font-mono text-xs bg-muted/30 border border-input focus:ring-1"
-                  value={formData.packagesJson}
-                  onChange={(e) => setFormData({ ...formData, packagesJson: e.target.value })}
-                />
-              </div>
+            <CardContent>
+              <a href="/admin/packages">
+                <Button type="button" className="gap-2 font-bold">
+                  <Package className="h-4 w-4" />
+                  Manage Publishing Packages
+                </Button>
+              </a>
             </CardContent>
           </Card>
 

@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import Image from "next/image";
-import api from "@/lib/api";
 import {
   BookOpen,
   Edit3,
@@ -19,20 +18,23 @@ import {
   Sparkles,
   Users,
   Globe,
-  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { defaultSiteContent, editedContent, useSiteContent, type SiteContent } from "@/context/site-content-context";
+import { useSiteContent } from "@/context/site-content-context";
 import { readSection } from "@/lib/page-content";
-import { findRealPackage, hasCardCopy, normalizePackages, parsePackagesJson, sortPackages } from "@/lib/publish-packages";
+import { fetchPublicPackages, onPackagesChanged, type PackageCard as PackageCardData } from "@/lib/publish-packages";
+import { PackageCard } from "@/components/packages/package-card";
+import { SpotlightSection } from "@/components/spotlight/spotlight-section";
 import { fetchPublicStats } from "@/lib/public-stats";
 import { useAuthStore } from "@/store/auth-store";
+import api from "@/lib/api";
 
-// Built-in package copy lives in one place: the Site Content default (packagesJson).
-// Unwanted packages are archived by an admin (Admin → Publishing Packages), not filtered here.
-const defaultPackages = parsePackagesJson(defaultSiteContent.packagesJson);
+/** Cloudinary covers resized for the hero (other hosts are used as they are). */
+const coverUrl = (src: string) =>
+  src.startsWith("https://res.cloudinary.com/") && src.includes("/upload/")
+    ? src.replace("/upload/", "/upload/f_auto,q_auto,w_400,c_limit/")
+    : src;
 
 const SERVICE_ICONS = [Edit3, ImageIcon, FileText, Megaphone, Truck, DollarSign];
 
@@ -48,8 +50,9 @@ export default function PublishPage() {
     step: idx + 1,
   }));
   const role = useAuthStore((state) => state.user?.role);
-  const [packages, setPackages] = useState<any[]>([]);
+  const [packages, setPackages] = useState<PackageCardData[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(true);
+  const [packagesError, setPackagesError] = useState(false);
   const [authorsCount, setAuthorsCount] = useState(0);
 
   useEffect(() => {
@@ -57,58 +60,46 @@ export default function PublishPage() {
     fetchAuthorsCount();
   }, []);
 
+  // Hero showcase: the newest published books that have a cover.
+  const [showcase, setShowcase] = useState<{ _id: string; slug?: string; title: string; coverImage: string }[]>([]);
   useEffect(() => {
-    const fetchPackages = async () => {
-      setLoadingPackages(true);
-      try {
-        // GET /publish-packages is the package database (active only, by sortOrder then price).
-        // Its _id is what manuscript submission sends as packageId.
-        const { data } = await api
-          .get("/publish-packages", { cache: "no-store" } as any)
-          .catch(() => ({ data: { data: [] } }));
-        const realPkgs = normalizePackages(data?.data ?? data).map((p) => ({ ...p, isRealPackage: true }));
+    api
+      .get("/books", { params: { limit: 8 } })
+      .then(({ data }) => {
+        const items = data?.data?.books || data?.books || data?.data || [];
+        // Only hosts allowed for next/image in next.config.mjs.
+        const allowed = (src: unknown) =>
+          typeof src === "string" &&
+          (src.startsWith("https://res.cloudinary.com/") || src.startsWith("https://harglimpublish-backend.onrender.com/"));
+        setShowcase((Array.isArray(items) ? items : []).filter((b: any) => allowed(b?.coverImage)).slice(0, 3));
+      })
+      .catch(() => setShowcase([]));
+  }, []);
 
-        // Once an admin has given the real packages their card copy (tagline / highlighted /
-        // badge / sortOrder), they are the single source and Site Content packagesJson is unused.
-        if (realPkgs.some(hasCardCopy)) {
-          setPackages(sortPackages(realPkgs));
-          return;
-        }
+  // The package database (Admin → Publishing Packages) is the only source: every card is a real
+  // package whose _id is the packageId sent on manuscript submission. Reloaded when the tab
+  // regains focus, so an admin's change shows without a refresh.
+  const loadPackages = useCallback(async (showSpinner: boolean) => {
+    if (showSpinner) setLoadingPackages(true);
+    try {
+      setPackages(await fetchPublicPackages());
+      setPackagesError(false);
+    } catch {
+      setPackagesError(true);
+    } finally {
+      setLoadingPackages(false);
+    }
+  }, []);
 
-        // Site Content packagesJson is what the admin edits for this page, so once it differs from
-        // the built-in default it drives the cards. Each card is linked to the real package with the
-        // same _id/id, else the same name, for its packageId (never by price alone).
-        const sitePkgs = parsePackagesJson(
-          editedContent({ packagesJson: content?.packagesJson } as SiteContent, "packagesJson")
-        );
-        if (sitePkgs.length > 0) {
-          setPackages(
-            sitePkgs.map((sp) => {
-              const real = findRealPackage(sp, realPkgs);
-              return real ? { ...sp, _id: real._id, isRealPackage: true } : sp;
-            })
-          );
-          return;
-        }
-
-        setPackages(realPkgs.length > 0 ? realPkgs : defaultPackages);
-      } catch {
-        setPackages(defaultPackages);
-      } finally {
-        setLoadingPackages(false);
-      }
-    };
-    fetchPackages();
-  }, [content?.packagesJson]);
+  useEffect(() => {
+    loadPackages(true);
+    return onPackagesChanged(() => loadPackages(false));
+  }, [loadPackages]);
 
   // Approved authors go straight to submission with the package preselected; everyone else
   // must apply to become an author first.
-  const packageHref = (pkg: any) =>
-    role === "author" && pkg.isRealPackage && pkg._id
-      ? `/author/manuscripts/new?packageId=${encodeURIComponent(pkg._id)}`
-      : role === "author"
-        ? "/author/manuscripts/new"
-        : "/dashboard/become-author";
+  const packageHref = (pkg: PackageCardData) =>
+    role === "author" ? `/author/manuscripts/new?packageId=${encodeURIComponent(pkg._id || "")}` : "/dashboard/become-author";
 
   return (
     <div className="bg-[#F8F9F7] min-h-screen text-[#0F3D3E] font-sans">
@@ -178,35 +169,60 @@ export default function PublishPage() {
               <div className="space-y-1">
                 <div className="flex items-center justify-center lg:justify-start gap-1 text-[#D4AF37]">
                   <DollarSign className="h-4 w-4" />
-                  <span className="font-serif font-bold text-lg text-white">Up to 70%</span>
+                  <span className="font-serif font-bold text-lg text-white">Live</span>
                 </div>
-                <p className="text-[11px] text-white/70">Author Royalties</p>
+                <p className="text-[11px] text-white/70">Royalty Dashboard</p>
               </div>
             </div>
           </div>
 
-          {/* Right Column: Floating Book Mockup / Author Card */}
-          <div className="lg:col-span-5 flex justify-center">
-            <motion.div
-              animate={{ y: [0, -10, 0] }}
-              transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
-              className="relative w-full max-w-sm aspect-[3/4] rounded-3xl overflow-hidden shadow-2xl border-4 border-[#D4AF37]/40 bg-[#0F3D3E]"
-            >
-              <Image
-                src="/logo.png"
-                alt="Book Publishing Mockup"
-                fill
-                sizes="(max-width: 768px) 100vw, 384px"
-                className="object-cover opacity-90"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent p-6 flex flex-col justify-end text-white">
-                <Badge className="w-fit bg-[#D4AF37] text-[#0F3D3E] font-serif font-bold text-xs mb-2">
-                  ⭐ Harglim Original Release
-                </Badge>
-                <h3 className="font-serif font-bold text-xl text-white">The Art of Storytelling</h3>
-                <p className="text-xs text-white/70">Turn your imagination into published reality</p>
+          {/* Right Column: real books published by Harglim authors */}
+          <div className="lg:col-span-5 flex flex-col items-center gap-5">
+            {showcase.length > 0 ? (
+              <>
+                <div className="relative w-full max-w-sm h-[285px] sm:h-[310px]">
+                  {showcase.map((book, idx) => {
+                    // Front cover in the middle, the others fanned out behind it.
+                    const fan = [
+                      "z-30 left-1/2 -translate-x-1/2 rotate-0",
+                      "z-20 left-[4%] rotate-[-8deg] top-6 opacity-90",
+                      "z-10 right-[4%] rotate-[8deg] top-6 opacity-90",
+                    ][idx];
+                    return (
+                      <Link
+                        key={book._id}
+                        href={`/books/${book.slug || book._id}`}
+                        className={`absolute top-0 w-[46%] aspect-[2/3] rounded-xl overflow-hidden shadow-2xl border-2 border-[#D4AF37]/40 bg-[#0F3D3E] transition-transform hover:-translate-y-2 ${fan}`}
+                        title={book.title}
+                      >
+                        <Image
+                          src={coverUrl(book.coverImage)}
+                          alt={`Cover of ${book.title}`}
+                          fill
+                          sizes="(max-width: 768px) 46vw, 180px"
+                          className="object-cover"
+                          priority={idx === 0}
+                        />
+                      </Link>
+                    );
+                  })}
+                </div>
+                <div className="text-center space-y-1">
+                  <p className="text-sm font-serif font-bold text-white">Recently published by Harglim authors</p>
+                  <Link href="/books" className="inline-flex items-center gap-1 text-xs font-bold text-[#D4AF37] hover:underline">
+                    Browse all books <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+              </>
+            ) : (
+              <div className="w-full max-w-sm rounded-3xl border-2 border-[#D4AF37]/40 bg-white/5 p-10 flex flex-col items-center text-center gap-4">
+                <div className="relative h-28 w-28">
+                  <Image src="/logo.png" alt="Harglim Publishers" fill sizes="112px" className="object-contain" />
+                </div>
+                <p className="font-serif font-bold text-lg text-white">Your book could be next</p>
+                <p className="text-xs text-white/70">Editing, design, ISBN and distribution handled for you.</p>
               </div>
-            </motion.div>
+            )}
           </div>
         </div>
       </section>
@@ -315,7 +331,7 @@ export default function PublishPage() {
       </section>
 
       {/* ------------------------------------------------------------------ */}
-      {/* 5. PUBLISHING PACKAGES SECTION (FIXED - NO EMPTY STATE) */}
+      {/* 5. PUBLISHING PACKAGES (Admin → Publishing Packages, GET /publish-packages) */}
       {/* ------------------------------------------------------------------ */}
       <section id="packages" className="py-16 sm:py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-3xl mx-auto mb-12 space-y-2">
@@ -344,78 +360,42 @@ export default function PublishPage() {
                 </div>
               </div>
             ))}
-          {!loadingPackages && packages.map((pkg, idx) => {
-            const isHighlighted = pkg.highlighted;
-
-            return (
+          {!loadingPackages &&
+            packages.map((pkg) => (
               <motion.div
-                key={pkg.id || pkg._id || idx}
+                key={pkg._id}
                 whileHover={{ y: -6 }}
                 transition={{ duration: 0.2 }}
-                className="flex"
+                className={`flex ${pkg.highlighted ? "lg:scale-105" : ""}`}
               >
-                <Card
-                  className={`w-full rounded-3xl p-8 flex flex-col justify-between transition-all duration-300 relative ${
-                    isHighlighted
-                      ? "bg-[#0F3D3E] text-white border-2 border-[#D4AF37] shadow-2xl scale-105"
-                      : "bg-white text-[#0F3D3E] border border-[#E2E6DF] shadow-xs hover:shadow-xl"
-                  }`}
-                >
-                  {isHighlighted && (
-                    <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
-                      <Badge className="bg-[#D4AF37] text-[#0F3D3E] font-serif font-bold text-xs px-4 py-1 rounded-full shadow-md">
-                        ⭐ {pkg.badge || "Most Popular Choice"}
-                      </Badge>
-                    </div>
-                  )}
-
-                  <div className="space-y-6">
-                    <div>
-                      <h3 className={`font-serif font-bold text-2xl ${isHighlighted ? "text-white" : "text-[#0F3D3E]"}`}>
-                        {pkg.name}
-                      </h3>
-                      <p className={`text-xs mt-1 ${isHighlighted ? "text-white/70" : "text-[#5C6E6E]"}`}>
-                        {pkg.tagline || pkg.description || "Comprehensive publishing services"}
-                      </p>
-                    </div>
-
-                    <div className="flex items-baseline gap-1">
-                      <span className={`text-4xl font-serif font-bold ${isHighlighted ? "text-[#D4AF37]" : "text-[#0F3D3E]"}`}>
-                        ₹{Number(pkg.price || 0).toLocaleString("en-IN")}
-                      </span>
-                      <span className={`text-xs ${isHighlighted ? "text-white/60" : "text-[#5C6E6E]"}`}>/ one-time</span>
-                    </div>
-
-                    <ul className="space-y-3 pt-4 border-t border-current/10">
-                      {pkg.features?.map((feat: string, fIdx: number) => (
-                        <li key={fIdx} className="flex items-center gap-2.5 text-xs font-medium">
-                          <Check className={`h-4 w-4 shrink-0 ${isHighlighted ? "text-[#D4AF37]" : "text-emerald-600"}`} />
-                          <span>{feat}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div className="pt-8">
-                    <Link href={packageHref(pkg)} className="block">
-                      <Button
-                        className={`w-full h-12 font-serif font-bold text-sm rounded-xl transition-all ${
-                          isHighlighted
-                            ? "bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] shadow-md"
-                            : "bg-[#0F3D3E] hover:bg-[#174C4D] text-white"
-                        }`}
-                      >
-                        <span>Select Plan & Submit</span>
-                        <ArrowRight className="h-4 w-4 ml-2" />
-                      </Button>
-                    </Link>
-                  </div>
-                </Card>
+                <PackageCard pkg={pkg} href={packageHref(pkg)} />
               </motion.div>
-            );
-          })}
+            ))}
         </div>
+
+        {!loadingPackages && packages.length === 0 && (
+          <div className="max-w-xl mx-auto text-center rounded-3xl border border-[#E2E6DF] bg-white p-8 space-y-3">
+            <p className="font-serif font-bold text-lg text-[#0F3D3E]">
+              {packagesError ? "We couldn't load our packages right now." : "Our publishing packages are being updated."}
+            </p>
+            <p className="text-sm text-[#5C6E6E]">
+              {packagesError ? "Please try again in a moment." : "Contact us and we'll help you choose the right plan."}
+            </p>
+            {packagesError ? (
+              <Button onClick={() => loadPackages(true)} className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-bold">
+                Try again
+              </Button>
+            ) : (
+              <Link href="/contact" className="inline-block">
+                <Button className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-bold">Contact us</Button>
+              </Link>
+            )}
+          </div>
+        )}
       </section>
+
+      {/* Author Spotlight (GET /spotlights), under the packages */}
+      <SpotlightSection />
 
       {/* ------------------------------------------------------------------ */}
       {/* 6. FINAL CONVERSION CTA SECTION */}

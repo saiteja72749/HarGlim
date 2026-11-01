@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useLayoutEffect, useRef } from 'react';
 import api from '@/lib/api';
+import { notifyLiveChange, onLiveChange } from '@/lib/live-sync';
 import { defaultFaqsJson, pageSectionDefaults, type PageSectionKey } from '@/lib/page-content';
 
 export interface SiteContent extends Record<PageSectionKey, string> {
@@ -257,18 +258,23 @@ const LEGACY_DEFAULTS: Partial<Record<keyof SiteContent, string>> = {
 
 const STORAGE_KEY = 'harglim_site_content_cache';
 
+/** What a save stored: the content read back from the server and the keys it did not keep. */
+export type SaveResult = {
+  stored: SiteContent;
+  notSaved: (keyof SiteContent)[];
+  /** False when the save succeeded but reading it back failed. */
+  verified: boolean;
+};
+
 interface SiteContentContextType {
   content: SiteContent;
-  /** Resolves to the keys the backend did not keep (empty when everything saved). */
-  updateContent: (newContent: Partial<SiteContent>) => Promise<(keyof SiteContent)[]>;
-  resetContent: () => void;
+  updateContent: (newContent: Partial<SiteContent>) => Promise<SaveResult>;
   loading: boolean;
 }
 
 const SiteContentContext = createContext<SiteContentContextType>({
   content: defaultSiteContent,
-  updateContent: async () => [],
-  resetContent: () => {},
+  updateContent: async () => ({ stored: defaultSiteContent, notSaved: [], verified: false }),
   loading: false,
 });
 
@@ -422,6 +428,23 @@ export function unsavedKeys(sent: SiteContent, stored: SiteContent): (keyof Site
   });
 }
 
+/** Backend rule: every key ending in Json is a JSON list string of at most 100 KB. */
+const MAX_JSON_BYTES = 100 * 1024;
+
+/** The first `…Json` field that the backend would reject, with the reason; null when all are valid. */
+export function invalidJsonField(content: Partial<SiteContent>): { key: keyof SiteContent; reason: string } | null {
+  for (const [key, value] of Object.entries(content)) {
+    if (!key.endsWith('Json') || typeof value !== 'string') continue;
+    try {
+      if (!Array.isArray(JSON.parse(value || '[]'))) return { key: key as keyof SiteContent, reason: 'must be a JSON list [ … ]' };
+    } catch (err: any) {
+      return { key: key as keyof SiteContent, reason: `is not valid JSON (${err?.message || 'syntax error'})` };
+    }
+    if (new Blob([value]).size > MAX_JSON_BYTES) return { key: key as keyof SiteContent, reason: 'is larger than 100 KB' };
+  }
+  return null;
+}
+
 async function fetchBackendContent(): Promise<any | null> {
   const res = await api.get('/content', { cache: 'no-store' } as any).catch(() => null);
   const apiData = res?.data?.data || res?.data;
@@ -474,28 +497,27 @@ export function SiteContentProvider({ children }: { children: React.ReactNode })
     };
 
     loadContent();
+    // An admin save in another tab, or coming back to this tab, reloads the live content.
+    return onLiveChange('site-content', loadContent);
   }, []);
 
   /**
    * Saves to the backend, then reads GET /content back so the site (and the admin editor) shows
-   * what was actually stored. Resolves to the keys the backend did not keep (empty = all saved).
+   * what was actually stored, and tells the site's other open tabs to reload.
    */
-  const updateContent = async (newFields: Partial<SiteContent>): Promise<(keyof SiteContent)[]> => {
+  const updateContent = async (newFields: Partial<SiteContent>): Promise<SaveResult> => {
     const updated = { ...content, ...newFields };
     await api.put('/admin/content', toBackendPayload(updated, backendDocRef.current));
+    notifyLiveChange('site-content');
 
     const stored = await fetchBackendContent();
     if (!stored) {
       // Saved, but the read-back failed: show what was sent until the next load.
       setContent(updated);
-      return [];
+      return { stored: updated, notSaved: [], verified: false };
     }
-    return unsavedKeys(updated, applyBackendContent(stored));
-  };
-
-  const resetContent = () => {
-    setContent(defaultSiteContent);
-    localStorage.removeItem(STORAGE_KEY);
+    const merged = applyBackendContent(stored);
+    return { stored: merged, notSaved: unsavedKeys(updated, merged), verified: true };
   };
 
   return (
@@ -503,7 +525,6 @@ export function SiteContentProvider({ children }: { children: React.ReactNode })
       value={{
         content,
         updateContent,
-        resetContent,
         loading,
       }}
     >

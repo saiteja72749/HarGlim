@@ -162,7 +162,7 @@ export default function AuthorSettingsPage() {
           const uploadFormData = new FormData();
           uploadFormData.append("image", imageFile);
 
-          const uploadRes = await api.post("/uploads/image", uploadFormData);
+          const uploadRes = await api.post("/authors/me/uploads/image", uploadFormData);
           const uploadedUrl = uploadRes?.data?.data?.url || uploadRes?.data?.url;
           if (!uploadedUrl) throw new Error("no url");
           finalImage = uploadedUrl;

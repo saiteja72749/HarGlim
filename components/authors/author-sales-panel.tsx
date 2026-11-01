@@ -86,9 +86,10 @@ export function AuthorSalesPanel({
                   <Title id={b.bookId} title={b.title} available={Boolean(b.bookId)} />
                   <p className="text-[11px] text-[#5C6E6E]">
                     {b.unitsSold} sold · {formatINR(b.grossRevenue)} revenue
-                    {b.royaltyPercent !== null
+                    {b.royaltyPercent !== null || b.royaltyPerCopy !== null
                       ? ` · ${formatINR(Math.max(0, b.grossRevenue - b.royalty))} printing, platform & delivery`
                       : ""}
+                    {b.royaltyPerCopy !== null ? ` · ${formatINR(b.royaltyPerCopy)} per copy` : ""}
                   </p>
                 </div>
                 <div className="text-right shrink-0">
@@ -132,7 +133,11 @@ export function AuthorSalesPanel({
                     <td className="p-2 text-center tabular-nums">{s.quantity}</td>
                     <td className="p-2 text-right tabular-nums">{formatINR(s.unitPrice)}</td>
                     <td className="p-2 text-right tabular-nums text-emerald-700">
-                      {formatINR(s.royalty)}
+                      {s.royaltyUnavailable ? (
+                        <span className="text-amber-700" title="Sale recorded before royalty rates were stored">Unavailable</span>
+                      ) : (
+                        formatINR(s.royalty)
+                      )}
                     </td>
                     <td className="p-2 whitespace-nowrap text-[#5C6E6E]">
                       {s.saleDate ? new Date(s.saleDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}

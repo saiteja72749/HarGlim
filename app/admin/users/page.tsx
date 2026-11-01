@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import api from "@/lib/api";
+import { announceInvite, resendAuthorInvite } from "@/lib/admin-authors";
 import { ErrorState } from "@/components/ui/error-state";
 import {
   Users,
@@ -19,6 +20,7 @@ import {
   Check,
   Loader2,
   KeyRound,
+  Send,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth-store";
 import { Card, CardContent } from "@/components/ui/card";
@@ -137,7 +139,9 @@ export default function AdminUsersPage() {
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!createForm.name.trim() || !createForm.email.trim() || !createForm.password) {
+    // An author needs no password: leaving it empty emails them a set-password invitation.
+    const inviteAuthor = createForm.role === "author" && !createForm.password;
+    if (!createForm.name.trim() || !createForm.email.trim() || (!createForm.password && !inviteAuthor)) {
       toast.error("Please fill in all required fields.");
       return;
     }
@@ -147,7 +151,7 @@ export default function AdminUsersPage() {
       const payload = {
         name: createForm.name.trim(),
         email: createForm.email.trim(),
-        password: createForm.password,
+        ...(inviteAuthor ? {} : { password: createForm.password }),
         role: createForm.role === "user" ? "reader" : createForm.role,
         isActive: Boolean(createForm.isActive),
       };
@@ -157,6 +161,7 @@ export default function AdminUsersPage() {
         res.data?.data?.user ||
         res.data?.user ||
         res.data?.data;
+      announceInvite(createdUser);
 
       if (!createdUser) {
         createdUser = {
@@ -549,6 +554,18 @@ export default function AdminUsersPage() {
                               <KeyRound className="mr-2 h-4 w-4 text-[#D4AF37]" />
                               Reset Password
                             </DropdownMenuItem>
+                            {String(role).toLowerCase() === "author" && (
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  resendAuthorInvite(user.id || user._id).catch((err: any) =>
+                                    toast.error(err?.response?.data?.message || "Could not resend the invitation.")
+                                  )
+                                }
+                              >
+                                <Send className="mr-2 h-4 w-4 text-primary" />
+                                Resend Invite
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem onClick={() => window.location.href = `mailto:${user.email}`}>
                               <Mail className="mr-2 h-4 w-4" />
                               Send Email
@@ -756,12 +773,12 @@ export default function AdminUsersPage() {
 
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block">
-                  Password *
+                  {createForm.role === "author" ? "Password (optional)" : "Password *"}
                 </label>
                 <Input
                   type="password"
-                  required
-                  placeholder="Enter strong password (min 6 chars)"
+                  required={createForm.role !== "author"}
+                  placeholder={createForm.role === "author" ? "Leave empty to email a set-password invitation" : "Enter strong password (min 6 chars)"}
                   value={createForm.password}
                   onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
                 />
