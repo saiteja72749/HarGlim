@@ -16,6 +16,7 @@ import {
   Baby,
   Compass,
 } from "lucide-react";
+import { onLiveChange } from "@/lib/live-sync";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -72,9 +73,11 @@ export default function CategoriesPage() {
       try {
         setLoading(true);
         setError(false);
+        // The backend pages at 20 by default; ask for all so the 21st category is not dropped.
         const { data } = await api.get("/categories", {
-          params: { active: true }
-        });
+          params: { active: true, limit: 100 },
+          cache: "no-store",
+        } as any);
         const items = data.data?.categories || (Array.isArray(data.data) ? data.data : []) || (Array.isArray(data) ? data : []);
         setCategories(Array.isArray(items) ? items : []);
       } catch (err) {
@@ -86,6 +89,8 @@ export default function CategoriesPage() {
       }
     };
     fetchCategories();
+    // An admin's category change in another tab, or coming back to this tab, reloads the list.
+    return onLiveChange("categories", fetchCategories);
   }, []);
 
   const filteredCategories = categories

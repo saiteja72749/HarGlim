@@ -29,6 +29,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import toast from "react-hot-toast";
+import { invalidateCategoryCache } from "@/lib/categories";
+import { notifyLiveChange } from "@/lib/live-sync";
+
+/** After a create, edit, status change or delete: forms and open website tabs load the new list. */
+const categoriesChanged = () => {
+  invalidateCategoryCache();
+  notifyLiveChange("categories");
+};
 
 export default function AdminCategoriesPage() {
   const [categories, setCategories] = useState<any[]>([]);
@@ -130,6 +138,7 @@ export default function AdminCategoriesPage() {
       }
 
       setIsModalOpen(false);
+      categoriesChanged();
       fetchCategories();
     } catch (err: any) {
       console.error("Failed to save category:", err);
@@ -151,6 +160,7 @@ export default function AdminCategoriesPage() {
           (c._id || c.id) === catId ? { ...c, active: newActive, isActive: newActive } : c
         )
       );
+      categoriesChanged();
       toast.success(`Category set to ${newActive ? "Active" : "Inactive"}.`);
     } catch (err: any) {
       console.error("Failed to toggle category status:", err);
@@ -168,6 +178,7 @@ export default function AdminCategoriesPage() {
     try {
       await api.delete(`/admin/categories/${catId}`);
       toast.success(`Category "${cat.name}" soft deleted successfully.`);
+      categoriesChanged();
       fetchCategories();
     } catch (err: any) {
       console.error("Failed to delete category:", err);
@@ -453,16 +464,22 @@ export default function AdminCategoriesPage() {
                 </div>
 
                 <div className="space-y-3 pt-4">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-[#0F3D3E]">Featured Category</span>
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <span className="font-bold text-[#0F3D3E] block">Show on Home page</span>
+                      <span className="text-[11px] text-[#5C6E6E]">Featured: one of up to 6 on the home page</span>
+                    </div>
                     <Switch
                       checked={formData.featured}
                       onCheckedChange={(val) => setFormData({ ...formData, featured: val })}
                     />
                   </div>
 
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-[#0F3D3E]">Active Status</span>
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <span className="font-bold text-[#0F3D3E] block">Active</span>
+                      <span className="text-[11px] text-[#5C6E6E]">Shown on the website</span>
+                    </div>
                     <Switch
                       checked={formData.active}
                       onCheckedChange={(val) => setFormData({ ...formData, active: val })}

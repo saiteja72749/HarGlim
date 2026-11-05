@@ -12,13 +12,23 @@ export interface BackendCategory {
 }
 
 let cachedCategories: BackendCategory[] | null = null;
+let cachedAt = 0;
 let fetchPromise: Promise<BackendCategory[]> | null = null;
 
+/** Reused for a minute at most, so a category an admin just added appears in forms and filters. */
+const CACHE_MS = 60 * 1000;
+
+/** Drop the cached list; called after any change in Admin → Categories. */
+export function invalidateCategoryCache() {
+  cachedCategories = null;
+  cachedAt = 0;
+}
+
 /**
- * Fetch all categories from backend API and cache them.
+ * Fetch all categories from backend API and cache them briefly.
  */
 export async function fetchBackendCategories(forceRefresh = false): Promise<BackendCategory[]> {
-  if (!forceRefresh && cachedCategories && cachedCategories.length > 0) {
+  if (!forceRefresh && cachedCategories && cachedCategories.length > 0 && Date.now() - cachedAt < CACHE_MS) {
     return cachedCategories;
   }
 
@@ -28,7 +38,8 @@ export async function fetchBackendCategories(forceRefresh = false): Promise<Back
 
   fetchPromise = (async () => {
     try {
-      const res = await api.get("/categories", { params: { limit: 100 } });
+      // no-store: the client's 30 s GET cache must not hand back a list from before an admin's change.
+      const res = await api.get("/categories", { params: { limit: 100 }, cache: "no-store" } as any);
 
       const data = res?.data;
       const rawList =
@@ -50,6 +61,7 @@ export async function fetchBackendCategories(forceRefresh = false): Promise<Back
         : [];
 
       cachedCategories = list;
+      cachedAt = Date.now();
       return list;
     } catch (err) {
       console.warn("Notice: Failed to fetch backend categories:", err);

@@ -43,6 +43,7 @@ import { Badge } from "@/components/ui/badge";
 import type { Book as BookType, Category } from "@/types";
 import api from "@/lib/api";
 import { fetchBackendCategories } from "@/lib/categories";
+import { onLiveChange } from "@/lib/live-sync";
 import { cn } from "@/lib/utils";
 
 const priceRanges = [
@@ -84,9 +85,9 @@ function BooksContent() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
-  const fetchCategories = async () => {
+  const fetchCategories = async (fresh = false) => {
     try {
-      const items = (await fetchBackendCategories()) as Category[];
+      const items = (await fetchBackendCategories(fresh)) as Category[];
       setCategories(items);
     } catch (err) {
       console.error("Failed to fetch categories:", err);
@@ -95,6 +96,8 @@ function BooksContent() {
 
   useEffect(() => {
     fetchCategories();
+    // A category added, renamed or deactivated by an admin shows in the filter without a reload.
+    return onLiveChange("categories", () => fetchCategories(true));
   }, []);
 
   const fetchBooks = async () => {
