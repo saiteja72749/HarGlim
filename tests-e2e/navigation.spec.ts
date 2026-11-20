@@ -22,16 +22,16 @@ test.describe('Public navigation', () => {
   test('books catalog page loads and lists books or an empty state', async ({ page }) => {
     await page.goto('/books', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: /books catalog/i })).toBeVisible();
-    // Either real book cards render, or the page's own "no books" message does —
-    // either way the page must not be stuck on its loading skeleton forever.
-    await expect(page.locator('body')).not.toContainText('undefined', { timeout: 15000 });
+    // Wait for an actual result rather than passing while loading skeletons are visible.
+    await expect(page.locator('a[href^="/books/"]').first().or(page.getByRole('heading', { name: /no books found/i }))).toBeVisible({ timeout: 50_000 });
   });
 
   test('navigating to a book from the catalog opens a detail page', async ({ page }) => {
     await page.goto('/books', { waitUntil: 'domcontentloaded' });
     const firstBookLink = page.locator('a[href^="/books/"]').first();
-    const count = await firstBookLink.count();
-    test.skip(count === 0, 'No books returned by the backend to click through.');
+    const empty = page.getByRole('heading', { name: /no books found/i });
+    await expect(firstBookLink.or(empty)).toBeVisible({ timeout: 50_000 });
+    test.skip(await empty.isVisible(), 'No books returned by the backend to click through.');
     await firstBookLink.click();
     await expect(page).toHaveURL(/\/books\/.+/);
     await expect(page.locator('h1').first()).toBeVisible();

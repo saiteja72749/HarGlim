@@ -1,0 +1,60 @@
+{
+  "checkedAt": "2026-11-20T18:15:02.552Z",
+  "scope": "Category management and backend category integration; broader audit changes excluded",
+  "baseline": "0495c2c",
+  "nextVersion": "16.4.6",
+  "validation": [
+    {
+      "name": "category-unit",
+      "passed": true,
+      "durationMs": 20680
+    },
+    {
+      "name": "category-lint",
+      "passed": true,
+      "durationMs": 99095,
+      "errors": 0,
+      "warnings": 80
+    },
+    {
+      "name": "build",
+      "passed": true,
+      "durationMs": 318224
+    },
+    {
+      "name": "category-browser",
+      "passed": true,
+      "durationMs": 213324
+    }
+  ],
+  "categoryUnitTestsPassed": 9,
+  "browserEvidence": {
+    "initialProductionRun": {
+      "passed": 14,
+      "skipped": 2
+    },
+    "correctedCatalogNavigation": {
+      "passed": 2,
+      "skipped": 0
+    },
+    "remainingUnverified": "Admin inventory and writes require authorized admin credentials; transactional tests require a test environment"
+  },
+  "staticPagesBuilt": 68,
+  "buildId": "9FEFxuklARyC_br9ZxsLC",
+  "seeding": {
+    "appliedToLiveDatabase": false,
+    "initialNames": 63,
+    "preserveExistingNamesAndIds": true,
+    "approvedExistingName": {
+      "requested": "Self-Help",
+      "preserved": "Self Help"
+    },
+    "publicPreview": {
+      "existing": 9,
+      "coveredRequestedEntries": 3,
+      "potentiallyMissing": 60
+    },
+    "inactiveInventoryVerified": false
+  },
+  "backendSourceAvailable": false
+}
