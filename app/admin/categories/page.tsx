@@ -106,6 +106,11 @@ export default function AdminCategoriesPage() {
       return;
     }
 
+    if (!Number.isFinite(formData.sortOrder) || formData.sortOrder < 0) {
+      toast.error("Sort order must be zero or greater.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const latest = await fetchAllCategories(true);
@@ -117,7 +122,7 @@ export default function AdminCategoriesPage() {
         name: formData.name.trim(),
         description: formData.description.trim(),
         featured: formData.featured,
-        sortOrder: Number(formData.sortOrder) || 1,
+        sortOrder: formData.sortOrder,
         active: formData.active,
       };
 
@@ -465,7 +470,7 @@ export default function AdminCategoriesPage() {
                     value={formData.sortOrder}
                     onChange={(e) => setFormData({ ...formData, sortOrder: Number(e.target.value) })}
                     className="bg-[#F8F9F7]"
-                    min={1}
+                    min={0}
                   />
                 </div>
 
