@@ -39,6 +39,10 @@
   ],
   "exclude": [
     "node_modules",
-    ".next/dev/types/validator.ts"
+    ".next/dev/types/validator.ts",
+    ".netlify",
+    "test-suite-results",
+    "test-results",
+    "playwright-report"
   ]
 }

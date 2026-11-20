@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
@@ -28,6 +30,7 @@ import toast from "react-hot-toast";
 import Link from "next/link";
 import api from "@/lib/api";
 import { fetchBackendCategories } from "@/lib/categories";
+import { useBookCategories } from "@/hooks/use-book-categories";
 import { fetchPublicPackages } from "@/lib/publish-packages";
 
 // Backend default upload limit (UPLOAD_MAX_BYTES) is 25MB.
@@ -40,17 +43,10 @@ export default function NewManuscriptPage() {
   const [packages, setPackages] = useState<any[]>([]);
   const [selectedPackageId, setSelectedPackageId] = useState<string>("");
   const [loadingPackages, setLoadingPackages] = useState(true);
-  const [categories, setCategories] = useState<{ _id: string; name: string }[]>([]);
+  const { categories, loading: categoriesLoading, error: categoryError, reload: reloadCategories } = useBookCategories(false);
   // If the draft was created but the submit step failed, retry only the submit (no duplicate drafts).
   const [draftBookId, setDraftBookId] = useState<string | null>(null);
   const [uploadedFileUrl, setUploadedFileUrl] = useState<string>("");
-
-  useEffect(() => {
-    // Category must be a real Category ObjectId for POST /authors/me/books.
-    fetchBackendCategories()
-      .then((list) => setCategories(list.filter((c: any) => c.isActive !== false && c.active !== false)))
-      .catch(() => setCategories([]));
-  }, []);
 
   const [formData, setFormData] = useState({
     title: "",
@@ -79,7 +75,7 @@ export default function NewManuscriptPage() {
           setSelectedPackageId(preselected._id || preselected.id);
         }
       } catch (err) {
-        console.warn("Failed to load publish packages:", err);
+        console.warn("Failed to load publish packages:", describeApiError(err));
       } finally {
         setLoadingPackages(false);
       }
@@ -116,7 +112,7 @@ export default function NewManuscriptPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.title.trim() || !formData.category || !formData.synopsis.trim()) {
+    if (!formData.title.trim() || !formData.category || categoryError || categoriesLoading || !formData.synopsis.trim()) {
       toast.error("Please fill in all required fields");
       return;
     }
@@ -167,7 +163,8 @@ export default function NewManuscriptPage() {
         setUploadedFileUrl(fileUrl);
       }
 
-      const category = categories.find((c) => c._id === formData.category);
+      const category = (await fetchBackendCategories(true)).find((c) => c._id === formData.category);
+      if (!category) throw new Error("The selected category is no longer available. Refresh categories and select again.");
 
       // 2. Create the draft once. Fields outside the backend schema go into the
       //    description so the editorial team still sees them.
@@ -193,15 +190,16 @@ export default function NewManuscriptPage() {
       // 3. Submit the draft for editorial review
       await api.post(`/authors/me/books/${bookId}/submit`, {
         fileUrl,
-        genre: category?.name || "General",
+        genre: category.name,
         wordCount,
         packageId: selectedPackageId,
       });
 
       toast.success("Manuscript submitted for editorial review! 📚");
       router.push("/author/manuscripts");
-    } catch (error: any) {
-      console.error("Manuscript submission failed:", error);
+    } catch (caughtError) {
+      const error = describeApiError(caughtError);
+      console.error("Manuscript submission failed:", describeApiError(error));
       const message = error?.response?.data?.message || error?.message || "Failed to submit manuscript request.";
       toast.error(draftBookId ? `${message} Your draft is saved. Press Submit again to retry.` : message);
     } finally {
@@ -253,12 +251,13 @@ export default function NewManuscriptPage() {
                     </Label>
                     <Select
                       value={formData.category}
+                      disabled={categoriesLoading || categoryError}
                       onValueChange={(value) =>
                         setFormData({ ...formData, category: value })
                       }
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a category" />
+                      <SelectTrigger id="category">
+                        <SelectValue placeholder={categoriesLoading ? "Loading categories..." : "Select a category"} />
                       </SelectTrigger>
                       <SelectContent>
                         {categories.map((cat) => (
@@ -268,6 +267,9 @@ export default function NewManuscriptPage() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {categoryError && <p role="alert" className="text-xs text-rose-700">Could not load categories. <button type="button" className="underline" onClick={() => void reloadCategories()}>Retry</button></p>}
+                    {!categoriesLoading && !categoryError && categories.length === 0 && <p className="text-xs text-muted-foreground">No active categories are available. Please contact the publisher.</p>}
+
                   </div>
 
                   <div className="space-y-2">

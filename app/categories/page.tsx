@@ -1,4 +1,6 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
+
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
@@ -28,10 +30,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { Category } from "@/types";
-import api from "@/lib/api";
+import { fetchBackendCategories } from "@/lib/categories";
 
 // Category Icons Mapping
-const categoryIconMap: Record<string, any> = {
+const categoryIconMap: Record<string, typeof BookOpen> = {
   fiction: Feather,
   literature: Feather,
   business: Briefcase,
@@ -54,7 +56,7 @@ const getCategoryIcon = (slugOrName: string) => {
   return BookOpen;
 };
 
-const getCategoryImage = (cat: any) => {
+const getCategoryImage = (cat: Category) => {
   if (cat.image && (cat.image.startsWith("http") || cat.image.startsWith("/")) && !cat.image.includes("placeholder")) {
     return cat.image;
   }
@@ -73,15 +75,9 @@ export default function CategoriesPage() {
       try {
         setLoading(true);
         setError(false);
-        // The backend pages at 20 by default; ask for all so the 21st category is not dropped.
-        const { data } = await api.get("/categories", {
-          params: { active: true, limit: 100 },
-          cache: "no-store",
-        } as any);
-        const items = data.data?.categories || (Array.isArray(data.data) ? data.data : []) || (Array.isArray(data) ? data : []);
-        setCategories(Array.isArray(items) ? items : []);
+        setCategories(await fetchBackendCategories(true) as Category[]);
       } catch (err) {
-        console.error("Failed to fetch categories:", err);
+        console.error("Failed to fetch categories:", describeApiError(err));
         setError(true);
         setCategories([]);
       } finally {

@@ -1,4 +1,6 @@
 'use client';
+import { describeApiError } from "@/lib/api-error";
+
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
@@ -15,17 +17,25 @@ import {
 } from '@/components/ui/select';
 import type { Book, Category } from '@/types';
 import api from '@/lib/api';
+import { onLiveChange } from '@/lib/live-sync';
+import { ErrorState } from '@/components/ui/error-state';
+import { Button } from '@/components/ui/button';
 export default function CategoryDetailPage() {
   const params = useParams();
-  const [category, setCategory] = useState<(Category & { image: string }) | null>(null);
+  const [category, setCategory] = useState<Category | null>(null);
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState('newest');
+  const [error, setError] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     const fetchCategoryData = async () => {
       try {
         setLoading(true);
+        setError(false);
         const slug = params.slug as string;
         
         let sortParam = "newest";
@@ -35,8 +45,8 @@ export default function CategoryDetailPage() {
         else if (sortBy === "bestseller") sortParam = "bestseller";
 
         const [catRes, booksRes] = await Promise.all([
-          api.get(`/categories/${slug}`).catch(() => null),
-          api.get(`/categories/${slug}/books`, { params: { sort: sortParam } }).catch(() => null),
+          api.get(`/categories/${encodeURIComponent(slug)}`, { cache: "no-store" }),
+          api.get(`/categories/${encodeURIComponent(slug)}/books`, { params: { sort: sortParam, page, limit: 24 }, cache: "no-store" }),
         ]);
         
         const catData = catRes?.data?.data || catRes?.data;
@@ -45,30 +55,25 @@ export default function CategoryDetailPage() {
         const bookList = Array.isArray(items) ? items : [];
         setBooks(bookList);
 
-        if (catData) {
-          setCategory(catData);
-        } else {
-          // Construct graceful fallback if category object isn't returned separately
-          const formattedName = slug ? slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "Category";
-          setCategory({
-            _id: slug,
-            name: formattedName,
-            slug: slug,
-            description: `Collection of ${formattedName} books`,
-            active: true,
-            featured: false,
-            bookCount: bookList.length,
-            image: "/logo.png",
-          } as any);
-        }
+        if (!catData?._id || !catData?.name) throw new Error("Invalid category response.");
+        setCategory(catData);
+        const pagination = booksRes.data?.pagination ?? booksRes.data?.data?.pagination;
+        setPages(pagination?.pages || 1);
       } catch (err) {
-        console.error("Failed to fetch category data:", err);
+        console.error("Failed to fetch category data:", describeApiError(err));
+        setBooks([]);
+        setCategory(null);
+        if (describeApiError(err).response?.status !== 404) setError(true);
       } finally {
         setLoading(false);
       }
     };
     fetchCategoryData();
-  }, [params.slug, sortBy]);
+  }, [params.slug, sortBy, page, retry]);
+
+  useEffect(() => onLiveChange("categories", () => setRetry((value) => value + 1)), []);
+
+  if (error && !loading) return <ErrorState title="Could not load category" message="Check your connection and try again." onRetry={() => setRetry((value) => value + 1)} />;
 
   if (loading) {
     return (
@@ -107,7 +112,7 @@ export default function CategoryDetailPage() {
       {/* Hero */}
       <div
         className="relative h-64 md:h-80 bg-cover bg-center"
-        style={{ backgroundImage: `url(${category.image})` }}
+        style={{ backgroundImage: `url(${category.image || "/logo.png"})` }}
       >
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/50 to-black/30" />
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-full flex flex-col justify-end pb-8">
@@ -124,7 +129,7 @@ export default function CategoryDetailPage() {
           <p className="text-white/80 max-w-2xl">{category.description}</p>
           <div className="flex items-center gap-2 text-white/70 mt-3">
             <BookOpen className="h-4 w-4" />
-            {category.bookCount} Books
+            {category.bookCount !== undefined ? `${category.bookCount} Books` : ""}
           </div>
         </div>
       </div>
@@ -135,7 +140,7 @@ export default function CategoryDetailPage() {
           <p className="text-muted-foreground">
             Showing {books.length} books in {category.name}
           </p>
-          <Select value={sortBy} onValueChange={setSortBy}>
+          <Select value={sortBy} onValueChange={(value) => { setSortBy(value); setPage(1); }}>
             <SelectTrigger className="w-[160px]">
               <SelectValue placeholder="Sort by" />
             </SelectTrigger>
@@ -149,6 +154,7 @@ export default function CategoryDetailPage() {
           </Select>
         </div>
 
+        {books.length === 0 && <p role="status" className="py-12 text-center text-muted-foreground">No books are available in this category yet.</p>}
         {/* Books Grid */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -159,6 +165,11 @@ export default function CategoryDetailPage() {
             <BookCard key={book._id} book={book} />
           ))}
         </motion.div>
+        {pages > 1 && <div className="flex items-center justify-center gap-4 mt-8">
+          <Button variant="outline" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Previous</Button>
+          <span>Page {page} of {pages}</span>
+          <Button variant="outline" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>Next</Button>
+        </div>}
       </div>
     </div>
   );

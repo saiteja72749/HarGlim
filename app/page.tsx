@@ -24,6 +24,8 @@ import { Button } from "@/components/ui/button";
 import { BookCard } from "@/components/books/book-card";
 import { Input } from "@/components/ui/input";
 import api from "@/lib/api";
+import { fetchBackendCategories } from "@/lib/categories";
+import { onLiveChange } from "@/lib/live-sync";
 import type { Book } from "@/types";
 import { getBookAuthorInfo } from "@/lib/utils";
 
@@ -100,7 +102,7 @@ export default function Home() {
       const [bestsellersRes, categoriesRes, authorsRes, statsRes] = await Promise.allSettled([
         // Live backend honours `bestseller=true`; `sort=rating` is ignored (returns default order).
         api.get("/books?bestseller=true&limit=4"),
-        api.get("/categories?featured=true&limit=6"),
+        fetchBackendCategories(),
         api.get("/authors?limit=6"),
         fetchPublicStats(),
       ]);
@@ -110,9 +112,7 @@ export default function Home() {
       }
 
       if (categoriesRes.status === "fulfilled") {
-        const data = categoriesRes.value.data;
-        const items = data?.data?.categories || data?.data || data || [];
-        setCategories(Array.isArray(items) ? items : []);
+        setCategories(categoriesRes.value.filter((category) => category.featured).slice(0, 6));
       }
 
       if (authorsRes.status === "fulfilled") {
@@ -134,6 +134,12 @@ export default function Home() {
   useEffect(() => {
     fetchHomeData();
   }, []);
+
+  useEffect(() => onLiveChange("categories", () => {
+    fetchBackendCategories(true)
+      .then((items) => setCategories(items.filter((category) => category.featured).slice(0, 6)))
+      .catch(() => setError(true));
+  }), []);
 
   useEffect(() => {
     if (heroPaused || featuredBooks.length < 2) return;

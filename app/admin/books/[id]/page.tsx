@@ -1,4 +1,5 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
@@ -30,7 +31,9 @@ import {
 import { Switch } from "@/components/ui/switch";
 import toast from "react-hot-toast";
 
-import { fetchBackendCategories, resolveCategoryObjectId, getCategoryDisplayName } from "@/lib/categories";
+import { createBackendCategory, fetchAllCategories } from "@/lib/categories";
+import { categoryIsActive, resolveCategoryId } from "@/lib/category-data";
+import { useBookCategories } from "@/hooks/use-book-categories";
 import { isValidEmailAddress, normalizeEmailForStorage } from "@/lib/email";
 import { hasCosts, readCosts } from "@/lib/royalty";
 import { RoyaltyCostFields } from "@/components/books/royalty-cost-fields";
@@ -57,11 +60,7 @@ export default function EditBookPage() {
   const [newAuthorName, setNewAuthorName] = useState<string>("");
   const [newAuthorEmail, setNewAuthorEmail] = useState<string>("");
 
-  // Category options come from GET /categories (the same list the storefront uses).
-  const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
-  useEffect(() => {
-    fetchBackendCategories().then((list) => setCategoryOptions(list.map((c) => c.name).filter(Boolean)));
-  }, []);
+  const { categories: categoryOptions, loading: fetchingCategories, error: categoryError, reload: reloadCategories } = useBookCategories();
 
   const [formData, setFormData] = useState({
     title: "",
@@ -85,7 +84,7 @@ export default function EditBookPage() {
     deliveryCharges: "",
   });
 
-  const [originalCategoryId, setOriginalCategoryId] = useState<string>("");
+  const [originalCategoryName, setOriginalCategoryName] = useState("");
 
   // New Category Creation Modal State
   const [addCategoryModalOpen, setAddCategoryModalOpen] = useState(false);
@@ -101,21 +100,17 @@ export default function EditBookPage() {
     }
     setIsCreatingCategory(true);
     try {
-      const { data } = await api.post("/admin/categories", {
-        name: newCategoryName.trim(),
-        description: newCategoryDescription.trim() || undefined,
-      });
-      const created = data?.data || data?.category || data;
-      const catName = created?.name || newCategoryName.trim();
-      setCategoryOptions((prev) => (prev.includes(catName) ? prev : [...prev, catName]));
-      fetchBackendCategories(true);
-      setFormData((prev: any) => ({ ...prev, category: catName }));
+      const created = await createBackendCategory(newCategoryName, newCategoryDescription);
+      const catName = created.name;
+      await reloadCategories();
+      setFormData((prev) => ({ ...prev, category: created._id }));
       setNewCategoryName("");
       setNewCategoryDescription("");
       setAddCategoryModalOpen(false);
       toast.success(`Category "${catName}" created and saved to database! 🏷️`);
-    } catch (err: any) {
-      console.error("Failed to create category:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to create category:", describeApiError(err));
       toast.error(err.response?.data?.message || err.message || "Failed to create category.");
     } finally {
       setIsCreatingCategory(false);
@@ -210,18 +205,18 @@ export default function EditBookPage() {
           } else if (typeof bookData.category === "string") {
             if (/^[0-9a-fA-F]{24}$/.test(bookData.category)) {
               initialCatId = bookData.category;
-              initialCatName = getCategoryDisplayName(bookData.category);
+
             } else {
               initialCatName = bookData.category;
             }
           }
-          setOriginalCategoryId(initialCatId);
+          setOriginalCategoryName(initialCatName);
 
           setFormData({
             title: bookData.title || "",
             authorName: resolvedAuthorName,
             description: bookData.description || "",
-            category: initialCatName || "Fiction",
+            category: initialCatId || initialCatName,
             price: (bookData.mrp || bookData.price)?.toString() || "",
             stock: bookData.stock?.toString() || "0",
             isbn: bookData.isbn || "",
@@ -274,8 +269,8 @@ export default function EditBookPage() {
       return;
     }
 
-    if (!formData.category) {
-      toast.error("Please select a book category.");
+    if (fetchingCategories || categoryError || !resolveCategoryId(categoryOptions, formData.category)) {
+      toast.error("Load categories and select a valid book category before saving.");
       return;
     }
 
@@ -402,7 +397,9 @@ export default function EditBookPage() {
       const statusValue = formData.status === "Active" ? "published" : formData.status;
 
       // Resolve category to a valid 24-character ObjectId to prevent Mongoose CastError
-      const resolvedCategoryObjectId = await resolveCategoryObjectId(formData.category, originalCategoryId);
+      const resolvedCategoryObjectId = resolveCategoryId(await fetchAllCategories(true), formData.category);
+
+      if (!resolvedCategoryObjectId) throw new Error("The selected category is unavailable. Refresh categories and select again.");
 
       const jsonPayload: any = {
         title: formData.title.trim(),
@@ -789,22 +786,31 @@ export default function EditBookPage() {
                   </button>
                 </div>
                 <Select
-                  value={formData.category}
+                  value={resolveCategoryId(categoryOptions, formData.category) || formData.category}
+                  disabled={fetchingCategories || categoryError}
                   onValueChange={(val) =>
                     setFormData((prev) => ({ ...prev, category: val }))
                   }
                 >
-                  <SelectTrigger className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-sm">
+                  <SelectTrigger id="category" className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-sm">
                     <SelectValue placeholder="Select Category" />
                   </SelectTrigger>
                   <SelectContent className="bg-white border-[#E2E6DF] max-h-72">
-                    {Array.from(new Set([...categoryOptions, formData.category].filter(Boolean))).map((categoryName) => (
-                      <SelectItem key={categoryName} value={categoryName}>
-                        {categoryName}
+                    {categoryOptions.filter((category) => categoryIsActive(category) || category._id === formData.category).map((category) => (
+                      <SelectItem key={category._id} value={category._id}>
+                        {category.name}{!categoryIsActive(category) ? " (inactive)" : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {categoryError ? (
+                  <p role="alert" className="text-xs text-rose-700">Could not load categories. <button type="button" className="underline" onClick={() => void reloadCategories()}>Retry</button></p>
+                ) : !fetchingCategories && categoryOptions.filter(categoryIsActive).length === 0 ? (
+                  <p className="text-xs text-[#5C6E6E]">No active categories. Create a category before publishing a book.</p>
+                ) : null}
+                {!fetchingCategories && formData.category && !resolveCategoryId(categoryOptions, formData.category) && (
+                  <p role="alert" className="text-xs text-rose-700">Saved category {originalCategoryName || formData.category} is unavailable. Choose a category before saving.</p>
+                )}
               </div>
 
               <div className="space-y-2">

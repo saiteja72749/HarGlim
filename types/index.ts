@@ -1,4 +1,7 @@
 export interface Book {
+  id?: string;
+  featured?: boolean;
+  createdAt?: string;
   _id: string;
   title: string;
   slug: string;

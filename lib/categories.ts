@@ -1,34 +1,69 @@
-import api from "@/lib/api";
 
-export interface BackendCategory {
-  _id: string;
-  id?: string;
-  name: string;
-  slug?: string;
-  description?: string;
-  active?: boolean;
-  isActive?: boolean;
-  bookCount?: number;
-}
+import { describeApiError, record } from "@/lib/api-error";
+import api, { invalidateApiCache } from "@/lib/api";
+import { categoryIsActive, findDuplicateCategory, parseCategoryPage, resolveCategoryId, type BackendCategory } from "@/lib/category-data";
+import { notifyLiveChange } from "@/lib/live-sync";
+export type { BackendCategory } from "@/lib/category-data";
 
 let cachedCategories: BackendCategory[] | null = null;
 let cachedAt = 0;
 let fetchPromise: Promise<BackendCategory[]> | null = null;
+let generation = 0;
+let requestIndex = 0;
 
 /** Reused for a minute at most, so a category an admin just added appears in forms and filters. */
 const CACHE_MS = 60 * 1000;
 
 /** Drop the cached list; called after any change in Admin → Categories. */
 export function invalidateCategoryCache() {
+  generation++;
+  requestIndex++;
   cachedCategories = null;
   cachedAt = 0;
+  fetchPromise = null;
+  invalidateApiCache("/categories");
+}
+
+export function categoriesChanged() {
+  invalidateCategoryCache();
+  notifyLiveChange("categories");
+}
+
+export async function createBackendCategory(name: string, description: string): Promise<BackendCategory> {
+  const cleanName = name.trim();
+  if (!cleanName) throw new Error("Category name is required.");
+  const existing = await fetchAllCategories(true);
+  if (findDuplicateCategory(existing, cleanName)) throw new Error("A category with this name already exists, including inactive categories.");
+  const { data } = await api.post("/admin/categories", { name: cleanName, description: description.trim() });
+  categoriesChanged();
+  const payload = record(data);
+  return parseCategoryPage({ data: [payload.data ?? payload.category ?? data] }).categories[0];
+}
+
+/** Explicit active filters include inactive records for admin duplicate checks and editing. */
+export async function fetchAllCategories(admin = false): Promise<BackendCategory[]> {
+  const categories = new Map<string, BackendCategory>();
+  for (const active of admin ? [true, false] : [true]) {
+    for (let page = 1; ; page++) {
+      const response = await api.get(admin ? "/admin/categories" : "/categories", {
+        params: { active, page, limit: 100 }, cache: "no-store",
+      });
+      const parsed = parseCategoryPage(response.data);
+      const previousSize = categories.size;
+      parsed.categories.forEach((category) => categories.set(category._id, category));
+      if (parsed.pages !== undefined ? page >= parsed.pages : parsed.categories.length < 100) break;
+      if (page > 1000 || categories.size === previousSize) throw new Error("Category pagination did not advance. Please retry.");
+    }
+  }
+  return Array.from(categories.values());
 }
 
 /**
  * Fetch all categories from backend API and cache them briefly.
  */
 export async function fetchBackendCategories(forceRefresh = false): Promise<BackendCategory[]> {
-  if (!forceRefresh && cachedCategories && cachedCategories.length > 0 && Date.now() - cachedAt < CACHE_MS) {
+  if (forceRefresh) invalidateCategoryCache();
+  if (!forceRefresh && cachedCategories && Date.now() - cachedAt < CACHE_MS) {
     return cachedCategories;
   }
 
@@ -36,42 +71,26 @@ export async function fetchBackendCategories(forceRefresh = false): Promise<Back
     return fetchPromise;
   }
 
-  fetchPromise = (async () => {
+  const requestGeneration = generation;
+  const index = ++requestIndex;
+  const request = (async () => {
     try {
-      // no-store: the client's 30 s GET cache must not hand back a list from before an admin's change.
-      const res = await api.get("/categories", { params: { limit: 100 }, cache: "no-store" } as any);
-
-      const data = res?.data;
-      const rawList =
-        data?.data?.categories ||
-        data?.categories ||
-        (Array.isArray(data?.data) ? data.data : []) ||
-        (Array.isArray(data) ? data : []);
-
-      const list: BackendCategory[] = Array.isArray(rawList)
-        ? rawList.map((c: any) => ({
-            ...c,
-            _id: c._id || c.id || "",
-            id: c._id || c.id || "",
-            name: c.name || "",
-            slug: c.slug || "",
-            description: c.description || "",
-            active: c.active ?? true,
-          }))
-        : [];
-
-      cachedCategories = list;
-      cachedAt = Date.now();
+      const list = (await fetchAllCategories()).filter(categoryIsActive);
+      if (generation === requestGeneration) {
+        cachedCategories = list;
+        cachedAt = Date.now();
+      }
       return list;
     } catch (err) {
-      console.warn("Notice: Failed to fetch backend categories:", err);
-      return cachedCategories || [];
+      console.warn("Notice: Failed to fetch backend categories:", describeApiError(err));
+      throw err;
     } finally {
-      fetchPromise = null;
+      if (requestIndex === index) fetchPromise = null;
     }
   })();
 
-  return fetchPromise;
+  fetchPromise = request;
+  return request;
 }
 
 /**
@@ -85,55 +104,13 @@ export async function resolveCategoryObjectId(
 ): Promise<string | undefined> {
   const cleanInput = (categoryInput || "").trim();
 
-  // 1. If it's already a valid 24-character hex ObjectId, return directly
-  if (/^[0-9a-fA-F]{24}$/.test(cleanInput)) {
-    return cleanInput;
-  }
-
-  // 2. Fetch categories from backend to match by name or slug
+  // Verify identifiers against real categories instead of accepting arbitrary ObjectIds.
   const categories = await fetchBackendCategories();
 
-  if (cleanInput) {
-    const inputLower = cleanInput.toLowerCase();
-    const matched = categories.find(
-      (c) =>
-        c.name.toLowerCase() === inputLower ||
-        (c.slug && c.slug.toLowerCase() === inputLower) ||
-        c._id === cleanInput
-    );
+  if (cleanInput) return resolveCategoryId(categories, cleanInput);
+  if (fallbackId) return resolveCategoryId(categories, fallbackId);
 
-    if (matched && /^[0-9a-fA-F]{24}$/.test(matched._id)) {
-      return matched._id;
-    }
-  }
-
-  // 3. Check fallback ID
-  const cleanFallback = (fallbackId || "").trim();
-  if (/^[0-9a-fA-F]{24}$/.test(cleanFallback)) {
-    return cleanFallback;
-  }
-
-  // 4. Try auto-creating category in backend if cleanInput is provided
-  if (cleanInput) {
-    try {
-      const createRes = await api.post("/admin/categories", {
-        name: cleanInput,
-        description: `Auto-created category for ${cleanInput}`,
-      });
-
-      const created = createRes?.data?.data || createRes?.data?.category || createRes?.data;
-      const createdId = created?._id || created?.id;
-      if (createdId && /^[0-9a-fA-F]{24}$/.test(createdId)) {
-        // Refresh cache
-        await fetchBackendCategories(true);
-        return createdId;
-      }
-    } catch {
-      // Ignore creation error
-    }
-  }
-
-  // 5. Return undefined if no valid ObjectId could be found
+  // Categories are created explicitly in the admin form, never invented during ID resolution.
   // This prevents sending invalid strings like "Fiction" that break Mongoose schema validation
   return undefined;
 }
@@ -142,13 +119,14 @@ export async function resolveCategoryObjectId(
  * Returns a human-friendly category display name.
  */
 export function getCategoryDisplayName(
-  categoryValue: any,
+  categoryValue: unknown,
   categoriesList?: BackendCategory[]
 ): string {
   if (!categoryValue) return "Uncategorized";
 
   if (typeof categoryValue === "object" && categoryValue !== null) {
-    return categoryValue.name || categoryValue.slug || "General";
+    const value = record(categoryValue);
+    return typeof value.name === "string" ? value.name : typeof value.slug === "string" ? value.slug : "Uncategorized";
   }
 
   const strVal = String(categoryValue).trim();

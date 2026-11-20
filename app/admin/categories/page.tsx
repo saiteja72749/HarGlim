@@ -1,7 +1,9 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useState, useEffect, useCallback } from "react";
-import { motion } from "framer-motion";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import api from "@/lib/api";
 import { ErrorState } from "@/components/ui/error-state";
 import {
@@ -29,17 +31,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import toast from "react-hot-toast";
-import { invalidateCategoryCache } from "@/lib/categories";
-import { notifyLiveChange } from "@/lib/live-sync";
-
-/** After a create, edit, status change or delete: forms and open website tabs load the new list. */
-const categoriesChanged = () => {
-  invalidateCategoryCache();
-  notifyLiveChange("categories");
-};
+import { categoriesChanged, fetchAllCategories, type BackendCategory } from "@/lib/categories";
+import { categoryIsActive, findDuplicateCategory, parseCategoryPage } from "@/lib/category-data";
+import { onLiveChange } from "@/lib/live-sync";
 
 export default function AdminCategoriesPage() {
-  const [categories, setCategories] = useState<any[]>([]);
+  const [categories, setCategories] = useState<BackendCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -47,7 +44,7 @@ export default function AdminCategoriesPage() {
 
   // Create / Edit Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingCategory, setEditingCategory] = useState<any | null>(null);
+  const [editingCategory, setEditingCategory] = useState<BackendCategory | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
@@ -64,27 +61,18 @@ export default function AdminCategoriesPage() {
     setLoading(true);
     setError(false);
     try {
-      const params: any = { limit: 100 };
-      if (searchQuery.trim()) params.search = searchQuery.trim();
-      if (statusFilter === "active") params.active = true;
-      if (statusFilter === "inactive") params.active = false;
-
-      const { data } = await api.get("/admin/categories", { params });
-      const items =
-        data?.data?.categories ||
-        (Array.isArray(data?.data) ? data.data : []) ||
-        (Array.isArray(data) ? data : []);
-      setCategories(Array.isArray(items) ? items : []);
+      setCategories(await fetchAllCategories(true));
     } catch (err) {
-      console.error("Failed to fetch admin categories:", err);
+      console.error("Failed to fetch admin categories:", describeApiError(err));
       setError(true);
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, statusFilter]);
+  }, []);
 
   useEffect(() => {
-    fetchCategories();
+    void fetchCategories();
+    return onLiveChange("categories", () => void fetchCategories());
   }, [fetchCategories]);
 
   const openCreateModal = () => {
@@ -99,7 +87,7 @@ export default function AdminCategoriesPage() {
     setIsModalOpen(true);
   };
 
-  const openEditModal = (cat: any) => {
+  const openEditModal = (cat: BackendCategory) => {
     setEditingCategory(cat);
     setFormData({
       name: cat.name || "",
@@ -120,6 +108,11 @@ export default function AdminCategoriesPage() {
 
     setSubmitting(true);
     try {
+      const latest = await fetchAllCategories(true);
+      if (findDuplicateCategory(latest, formData.name, editingCategory?._id)) {
+        toast.error("A category with this name already exists, including inactive categories.");
+        return;
+      }
       const payload = {
         name: formData.name.trim(),
         description: formData.description.trim(),
@@ -129,7 +122,7 @@ export default function AdminCategoriesPage() {
       };
 
       if (editingCategory) {
-        const catId = editingCategory._id || editingCategory.id;
+        const catId = editingCategory._id;
         await api.put(`/admin/categories/${catId}`, payload);
         toast.success(`Category "${formData.name}" updated successfully!`);
       } else {
@@ -140,16 +133,17 @@ export default function AdminCategoriesPage() {
       setIsModalOpen(false);
       categoriesChanged();
       fetchCategories();
-    } catch (err: any) {
-      console.error("Failed to save category:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to save category:", describeApiError(err));
       toast.error(err.response?.data?.message || "Failed to save category.");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleToggleStatus = async (cat: any) => {
-    const catId = cat._id || cat.id;
+  const handleToggleStatus = async (cat: BackendCategory) => {
+    const catId = cat._id;
     const currentActive = cat.active !== false && cat.isActive !== false;
     const newActive = !currentActive;
 
@@ -162,30 +156,39 @@ export default function AdminCategoriesPage() {
       );
       categoriesChanged();
       toast.success(`Category set to ${newActive ? "Active" : "Inactive"}.`);
-    } catch (err: any) {
-      console.error("Failed to toggle category status:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to toggle category status:", describeApiError(err));
       toast.error(err.response?.data?.message || "Failed to update category status.");
     }
   };
 
-  const handleDelete = async (cat: any) => {
-    const catId = cat._id || cat.id;
+  const handleDelete = async (cat: BackendCategory) => {
+    const catId = cat._id;
+    if (cat.bookCount !== 0) {
+      toast.error(cat.bookCount === undefined ? "Book count is unavailable. Deletion is blocked until it can be verified." : "Cannot delete a category with assigned books.");
+      return;
+    }
     if (!window.confirm(`Are you sure you want to deactivate/delete "${cat.name}"?`)) {
       return;
     }
 
     setDeletingId(catId);
     try {
+      const { data } = await api.get(`/admin/categories/${catId}`, { cache: "no-store" });
+      const latest = parseCategoryPage({ data: [data?.data?.category ?? data?.data ?? data] }).categories[0];
+      if (latest.bookCount !== 0) throw new Error("Cannot delete: assigned books exist or the book count could not be verified.");
       await api.delete(`/admin/categories/${catId}`);
       toast.success(`Category "${cat.name}" soft deleted successfully.`);
       categoriesChanged();
       fetchCategories();
-    } catch (err: any) {
-      console.error("Failed to delete category:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to delete category:", describeApiError(err));
       if (err.response?.status === 409) {
         toast.error(err.response?.data?.message || "Cannot delete category: active books are still assigned to it.");
       } else {
-        toast.error(err.response?.data?.message || "Failed to delete category.");
+        toast.error(err.response?.data?.message || err.message || "Failed to delete category.");
       }
     } finally {
       setDeletingId(null);
@@ -216,7 +219,7 @@ export default function AdminCategoriesPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-serif font-bold text-[#0F3D3E]">
-            Categories Management
+            Book Categories
           </h1>
           <p className="text-xs sm:text-sm text-[#5C6E6E] mt-1">
             Create, order, and curate book categories for the storefront and catalog navigation.
@@ -237,6 +240,7 @@ export default function AdminCategoriesPage() {
           <div className="relative w-full sm:w-80">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#5C6E6E]" />
             <Input
+              aria-label="Search categories"
               placeholder="Search category by name..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -303,7 +307,7 @@ export default function AdminCategoriesPage() {
                 </TableRow>
               ) : (
                 filteredCategories.map((cat) => {
-                  const catId = cat._id || cat.id;
+                  const catId = cat._id;
                   const isActive = cat.active !== false && cat.isActive !== false;
                   return (
                     <TableRow key={catId} className="hover:bg-[#F8F9F7]/60 text-xs">
@@ -324,7 +328,7 @@ export default function AdminCategoriesPage() {
                       <TableCell className="text-center">
                         <Badge variant="outline" className="bg-[#0F3D3E]/5 text-[#0F3D3E] font-semibold text-xs gap-1">
                           <BookOpen className="h-3 w-3" />
-                          <span>{cat.bookCount ?? cat.booksCount ?? 0}</span>
+                          <span>{cat.bookCount ?? "Unavailable"}</span>
                         </Badge>
                       </TableCell>
                       <TableCell className="text-center">
@@ -342,6 +346,7 @@ export default function AdminCategoriesPage() {
                           onClick={() => handleToggleStatus(cat)}
                           className="cursor-pointer"
                           title="Click to toggle status"
+                          aria-label={`${categoryIsActive(cat) ? "Deactivate" : "Activate"} category ${cat.name}`}
                         >
                           {isActive ? (
                             <Badge className="bg-emerald-500/15 text-emerald-800 border-emerald-300 text-[11px]">
@@ -362,6 +367,7 @@ export default function AdminCategoriesPage() {
                             onClick={() => openEditModal(cat)}
                             className="h-8 w-8 text-[#0F3D3E] hover:bg-[#0F3D3E]/10"
                             title="Edit Category"
+                            aria-label={`Edit category ${cat.name}`}
                           >
                             <Edit2 className="h-3.5 w-3.5" />
                           </Button>
@@ -369,9 +375,10 @@ export default function AdminCategoriesPage() {
                             variant="ghost"
                             size="icon"
                             onClick={() => handleDelete(cat)}
-                            disabled={deletingId === catId}
+                            disabled={deletingId === catId || cat.bookCount !== 0}
                             className="h-8 w-8 text-rose-600 hover:bg-rose-50"
-                            title="Soft Delete Category"
+                            title={cat.bookCount !== 0 ? "Assigned books or unavailable book count prevent deletion" : "Soft Delete Category"}
+                            aria-label={`Delete category ${cat.name}`}
                           >
                             {deletingId === catId ? (
                               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -391,32 +398,28 @@ export default function AdminCategoriesPage() {
       </Card>
 
       {/* Create / Edit Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-[#E2E6DF] overflow-hidden"
-          >
+      <Dialog open={isModalOpen} onOpenChange={(open) => { if (!submitting) setIsModalOpen(open); }}>
+        <DialogContent showCloseButton={false} className="max-h-[90vh] overflow-y-auto p-0 gap-0 rounded-2xl bg-white border-[#E2E6DF]">
             <div className="flex items-center justify-between p-5 border-b border-[#E2E6DF] bg-[#F8F9F7]">
               <div className="flex items-center gap-2.5">
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#0F3D3E]/10 text-[#0F3D3E]">
                   <Tags className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="font-serif font-bold text-base text-[#0F3D3E]">
+                  <DialogTitle className="font-serif font-bold text-base text-[#0F3D3E]">
                     {editingCategory ? "Edit Category" : "Create New Category"}
-                  </h3>
-                  <p className="text-xs text-[#5C6E6E]">
+                  </DialogTitle>
+                  <DialogDescription className="text-xs text-[#5C6E6E]">
                     {editingCategory ? `Updating ${editingCategory.name}` : "Add a category to the catalog"}
-                  </p>
+                  </DialogDescription>
                 </div>
               </div>
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => setIsModalOpen(false)}
+                aria-label="Close category form"
+                disabled={submitting}
                 className="h-8 w-8 text-[#5C6E6E]"
               >
                 <X className="h-4 w-4" />
@@ -425,10 +428,11 @@ export default function AdminCategoriesPage() {
 
             <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
               <div className="space-y-1.5">
-                <label className="font-bold uppercase tracking-wider text-[#5C6E6E] block">
+                <label htmlFor="category-name" className="font-bold uppercase tracking-wider text-[#5C6E6E] block">
                   Category Name *
                 </label>
                 <Input
+                  id="category-name"
                   placeholder="e.g. Science Fiction, Poetry, Self-Help"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -438,10 +442,11 @@ export default function AdminCategoriesPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="font-bold uppercase tracking-wider text-[#5C6E6E] block">
+                <label htmlFor="category-description" className="font-bold uppercase tracking-wider text-[#5C6E6E] block">
                   Description
                 </label>
                 <Textarea
+                  id="category-description"
                   placeholder="Brief synopsis of this book collection..."
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
@@ -451,10 +456,11 @@ export default function AdminCategoriesPage() {
 
               <div className="grid grid-cols-2 gap-4 pt-1">
                 <div className="space-y-1.5">
-                  <label className="font-bold uppercase tracking-wider text-[#5C6E6E] block">
+                  <label htmlFor="category-order" className="font-bold uppercase tracking-wider text-[#5C6E6E] block">
                     Sort Order
                   </label>
                   <Input
+                    id="category-order"
                     type="number"
                     value={formData.sortOrder}
                     onChange={(e) => setFormData({ ...formData, sortOrder: Number(e.target.value) })}
@@ -470,6 +476,7 @@ export default function AdminCategoriesPage() {
                       <span className="text-[11px] text-[#5C6E6E]">Featured: one of up to 6 on the home page</span>
                     </div>
                     <Switch
+                      aria-label="Show category on home page"
                       checked={formData.featured}
                       onCheckedChange={(val) => setFormData({ ...formData, featured: val })}
                     />
@@ -481,6 +488,7 @@ export default function AdminCategoriesPage() {
                       <span className="text-[11px] text-[#5C6E6E]">Shown on the website</span>
                     </div>
                     <Switch
+                      aria-label="Active category"
                       checked={formData.active}
                       onCheckedChange={(val) => setFormData({ ...formData, active: val })}
                     />
@@ -513,9 +521,8 @@ export default function AdminCategoriesPage() {
                 </Button>
               </div>
             </form>
-          </motion.div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

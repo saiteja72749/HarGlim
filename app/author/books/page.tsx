@@ -86,7 +86,7 @@ export default function AuthorBooksPage() {
   useEffect(() => {
     fetchBooks();
     // Coming back to the tab reloads, so changes made by the admin show without a refresh.
-    return onLiveChange("author-data", fetchBooks);
+    return onLiveChange(["author-data", "categories"], fetchBooks);
   }, [fetchBooks]);
 
   const filteredBooks = books.filter((book) =>

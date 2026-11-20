@@ -40,6 +40,7 @@ import type { Book } from "@/types";
 import toast from "react-hot-toast";
 import { cn, getBookAuthorInfo } from "@/lib/utils";
 import api from "@/lib/api";
+import { onLiveChange } from "@/lib/live-sync";
 
 export default function BookDetailPage() {
   const params = useParams();
@@ -159,7 +160,7 @@ export default function BookDetailPage() {
     setError(false);
     try {
       const [bookRes, relatedRes, reviewsRes] = await Promise.all([
-        api.get(`/books/${params.slug}`),
+        api.get(`/books/${params.slug}`, { cache: "no-store" }),
         api.get(`/books/${params.slug}/related?limit=4`).catch(() => ({ data: { data: [] } })),
         api.get(`/books/${params.slug}/reviews?page=1&limit=20`).catch(() => ({ data: { data: [] } })),
       ]);
@@ -191,7 +192,8 @@ export default function BookDetailPage() {
   };
 
   useEffect(() => {
-    fetchBookData();
+    void fetchBookData();
+    return onLiveChange("categories", () => void fetchBookData());
   }, [params.slug]);
 
   useEffect(() => {

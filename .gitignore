@@ -20,3 +20,6 @@ test-results/
 playwright-report/
 # Netlify local build output
 .netlify
+
+# Local full-suite logs
+test-suite-results/

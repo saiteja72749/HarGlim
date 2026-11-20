@@ -13,6 +13,7 @@ const eslintConfig = [
       'tests-e2e/**',
       'playwright-report/**',
       'test-results/**',
+      'test-suite-results/**',
       'test-backend.js',
     ],
   },

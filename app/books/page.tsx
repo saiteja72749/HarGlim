@@ -1,4 +1,6 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
+
 
 import { useState, useEffect, Suspense, useRef } from "react";
 import Image from "next/image";
@@ -68,6 +70,7 @@ function BooksContent() {
   const [selectedPriceRange, setSelectedPriceRange] = useState<string | null>(null);
   const [minRatingFilter, setMinRatingFilter] = useState<number | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [categoryError, setCategoryError] = useState(false);
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -86,11 +89,13 @@ function BooksContent() {
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
   const fetchCategories = async (fresh = false) => {
+    setCategoryError(false);
     try {
       const items = (await fetchBackendCategories(fresh)) as Category[];
       setCategories(items);
     } catch (err) {
-      console.error("Failed to fetch categories:", err);
+      console.error("Failed to fetch categories:", describeApiError(err));
+      setCategoryError(true);
     }
   };
 
@@ -104,7 +109,7 @@ function BooksContent() {
     setLoading(true);
     setError(false);
     try {
-      const params: any = {
+      const params: { page: number; limit: number; search?: string; q?: string; category?: string; minPrice?: number; maxPrice?: number; featured?: boolean; bestseller?: boolean; newRelease?: boolean; sort?: string } = {
         page: currentPage,
         limit: 12,
       };
@@ -139,29 +144,39 @@ function BooksContent() {
       // Live backend: GET /books ignores `search`/`q` (returns the unfiltered list),
       // so text queries go to GET /search?q=, which does full-text matching.
       const query = searchQuery.trim();
+      const intersectCategory = Boolean(query && params.category);
       const { data } = query
-        ? await api.get("/search", { params: { q: query, page: currentPage, limit: 12 } })
+        ? await api.get("/search", { params: { q: query, page: intersectCategory ? 1 : currentPage, limit: intersectCategory ? 100 : 12 } })
         : await api.get("/books", { params });
 
       const items = data.data?.books || (Array.isArray(data.data) ? data.data : []) || (Array.isArray(data) ? data : []);
       const pagination = data.pagination || data.data?.pagination || {};
 
-      let result = Array.isArray(items) ? items : [];
+      let result: BookType[] = Array.isArray(items) ? [...items] : [];
+      if (intersectCategory) {
+        const searchPages = pagination.pages ?? pagination.totalPages ?? 1;
+        for (let page = 2; page <= searchPages; page++) {
+          const next = await api.get("/search", { params: { q: query, page, limit: 100 } });
+          const nextItems = next.data?.data?.books ?? next.data?.data;
+          if (!Array.isArray(nextItems)) throw new Error("Invalid search results.");
+          result.push(...nextItems);
+        }
+      }
 
       // Filters the backend ignores (newRelease) or that /search doesn't take are applied here.
-      if (quickTagFilter === "newRelease") result = result.filter((b: any) => b.isNewRelease);
+      if (quickTagFilter === "newRelease") result = result.filter((b) => b.isNewRelease);
       if (query) {
-        if (quickTagFilter === "featured") result = result.filter((b: any) => b.isFeatured);
-        if (quickTagFilter === "bestseller") result = result.filter((b: any) => b.isBestseller);
+        if (quickTagFilter === "featured") result = result.filter((b) => b.isFeatured);
+        if (quickTagFilter === "bestseller") result = result.filter((b) => b.isBestseller);
         if (params.category) {
           result = result.filter(
-            (b: any) => b.category?.slug === params.category || b.category?._id === selectedCategories[0]
+            (b) => typeof b.category === "object" && b.category !== null ? (b.category.slug === params.category || b.category._id === selectedCategories[0]) : b.category === selectedCategories[0]
           );
         }
         if (params.minPrice !== undefined) {
-          result = result.filter((b: any) => {
+          result = result.filter((b) => {
             const price = Number(b.price ?? b.mrp ?? 0);
-            return price >= params.minPrice && (params.maxPrice === undefined || price <= params.maxPrice);
+            return price >= (params.minPrice ?? 0) && (params.maxPrice === undefined || price <= params.maxPrice);
           });
         }
       }
@@ -182,17 +197,17 @@ function BooksContent() {
 
       // Backend ignores sort=rating / sort=newest; order the returned page here.
       if (sortBy === "rating") {
-        result = [...result].sort((a: any, b: any) => (b.ratings ?? b.rating ?? 0) - (a.ratings ?? a.rating ?? 0));
+        result = [...result].sort((a, b) => (b.ratings ?? b.rating ?? 0) - (a.ratings ?? a.rating ?? 0));
       } else if (sortBy === "newest") {
         result = [...result].sort(
-          (a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
         );
       }
 
-      setBooks(result);
-      setTotalPages(pagination.pages || Math.ceil((pagination.total || result.length) / 12) || 1);
+      setBooks(intersectCategory ? result.slice((currentPage - 1) * 12, currentPage * 12) : result);
+      setTotalPages(intersectCategory ? Math.max(1, Math.ceil(result.length / 12)) : (pagination.pages || Math.ceil((pagination.total || result.length) / 12) || 1));
     } catch (err) {
-      console.error("Failed to fetch books:", err);
+      console.error("Failed to fetch books:", describeApiError(err));
       setError(true);
       setBooks([]);
     } finally {
@@ -202,7 +217,7 @@ function BooksContent() {
 
   useEffect(() => {
     fetchBooks();
-  }, [searchQuery, sortBy, selectedCategories, selectedFormats, selectedPriceRange, minRatingFilter, quickTagFilter, currentPage]);
+  }, [searchQuery, sortBy, selectedCategories, selectedFormats, selectedPriceRange, minRatingFilter, quickTagFilter, currentPage, categories]);
 
   // Click outside listener for suggestions
   useEffect(() => {
@@ -216,6 +231,7 @@ function BooksContent() {
   }, []);
 
   const handleCategoryToggle = (categoryId: string) => {
+    setCurrentPage(1);
     setSelectedCategories((prev) =>
       prev.includes(categoryId) ? prev.filter((id) => id !== categoryId) : [categoryId]
     );
@@ -244,7 +260,7 @@ function BooksContent() {
     : [];
 
   // Filter Panel Component
-  const FilterContent = () => (
+  const renderFilters = (idPrefix: string) => (
     <div className="space-y-6 font-sans">
       {/* Header */}
       <div className="flex items-center justify-between pb-3 border-b border-[#E2E6DF]">
@@ -277,19 +293,20 @@ function BooksContent() {
 
         {openSections.categories && (
           <div className="mt-3 space-y-2.5">
+            {categoryError && <p role="alert" className="text-xs text-rose-700">Could not load categories. <button type="button" className="underline" onClick={() => void fetchCategories(true)}>Retry</button></p>}
             {categories.map((category) => {
               const isChecked = selectedCategories.includes(category._id);
               return (
                 <div key={category._id} className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-2.5">
                     <Checkbox
-                      id={`cat-${category._id}`}
+                      id={`${idPrefix}-cat-${category._id}`}
                       checked={isChecked}
                       onCheckedChange={() => handleCategoryToggle(category._id)}
                       className="border-[#E2E6DF] data-[state=checked]:bg-[#0F3D3E]"
                     />
                     <Label
-                      htmlFor={`cat-${category._id}`}
+                      htmlFor={`${idPrefix}-cat-${category._id}`}
                       className={cn(
                         "cursor-pointer transition-colors",
                         isChecked ? "font-bold text-[#0F3D3E]" : "text-[#5C6E6E] hover:text-[#0F3D3E]"
@@ -330,7 +347,7 @@ function BooksContent() {
               return (
                 <div key={range.label} className="flex items-center gap-2.5 text-xs">
                   <Checkbox
-                    id={`price-${range.label}`}
+                    id={`${idPrefix}-price-${range.label}`}
                     checked={isSelected}
                     onCheckedChange={() =>
                       setSelectedPriceRange(isSelected ? null : range.label)
@@ -338,7 +355,7 @@ function BooksContent() {
                     className="border-[#E2E6DF] data-[state=checked]:bg-[#0F3D3E]"
                   />
                   <Label
-                    htmlFor={`price-${range.label}`}
+                    htmlFor={`${idPrefix}-price-${range.label}`}
                     className={cn(
                       "cursor-pointer transition-colors",
                       isSelected ? "font-bold text-[#0F3D3E]" : "text-[#5C6E6E] hover:text-[#0F3D3E]"
@@ -441,7 +458,7 @@ function BooksContent() {
           {/* LEFT: Desktop Sticky Filter Panel */}
           <aside className="hidden lg:block w-72 flex-shrink-0">
             <div className="sticky top-24 bg-white p-6 rounded-2xl border border-[#E2E6DF] shadow-xs">
-              <FilterContent />
+              {renderFilters("desktop")}
             </div>
           </aside>
 
@@ -457,6 +474,7 @@ function BooksContent() {
                 <Input
                   type="text"
                   placeholder="Search by title, author, category..."
+                  aria-label="Search catalog"
                   value={searchQuery}
                   onFocus={() => setShowSuggestions(true)}
                   onChange={(e) => {
@@ -489,7 +507,7 @@ function BooksContent() {
                       </p>
                       {suggestions.map((b) => (
                         <Link
-                          key={b._id || (b as any).id}
+                          key={b._id || b.id}
                           href={`/books/${b.slug || b._id}`}
                           onClick={() => setShowSuggestions(false)}
                           className="flex items-center gap-3 p-2 rounded-xl hover:bg-[#F8F9F7] transition-colors"
@@ -533,7 +551,7 @@ function BooksContent() {
                       <SheetTitle className="font-serif font-bold text-[#0F3D3E]">Filters</SheetTitle>
                     </SheetHeader>
                     <div className="mt-6">
-                      <FilterContent />
+                      {renderFilters("mobile")}
                     </div>
                   </SheetContent>
                 </Sheet>
@@ -557,6 +575,8 @@ function BooksContent() {
                     variant={viewMode === "grid" ? "secondary" : "ghost"}
                     size="icon"
                     onClick={() => setViewMode("grid")}
+                    aria-label="Grid view"
+                    aria-pressed={viewMode === 'grid'}
                     className="h-10 w-10 rounded-none text-[#0F3D3E]"
                   >
                     <Grid className="h-4 w-4" />
@@ -565,6 +585,8 @@ function BooksContent() {
                     variant={viewMode === "list" ? "secondary" : "ghost"}
                     size="icon"
                     onClick={() => setViewMode("list")}
+                    aria-label="List view"
+                    aria-pressed={viewMode === 'list'}
                     className="h-10 w-10 rounded-none text-[#0F3D3E]"
                   >
                     <List className="h-4 w-4" />
@@ -584,7 +606,7 @@ function BooksContent() {
                 <button
                   key={tab.id}
                   onClick={() => {
-                    setQuickTagFilter(tab.id as any);
+                    setQuickTagFilter(tab.id as typeof quickTagFilter);
                     setCurrentPage(1);
                   }}
                   className={cn(
@@ -700,7 +722,7 @@ function BooksContent() {
                 >
                   {books.map((book) => (
                     <BookCard
-                      key={book._id || (book as any).id}
+                      key={book._id || book.id}
                       book={book}
                       variant={viewMode === "list" ? "horizontal" : "default"}
                     />
