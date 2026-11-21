@@ -1,3 +1,5 @@
+import type { Category } from "@/types";
+import { siteConfig } from "@/config/site";
 import { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { fetchRecord, MISSING, notFoundMetadata } from '@/lib/fetch-record';
@@ -8,7 +10,7 @@ type Props = {
   children: React.ReactNode;
 };
 
-const getCategoryData = (slug: string) => fetchRecord(`/categories/${slug}`);
+const getCategoryData = (slug: string) => fetchRecord<Category>(`/categories/${slug}`);
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const resolvedParams = await params;
@@ -17,7 +19,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   
   if (category === MISSING) return notFoundMetadata;
   if (!category) return {};
-  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://harglim.com';
+  const APP_URL = siteConfig.url;
 
   const title = `${category.name} Books`;
   const description = category.description || `Explore our collection of books in the ${category.name} category at Harglim Publishers.`;
@@ -39,7 +41,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 export default async function CategoryLayout({ children, params }: Props) {
   const resolvedParams = await params;
   const category = await getCategoryData(resolvedParams.slug);
-  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://harglim.com';
+  const APP_URL = siteConfig.url;
 
   if (category === MISSING) notFound();
   if (!category) return <>{children}</>;

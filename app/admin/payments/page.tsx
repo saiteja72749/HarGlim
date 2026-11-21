@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 import {
@@ -121,8 +123,9 @@ export default function AdminPaymentVerificationPage() {
 
       setPayments(Array.isArray(items) ? items : []);
       setPagination(pag);
-    } catch (err: any) {
-      console.error("Failed to fetch admin payments queue:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to fetch admin payments queue:", describeApiError(err));
       setError(true);
       toast.error(err.response?.data?.message || "Failed to load payment verification queue.");
     } finally {
@@ -149,8 +152,9 @@ export default function AdminPaymentVerificationPage() {
     try {
       const res = await getAdminPaymentDetail(paymentId);
       setSelectedPaymentDetail(res?.data || res);
-    } catch (err: any) {
-      console.error("Failed to load payment details:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to load payment details:", describeApiError(err));
       toast.error(err.response?.data?.message || "Failed to load payment details.");
     } finally {
       setLoadingDetail(false);
@@ -171,7 +175,8 @@ export default function AdminPaymentVerificationPage() {
       setActionReason("");
       setDetailModalOpen(false);
       fetchPayments();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to approve payment.");
     } finally {
       setActionLoading(null);
@@ -192,7 +197,8 @@ export default function AdminPaymentVerificationPage() {
       setActionReason("");
       setDetailModalOpen(false);
       fetchPayments();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to reject payment.");
     } finally {
       setActionLoading(null);
@@ -215,7 +221,8 @@ export default function AdminPaymentVerificationPage() {
       setActionReason("");
       fetchPayments();
       if (selectedPaymentDetail) handleOpenDetail(paymentId);
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to cancel payment.");
     } finally {
       setActionLoading(null);
@@ -238,7 +245,8 @@ export default function AdminPaymentVerificationPage() {
       setActionReason("");
       fetchPayments();
       if (selectedPaymentDetail) handleOpenDetail(paymentId);
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to expire payment.");
     } finally {
       setActionLoading(null);
@@ -258,7 +266,8 @@ export default function AdminPaymentVerificationPage() {
       toast.success("Verification retried.");
       fetchPayments();
       if (selectedPaymentDetail) handleOpenDetail(paymentId);
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to retry verification.");
     } finally {
       setActionLoading(null);
@@ -278,7 +287,8 @@ export default function AdminPaymentVerificationPage() {
       toast.success("QR Code recreated successfully!");
       fetchPayments();
       if (selectedPaymentDetail) handleOpenDetail(paymentId);
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to recreate QR.");
     } finally {
       setActionLoading(null);

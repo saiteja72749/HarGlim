@@ -1,6 +1,8 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
 
-import { useState, useEffect } from "react";
+
+import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -60,7 +62,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     if (!user?._id && !user?.id) return;
     const userId = user._id || user.id;
     setLoading(true);
@@ -68,10 +70,12 @@ export default function DashboardPage() {
 
     try {
       const [ordersRes, booksRes] = await Promise.allSettled([
-        api.get(`/users/${userId}/orders`, { params: { limit: 20 }, cache: "no-store" } as any),
+        api.get(`/users/${userId}/orders`, { params: { limit: 20 }, cache: "no-store" }),
         api.get(`/books?limit=4`),
       ]);
 
+      if (ordersRes.status === "rejected") throw ordersRes.reason;
+      if (booksRes.status === "rejected") throw booksRes.reason;
       if (ordersRes.status === "fulfilled") {
         // Sort client-side: the backend's sort param isn't guaranteed.
         const list = extractList(ordersRes.value.data, "orders").sort(
@@ -85,16 +89,16 @@ export default function DashboardPage() {
         setRecommendedBooks(Array.isArray(bData) ? bData : []);
       }
     } catch (err) {
-      console.error("Error fetching dashboard data:", err);
+      console.error("Error fetching dashboard data:", describeApiError(err));
       setError(true);
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     fetchDashboardData();
-  }, [user]);
+  }, [fetchDashboardData]);
 
   if (error) {
     return (

@@ -22,22 +22,22 @@ export interface AdminPaymentQueryParams {
 
 export interface ApprovePaymentPayload {
   reason?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface RejectPaymentPayload {
   reason?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface CancelPaymentPayload {
   reason?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ExpirePaymentPayload {
   reason?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface RecreateQrPayload {
@@ -50,7 +50,7 @@ export interface RecreateQrPayload {
  * GET /admin/operations/payments
  */
 export async function listAdminPayments(params: AdminPaymentQueryParams = {}) {
-  const queryParams: Record<string, any> = {};
+  const queryParams: Record<string, unknown> = {};
   if (params.page) queryParams.page = params.page;
   if (params.limit) queryParams.limit = params.limit;
   if (params.status && params.status !== 'ALL') queryParams.status = params.status;

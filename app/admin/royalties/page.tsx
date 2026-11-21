@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -146,7 +148,8 @@ function ManualRoyaltiesPage() {
       toast.success(`Royalty of ${formatINR(totals.royalty)} recorded for ${selectedAuthor?.name || "the author"}.`);
       resetForm();
       loadStatements();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(
         isMissingEndpoint(err)
           ? "The backend does not support manual royalties yet (POST /admin/manual-royalties)."
@@ -164,7 +167,8 @@ function ManualRoyaltiesPage() {
       await voidManualRoyalty(statement.id, reason);
       toast.success("Statement voided.");
       loadStatements();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err?.response?.data?.message || "Failed to void the statement.");
     }
   };

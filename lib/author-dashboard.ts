@@ -1,3 +1,4 @@
+import { record } from "@/lib/api-error";
 /**
  * Normalises GET /authors/me/dashboard and GET /admin/authors/{id}/dashboard.
  *
@@ -58,7 +59,7 @@ export interface AuthorDashboardSummary {
   recentSales: AuthorSale[];
 }
 
-const num = (...values: any[]) => {
+const num = (...values: unknown[]) => {
   for (const v of values) {
     if (v === null || v === undefined || v === "") continue;
     const n = Number(v);
@@ -67,28 +68,30 @@ const num = (...values: any[]) => {
   return 0;
 };
 
-const optionalNum = (v: any): number | null =>
+const optionalNum = (v: unknown): number | null =>
   v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
 
 /** Backend sends bookTitle "Book" + bookId null when the book was deleted. */
-const resolveTitle = (title: any, bookId: any) => {
+const resolveTitle = (title: unknown, bookId: unknown) => {
   const t = typeof title === "string" ? title.trim() : "";
   if (!bookId && (!t || t.toLowerCase() === "book")) return { title: "Book no longer available", available: false };
   return { title: t || "Untitled book", available: Boolean(bookId) };
 };
 
-export function normalizeAuthorDashboard(payload: any): AuthorDashboardSummary {
-  const d = payload?.data?.data ?? payload?.data ?? payload ?? {};
-  const books = typeof d.books === "object" && !Array.isArray(d.books) ? d.books : {};
-  const sales = d.sales || {};
-  const royalties = d.royalties || {};
+export function normalizeAuthorDashboard(payload: unknown): AuthorDashboardSummary {
+  const root = record(payload);
+  const nested = record(root.data);
+  const d = record(nested.data ?? root.data ?? payload);
+  const books = record(d.books);
+  const sales = record(d.sales);
+  const royalties = record(d.royalties);
 
-  const topBooks: AuthorTopBook[] = (Array.isArray(d.topBooks) ? d.topBooks : []).map((b: any) => {
+  const topBooks: AuthorTopBook[] = (Array.isArray(d.topBooks) ? d.topBooks : []).map(record).map((b) => {
     const { title } = resolveTitle(b.title, b.bookId ?? b._id);
     return {
-      bookId: b.bookId ?? b._id ?? null,
+      bookId: b.bookId || b._id ? String(b.bookId ?? b._id) : null,
       title,
-      coverImage: b.coverImage || "",
+      coverImage: String(b.coverImage || ""),
       status: String(b.status || ""),
       unitsSold: num(b.unitsSold),
       grossRevenue: num(b.grossBookRevenue, b.grossRevenue),
@@ -99,11 +102,11 @@ export function normalizeAuthorDashboard(payload: any): AuthorDashboardSummary {
     };
   });
 
-  const recentSales: AuthorSale[] = (Array.isArray(d.recentSales) ? d.recentSales : []).map((s: any) => {
+  const recentSales: AuthorSale[] = (Array.isArray(d.recentSales) ? d.recentSales : []).map(record).map((s) => {
     const { title, available } = resolveTitle(s.bookTitle ?? s.title, s.bookId);
     return {
       orderNumber: String(s.orderNumber || ""),
-      bookId: s.bookId ?? null,
+      bookId: s.bookId ? String(s.bookId) : null,
       bookTitle: title,
       bookAvailable: available,
       quantity: num(s.quantity, 1),
@@ -113,7 +116,7 @@ export function normalizeAuthorDashboard(payload: any): AuthorDashboardSummary {
       royalty: num(s.accruedRoyalty, s.royaltyAmount),
       royaltyUnavailable: String(s.royaltyStatus || "").toUpperCase() === "HISTORICAL_RATE_UNAVAILABLE",
       royaltyStatus: String(s.royaltyStatus || ""),
-      saleDate: s.saleDate || s.createdAt || "",
+      saleDate: String(s.saleDate || s.createdAt || ""),
       orderStatus: String(s.status || ""),
     };
   });
@@ -131,8 +134,8 @@ export function normalizeAuthorDashboard(payload: any): AuthorDashboardSummary {
     eligibleUnsettled: num(royalties.eligibleUnsettled, d.eligibleUnsettled),
     pendingPayout: num(royalties.settledPendingPayment, d.settledPendingPayment),
     paidLifetime: num(royalties.paidLifetime, d.paidLifetime),
-    currency: royalties.currency || "INR",
-    dataStatus: String(royalties.dataStatus || "COMPLETE"),
+    currency: String(royalties.currency || "INR"),
+    dataStatus: String(royalties.dataStatus || "UNKNOWN"),
     unresolvedLegacySales: num(royalties.unresolvedLegacySales),
     topBooks,
     recentSales,

@@ -5,14 +5,14 @@ import { motion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { defaultSiteContent, useSiteContent } from "@/context/site-content-context";
+import { useSiteContent } from "@/context/site-content-context";
 
 
 export default function FAQPage() {
   const [openIndex, setOpenIndex] = useState<number | null>(0);
   // FAQs come from the shared site content (GET /content → faq / faqsJson, edited in Admin →
   // Site Content). Categorised [{ category, items }] or a flat question list both work.
-  const { content } = useSiteContent();
+  const { content, loading, error } = useSiteContent();
   const faqCategories = useMemo(() => {
     const toCategories = (raw?: string): { category: string; items: { question: string; answer: string }[] }[] => {
       try {
@@ -25,8 +25,7 @@ export default function FAQPage() {
         return [];
       }
     };
-    const saved = toCategories(content?.faqsJson);
-    return saved.length > 0 ? saved : toCategories(defaultSiteContent.faqsJson);
+    return toCategories(content.faqsJson);
   }, [content]);
 
   const fadeInUp = {
@@ -52,6 +51,8 @@ export default function FAQPage() {
 
       {/* FAQs Section */}
       <section className="py-16 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
+        {loading && <p role="status" className="text-center text-muted-foreground">Loading FAQs...</p>}
+        {!loading && !error && faqCategories.length === 0 && <p className="text-center text-muted-foreground">No FAQs have been published yet.</p>}
         {faqCategories.map((cat, catIdx) => (
           <motion.div
             key={catIdx}
@@ -104,9 +105,7 @@ export default function FAQPage() {
             Can&apos;t find the answer you&apos;re looking for? Our support team is here to help.
           </p>
           <div className="flex gap-4 justify-center pt-2">
-            <Link href="/contact">
-              <Button>Contact Support</Button>
-            </Link>
+            <Button asChild><Link href="/contact">Contact Support</Link></Button>
           </div>
         </div>
       </section>

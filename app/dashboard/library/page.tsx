@@ -1,6 +1,8 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
 
-import { useState, useEffect } from "react";
+
+import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -29,13 +31,13 @@ export default function LibraryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  const fetchLibrary = async () => {
+  const fetchLibrary = useCallback(async () => {
     if (!user?._id && !user?.id) return;
     const userId = user._id || user.id;
     setLoading(true);
     setError(false);
     try {
-      const { data } = await api.get(`/users/${userId}/library`, { params: { limit: 100 }, cache: "no-store" } as any);
+      const { data } = await api.get(`/users/${userId}/library`, { params: { limit: 100 }, cache: "no-store" });
       const booksData = extractList(data, "library").length ? extractList(data, "library") : extractList(data, "books");
       // Entries may be books or { book, purchasedAt, order } rows.
       setLibraryBooks(
@@ -48,16 +50,16 @@ export default function LibraryPage() {
           .filter((book: any) => book && (book._id || book.id || book.title))
       );
     } catch (err) {
-      console.error("Failed to fetch library:", err);
+      console.error("Failed to fetch library:", describeApiError(err));
       setError(true);
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     fetchLibrary();
-  }, [user]);
+  }, [fetchLibrary]);
 
   const filteredBooks = libraryBooks.filter((book) => {
     const title = (book.title || "").toLowerCase();

@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
@@ -57,7 +59,7 @@ export default function BecomeAuthorPage() {
   const checkStatus = async () => {
     setIsLoadingStatus(true);
     try {
-      const res = await api.get("/users/me/author-application", { cache: "no-store" } as any);
+      const res = await api.get("/users/me/author-application", { cache: "no-store" });
       const data = res.data;
       const app = data?.data || data?.application || (Array.isArray(data) ? data[0] : data);
       if (app && (app.status || app.state)) {
@@ -129,7 +131,8 @@ export default function BecomeAuthorPage() {
 
       toast.success("Author application submitted successfully!");
       setApplicationStatus("pending");
-    } catch (error: any) {
+    } catch (caughtError) {
+      const error = describeApiError(caughtError);
       toast.error(error.response?.data?.message || "Failed to submit application.");
     } finally {
       setIsSubmitting(false);

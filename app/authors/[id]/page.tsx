@@ -1,6 +1,8 @@
 'use client';
+import { describeApiError } from "@/lib/api-error";
 
-import { useState, useEffect } from 'react';
+
+import { useState, useEffect , useCallback} from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -50,7 +52,7 @@ export default function AuthorDetailPage() {
   const [activeTab, setActiveTab] = useState<'books' | 'bio'>('books');
   const [bookSearchQuery, setBookSearchQuery] = useState('');
 
-  const fetchAuthorData = async () => {
+  const fetchAuthorData = useCallback(async () => {
     setLoading(true);
     setError(false);
     try {
@@ -74,17 +76,17 @@ export default function AuthorDetailPage() {
         setBooks([]);
       }
     } catch (err) {
-      console.error('Failed to process author data:', err);
+      console.error('Failed to process author data:', describeApiError(err));
       setError(true);
       setAuthor(null);
     } finally {
       setLoading(false);
     }
-  };
+  }, [params.id]);
 
   useEffect(() => {
     fetchAuthorData();
-  }, [params.id]);
+  }, [fetchAuthorData]);
 
   const handleShare = () => {
     if (typeof window !== 'undefined') {

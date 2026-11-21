@@ -1,4 +1,6 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
+
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
@@ -28,7 +30,7 @@ export default function AdminDashboard() {
     setLoading(true);
     setError(false);
     try {
-      const dashRes = await api.get("/admin/dashboard", { cache: "no-store" } as any);
+      const dashRes = await api.get("/admin/dashboard", { cache: "no-store" });
       const dashData = dashRes.data?.data || dashRes.data || {};
       const opCounts = dashData.operationalCounts || {};
       const ordersArr = dashData.recentOrders || dashData.orders || [];
@@ -46,7 +48,7 @@ export default function AdminDashboard() {
         recentAuthors: Array.isArray(authorsArr) ? authorsArr.slice(0, 5) : [],
       });
     } catch (err) {
-      console.error("Failed to fetch admin dashboard data:", err);
+      console.error("Failed to fetch admin dashboard data:", describeApiError(err));
       setError(true);
     } finally {
       setLoading(false);

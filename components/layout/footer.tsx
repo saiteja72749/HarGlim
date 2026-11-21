@@ -13,7 +13,6 @@ import {
   Phone,
   MapPin,
 } from "lucide-react";
-import { siteConfig } from "@/config/site";
 import { getSafeExternalUrl } from "@/lib/utils";
 
 const footerLinks = {
@@ -52,11 +51,11 @@ export function Footer() {
   const { content } = useSiteContent();
 
   const dynamicSocial = [
-    { icon: Facebook, href: content?.socialFacebook || siteConfig.social.facebook, label: "Facebook" },
-    { icon: Twitter, href: content?.socialTwitter || siteConfig.social.twitter, label: "Twitter" },
-    { icon: Instagram, href: content?.socialInstagram || siteConfig.social.instagram, label: "Instagram" },
-    { icon: Linkedin, href: content?.socialLinkedin || siteConfig.social.linkedin, label: "LinkedIn" },
-  ];
+    { icon: Facebook, href: content.socialFacebook, label: "Facebook" },
+    { icon: Twitter, href: content.socialTwitter, label: "Twitter" },
+    { icon: Instagram, href: content.socialInstagram, label: "Instagram" },
+    { icon: Linkedin, href: content.socialLinkedin, label: "LinkedIn" },
+  ].filter((social) => getSafeExternalUrl(social.href));
   
   // Only keep footer ("bottom details") for the home page screen
   if (pathname !== "/") return null;
@@ -79,25 +78,22 @@ export function Footer() {
               </span>
             </Link>
             <p className="text-white/70 mb-4 max-w-sm">
-              Empowering authors and delighting readers. We bring
-              stories to life with professional publishing services.
+              {content.aboutSubtitle || content.homeSubtitle}
             </p>
             <div className="space-y-2 text-sm text-white/70">
               <div className="flex items-start gap-2">
                 <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0" />
                 <span>
-                  {content?.contactAddressLine1
-                    ? [content.contactAddressLine1, content.contactAddressLine2].filter(Boolean).join(", ")
-                    : siteConfig.contact.address}
+                  {[content.contactAddressLine1, content.contactAddressLine2].filter(Boolean).join(", ")}
                 </span>
               </div>
               <div className="flex items-start gap-2">
                 <Phone className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                <span>{content?.contactPhone || siteConfig.contact.phonePrimary}</span>
+                <span>{content.contactPhone}</span>
               </div>
               <div className="flex items-start gap-2">
                 <Mail className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                <span>{content?.contactEmail || siteConfig.contact.email}</span>
+                <span>{content.contactEmail}</span>
               </div>
             </div>
           </div>

@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -38,7 +40,8 @@ export function ResetPasswordForm({ token }: { token: string }) {
     try {
       await api.put(`/auth/reset-password/${encodeURIComponent(token)}`, { password });
       setDone(true);
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       setError(err?.response?.data?.message || "We couldn't set your password. Please try again.");
     } finally {
       setSaving(false);
@@ -66,18 +69,14 @@ export function ResetPasswordForm({ token }: { token: string }) {
             </div>
             <h2 className="font-bold text-lg text-foreground">Password saved</h2>
             <p className="text-sm text-muted-foreground">You can now sign in with your new password.</p>
-            <Link href="/login" className="block">
-              <Button className="w-full">Go to Sign In</Button>
-            </Link>
+            <Button className="w-full" asChild><Link href="/login" className="block">Go to Sign In</Link></Button>
           </div>
         ) : !token ? (
           <div className="bg-card border border-border rounded-2xl p-6 text-center space-y-4 shadow-sm" role="alert">
             <p className="text-sm text-muted-foreground">
               This link is incomplete. Please open the full link from your email, or request a new one.
             </p>
-            <Link href="/forgot-password" className="block">
-              <Button className="w-full">Request a New Link</Button>
-            </Link>
+            <Button className="w-full" asChild><Link href="/forgot-password" className="block">Request a New Link</Link></Button>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="bg-card border border-border rounded-2xl p-6 space-y-4 shadow-sm">

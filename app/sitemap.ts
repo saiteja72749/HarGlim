@@ -1,3 +1,6 @@
+import { siteConfig } from "@/config/site";
+
+import { describeApiError } from "@/lib/api-error";
 import { MetadataRoute } from 'next';
 
 type SitemapRecord = {
@@ -27,22 +30,22 @@ function getRecords(value: unknown): SitemapRecord[] {
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://harglim.com').replace(/\/+$/, '');
+  const baseUrl = (siteConfig.url).replace(/\/+$/, '');
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
 
   try {
     // Fetch all books, categories, and authors for the sitemap
     const [booksRes, categoriesRes, authorsRes] = await Promise.all([
       fetch(`${API_URL}/books?limit=1000`, { next: { revalidate: 3600 } }).catch((e) => {
-        console.error('sitemap: failed to fetch books', e);
+        console.error('sitemap: failed to fetch books', describeApiError(e));
         return null;
       }),
       fetch(`${API_URL}/categories?limit=100`, { next: { revalidate: 3600 } }).catch((e) => {
-        console.error('sitemap: failed to fetch categories', e);
+        console.error('sitemap: failed to fetch categories', describeApiError(e));
         return null;
       }),
       fetch(`${API_URL}/authors?limit=1000`, { next: { revalidate: 3600 } }).catch((e) => {
-        console.error('sitemap: failed to fetch authors', e);
+        console.error('sitemap: failed to fetch authors', describeApiError(e));
         return null;
       }),
     ]);
@@ -110,7 +113,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
     return sitemapEntries;
   } catch (error) {
-    console.error('sitemap: falling back to static sitemap after unexpected error', error);
+    console.error('sitemap: falling back to static sitemap after unexpected error', describeApiError(error));
     return [
       { url: `${baseUrl}/` },
       { url: `${baseUrl}/books` },

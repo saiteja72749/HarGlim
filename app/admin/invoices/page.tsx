@@ -1,4 +1,6 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
+
 
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
@@ -65,7 +67,7 @@ export default function AdminInvoicesPage() {
 
       setInvoices(items);
     } catch (err) {
-      console.warn("Invoices fetch error:", err);
+      console.warn("Invoices fetch error:", describeApiError(err));
       setInvoices([]);
     } finally {
       setLoading(false);
@@ -101,7 +103,7 @@ export default function AdminInvoicesPage() {
         window.print();
       }
     } catch (err) {
-      console.error("Failed to download invoice:", err);
+      console.error("Failed to download invoice:", describeApiError(err));
       window.print();
     } finally {
       setDownloadingId(null);

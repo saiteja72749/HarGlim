@@ -1,5 +1,8 @@
 "use client";
 
+import type { UserContextData } from "@/types";
+import { describeApiError } from "@/lib/api-error";
+
 import { useState, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -53,7 +56,7 @@ function RegisterFormContent() {
     email: undefined,
   });
 
-  const handleRouteAfterAuth = (context?: any) => {
+  const handleRouteAfterAuth = (context?: UserContextData | null) => {
     // No explicit ?redirect=: approved authors go straight to their dashboard, admins to /admin.
     const home = getHomeRouteForContext(useAuthStore.getState().user, context || useAuthStore.getState().userContext);
     router.replace(getSafeRedirect(redirectUrl, home));
@@ -115,8 +118,8 @@ function RegisterFormContent() {
           email: user.email,
           role: user.role,
           profileImage: user.profilePicture || user.profileImage,
-          emailVerified: true,
-          isActive: true,
+          emailVerified: user.emailVerified,
+          isActive: user.isActive,
         },
         token,
         refreshToken,
@@ -130,7 +133,8 @@ function RegisterFormContent() {
       setTimeout(() => {
         handleRouteAfterAuth(context);
       }, 300);
-    } catch (error: any) {
+    } catch (caughtError) {
+      const error = describeApiError(caughtError);
       setAuthStatus("error");
       const status = error.response?.status;
       const errorCode = error.response?.data?.error;
@@ -304,6 +308,7 @@ function RegisterFormContent() {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
                     className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#5C6E6E] hover:text-[#0F3D3E]"
                   >
                     {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}

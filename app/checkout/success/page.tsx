@@ -4,29 +4,60 @@ import Link from "next/link";
 import { CheckCircle2, ArrowRight, Copy, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useState, useEffect } from "react";
+import { Suspense, useState, useEffect, useCallback } from "react";
 import toast from "react-hot-toast";
-import { useCartStore } from "@/store/cart-store";
+import api from "@/lib/api";
+import { AuthGuard } from "@/components/auth/auth-guard";
+import { ErrorState } from "@/components/ui/error-state";
+import { getPaymentState, getPaymentOrderId, PAYMENT_STATE_META } from "@/lib/order-status";
+import { extractList } from '@/lib/tracking';
+import { useAuthStore } from '@/store/auth-store';
+
+interface OrderReceipt {
+  _id: string;
+  orderNumber: string;
+  isPaid?: boolean;
+  utr?: string;
+  paymentStatus?: string;
+  payment?: { status?: string } | string;
+}
 
 function SuccessContent() {
   const searchParams = useSearchParams();
-  // Never invent an order number: a fake one can't be tracked or matched by support.
-  const orderId = searchParams?.get("orderId") || "";
-  const [_copied, setCopied] = useState(false);
-  const clearCart = useCartStore((state) => state.clearCart);
+  const recordId = searchParams?.get("orderId") || "";
+  const userId = useAuthStore((state) => state.user?._id || state.user?.id);
+  const [order, setOrder] = useState<OrderReceipt | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const loadOrder = useCallback(async () => {
+    setLoading(true);
+    setError(false);
+    try {
+      if (!/^[a-f0-9]{24}$/i.test(recordId)) throw new Error('An order ID is required.');
+      if (!userId) throw new Error('Sign in to view your order.');
+      const [orders, payments] = await Promise.all([
+        api.get(`/users/${userId}/orders`, { params: { limit: 100 }, cache: 'no-store' }),
+        api.get(`/users/${userId}/payments`, { params: { limit: 100 }, cache: 'no-store' }),
+      ]);
+      const receipt = extractList<OrderReceipt>(orders.data, 'orders').find((candidate: OrderReceipt) => candidate._id === recordId);
+      if (!receipt?._id || !receipt.orderNumber) throw new Error('Order details are unavailable.');
+      const payment = extractList(payments.data, 'payments').find((candidate) => getPaymentOrderId(candidate) === recordId);
+      setOrder({ ...receipt, payment: payment || receipt.payment });
+    } catch { setError(true); setOrder(null); }
+    finally { setLoading(false); }
+  }, [recordId, userId]);
+  useEffect(() => { void loadOrder(); }, [loadOrder]);
 
-  useEffect(() => {
-    clearCart();
-  }, [clearCart]);
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    toast.success("Copied to clipboard!");
-    setTimeout(() => setCopied(false), 2000);
+  const copyToClipboard = async (text: string) => {
+    try { await navigator.clipboard.writeText(text); toast.success('Copied to clipboard!'); }
+    catch { toast.error('Could not copy. Please select and copy the value.'); }
   };
-
-  const utrRef = searchParams?.get("utr") || "";
+  if (loading) return <div role="status" className="min-h-screen flex items-center justify-center">Loading order details...</div>;
+  if (error || !order) return <div className="max-w-3xl mx-auto py-16 px-4"><ErrorState title="Order details unavailable" message="Open My Orders to find your order, or retry loading its confirmed details." onRetry={loadOrder} /><Link href="/dashboard/orders">View My Orders</Link></div>;
+  const orderId = order.orderNumber;
+  const utrRef = order.utr || '';
+  const paymentState = getPaymentState(order);
+  const status = PAYMENT_STATE_META[paymentState];
 
   return (
     <div className="bg-background min-h-screen py-24">
@@ -34,9 +65,9 @@ function SuccessContent() {
         <div className="inline-flex h-24 w-24 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 mb-6">
           <CheckCircle2 className="h-12 w-12" />
         </div>
-        <h1 className="text-3xl font-serif font-bold text-[#0F3D3E]">Order Submitted Successfully!</h1>
+        <h1 className="text-3xl font-serif font-bold text-[#0F3D3E]">Order Details</h1>
         <p className="mt-3 text-sm text-[#5C6E6E] max-w-xl mx-auto font-sans leading-relaxed">
-          Thank you for your purchase! Your order has been registered and your payment UTR has been submitted for admin verification.
+          Your order information and payment status below come from your account.
         </p>
 
         <div className="mt-8 max-w-md mx-auto bg-card border border-border rounded-2xl p-6 text-left shadow-sm space-y-4">
@@ -66,7 +97,7 @@ function SuccessContent() {
             )}
 
             <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-800 space-y-1">
-              <p className="font-bold">Payment Status: Pending Admin Verification</p>
+              <p className="font-bold">Payment Status: {status.label}</p>
               <p className="text-[11px] text-amber-700 leading-relaxed font-sans">
                 Your order is registered under <strong>Order Number {orderId || "(see My Orders)"}</strong>. Shipment tracking details will be assigned by admin after payment approval & dispatch.
               </p>
@@ -74,32 +105,26 @@ function SuccessContent() {
           </div>
         </div>
         <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3.5">
-          <Link href="/dashboard/orders">
-            <Button size="lg" className="w-full sm:w-auto flex items-center gap-2 bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] font-serif font-bold">
+          <Button size="lg" className="w-full sm:w-auto flex items-center gap-2 bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] font-serif font-bold" asChild><Link href="/dashboard/orders">
               <Package className="h-4 w-4" />
               View in My Orders
-            </Button>
-          </Link>
-          <Link href="/books">
-            <Button
+            </Link></Button>
+          <Button
               variant="outline"
               size="lg"
               className="w-full sm:w-auto flex items-center justify-center gap-2"
-            >
+             asChild><Link href="/books">
               Continue Shopping
-            </Button>
-          </Link>
+            </Link></Button>
           {orderId && (
-            <Link href={`/track-order?orderNumber=${encodeURIComponent(orderId)}`}>
-              <Button
+            <Button
                 variant="ghost"
                 size="lg"
                 className="w-full sm:w-auto flex items-center justify-center gap-2 text-[#5C6E6E]"
-              >
+               asChild><Link href={`/track-order?orderNumber=${encodeURIComponent(orderId)}`}>
                 Track this order
                 <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
+              </Link></Button>
           )}
         </div>
       </div>
@@ -109,8 +134,8 @@ function SuccessContent() {
 
 export default function CheckoutSuccessPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+    <AuthGuard><Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
       <SuccessContent />
-    </Suspense>
+    </Suspense></AuthGuard>
   );
 }

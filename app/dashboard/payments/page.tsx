@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
@@ -165,7 +167,7 @@ export default function PaymentsPage() {
       // Filtering happens client-side: the backend status values (PAYMENT_VERIFIED, QR_GENERATED...)
       // don't match the old filter values (VERIFIED, INTENT_CREATED...), so server filtering returned nothing.
       const [res, ordersRes] = await Promise.all([
-        api.get(`/users/${userId}/payments`, { params: { page: 1, limit: 100 }, cache: "no-store" } as any),
+        api.get(`/users/${userId}/payments`, { params: { page: 1, limit: 100 }, cache: "no-store" }),
         api.get(`/users/${userId}/orders`, { params: { limit: 100 } }).catch(() => null),
       ]);
       const list = extractList(res.data, "payments").sort(
@@ -179,8 +181,9 @@ export default function PaymentsPage() {
         if (o._id && o.orderNumber) numbers[String(o._id)] = o.orderNumber;
       });
       setOrderNumbers(numbers);
-    } catch (err: any) {
-      console.warn("Failed to fetch user payments:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.warn("Failed to fetch user payments:", describeApiError(err));
       setPayments([]);
       toast.error(err?.response?.data?.message || "Could not load your payments. Please try again.");
     } finally {

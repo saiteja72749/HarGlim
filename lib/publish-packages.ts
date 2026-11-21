@@ -1,3 +1,4 @@
+import { record } from "@/lib/api-error";
 import api from "@/lib/api";
 import { notifyLiveChange, onLiveChange } from "@/lib/live-sync";
 
@@ -30,18 +31,19 @@ export type PackageCard = {
  * Accepts a package array or the wrapped `[{ packages: [...] }]` shape of CMS packagesJson,
  * drops inactive ones and turns text prices like "₹999/-" into numbers.
  */
-export function normalizePackages(raw: any): PackageCard[] {
-  let list: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.packages) ? raw.packages : [];
-  if (list.length > 0 && list.every((item) => Array.isArray(item?.packages))) {
-    list = list.flatMap((item) => item.packages);
+export function normalizePackages(raw: unknown): PackageCard[] {
+  let list: unknown[] = Array.isArray(raw) ? raw : Array.isArray(record(raw).packages) ? record(raw).packages as unknown[] : [];
+  if (list.length > 0 && list.every((item) => Array.isArray(record(item).packages))) {
+    list = list.flatMap((item) => record(item).packages as unknown[]);
   }
-  return list
-    .filter((p) => p?.name && p.isActive !== false)
-    .map((p) => ({
-      ...p,
-      features: Array.isArray(p.features) ? p.features : [],
-      price: typeof p.price === "number" ? p.price : Number(String(p.price ?? "").replace(/[^0-9.]/g, "")) || 0,
-    }));
+  return list.flatMap((input) => {
+    const value = record(input);
+    if (typeof value.name !== 'string' || !value.name.trim() || value.isActive === false) return [];
+    const rawPrice = typeof value.price === 'string' ? value.price.replace(/\/-$/, '').replace(/[^0-9.-]/g, '') : value.price;
+    const price = typeof rawPrice === 'number' ? rawPrice : typeof rawPrice === 'string' && rawPrice ? Number(rawPrice) : NaN;
+    if (!Number.isFinite(price) || price < 0) return [];
+    return [{ ...value, name: value.name, price, features: Array.isArray(value.features) ? value.features.filter((feature): feature is string => typeof feature === 'string') : [] } as PackageCard];
+  });
 }
 
 /** packagesJson parsed into cards; [] when it is missing or not valid JSON. */
@@ -60,7 +62,7 @@ export const sortPackages = <T extends PackageCard>(list: T[]) => [...list].sort
 
 /** Active packages in display order. Throws when the request fails, so pages can show a retry. */
 export async function fetchPublicPackages(): Promise<PackageCard[]> {
-  const { data } = await api.get("/publish-packages", { cache: "no-store" } as any);
+  const { data } = await api.get("/publish-packages", { cache: "no-store" });
   return sortPackages(normalizePackages(data?.data ?? data));
 }
 

@@ -1,4 +1,7 @@
 "use client";
+import type { AuthorBook } from "@/types/author-api";
+import { describeApiError } from "@/lib/api-error";
+
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -25,6 +28,11 @@ import { AuthorSalesPanel } from "@/components/authors/author-sales-panel";
 import { AuthorDataNotice } from "@/components/authors/author-data-notice";
 import { authorPanelProblem } from "@/lib/author-panel";
 import { onLiveChange } from "@/lib/live-sync";
+import { getAuthorBookStage } from "@/lib/author-book-status";
+import { AuthorDashboardAccess } from "@/components/authors/author-dashboard-access";
+import { fetchAuthorBooks } from "@/lib/author-books";
+
+type DashboardBook = Pick<Partial<AuthorBook>, "_id" | "id" | "slug" | "status" | "totalSales" | "unitsSold" | "copiesSold" | "sales" | "soldCount"> & { title: string; bookId?: string | null };
 
 type AuthorDashboardData = {
   totalBooks: number;
@@ -39,8 +47,8 @@ type AuthorDashboardData = {
   eligibleUnsettled: number;
   pendingPayout: number;
   paidLifetime: number;
-  recentBooks: any[];
-  manuscripts: any[];
+  recentBooks: DashboardBook[];
+  manuscripts: AuthorBook[];
 };
 
 const emptyDashboardData: AuthorDashboardData = {
@@ -60,23 +68,7 @@ const emptyDashboardData: AuthorDashboardData = {
   manuscripts: [],
 };
 
-const unwrapData = (payload: any) => payload?.data?.data ?? payload?.data ?? payload ?? {};
-
-const extractList = (payload: any, keys: string[] = []) => {
-  const data = unwrapData(payload);
-  for (const key of keys) {
-    const value = data?.[key] ?? payload?.[key];
-    if (Array.isArray(value)) return value;
-  }
-
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(payload)) return payload;
-
-  const nested = data?.items || data?.results || data?.docs;
-  return Array.isArray(nested) ? nested : [];
-};
-
-const getNumber = (...values: any[]) => {
+const getNumber = (...values: unknown[]) => {
   for (const value of values) {
     // Number(null) and Number("") are 0: skip them so a missing field doesn't hide the fallback.
     if (value === null || value === undefined || value === "") continue;
@@ -86,17 +78,14 @@ const getNumber = (...values: any[]) => {
   return 0;
 };
 
-const normalizeStatus = (status: any) =>
-  String(status || "draft").toLowerCase().replace(/\s+/g, "_");
-
-const getSoldCount = (book: any) =>
+const getSoldCount = (book: DashboardBook) =>
   getNumber(book?.totalSales, book?.unitsSold, book?.copiesSold, book?.sales, book?.soldCount);
 
-const getBookId = (book: any) => String(book?._id || book?.id || book?.bookId || book?.slug || book?.title || "");
+const getBookId = (book: DashboardBook) => String(book?._id || book?.id || book?.bookId || book?.slug || book?.title || "");
 
-const getStatusLabel = (status: any) => {
-  const normalized = normalizeStatus(status);
-  if (normalized === "pending") return "Pending";
+const getStatusLabel = (status: unknown) => {
+  const normalized = getAuthorBookStage({ status });
+  if (normalized === "draft") return "Draft";
   if (["processing", "under_review", "in_editing", "submitted"].includes(normalized)) return "Processing";
   if (["approved", "published"].includes(normalized)) return "Published";
   if (["rejected", "revision_required", "changes_requested"].includes(normalized)) return "Needs Revision";
@@ -104,25 +93,30 @@ const getStatusLabel = (status: any) => {
 };
 
 export default function AuthorDashboard() {
+  return <AuthorDashboardAccess><AuthorDashboardContent /></AuthorDashboardAccess>;
+}
+
+function AuthorDashboardContent() {
   const { user } = useAuthStore();
   const [dashboardData, setDashboardData] = useState<AuthorDashboardData>(emptyDashboardData);
   const [loading, setLoading] = useState(true);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [salesSummary, setSalesSummary] = useState<AuthorDashboardSummary | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [booksLoaded, setBooksLoaded] = useState(false);
 
   const fetchDashboardData = useCallback(async () => {
     if (!user) return;
 
     setLoading(true);
     try {
-      const requestConfig = { cache: "no-store" } as any;
+      const requestConfig = { cache: "no-store" as const };
 
       // Two calls cover the whole page: the grouped dashboard (book counts, sales, royalties,
       // topBooks, recentSales) and the author's own book list (manuscript statuses).
       const [dashboardRes, booksRes] = await Promise.allSettled([
         api.get("/authors/me/dashboard", requestConfig),
-        api.get("/authors/me/books", { params: { limit: 100, sort: "-updatedAt" }, ...requestConfig } as any),
+        fetchAuthorBooks({ sort: "-updatedAt" }),
       ]);
 
       const summary = dashboardRes.status === "fulfilled" ? normalizeAuthorDashboard(dashboardRes.value.data) : null;
@@ -133,20 +127,18 @@ export default function AuthorDashboard() {
           { label: "your book list", result: booksRes },
         ])
       );
-      const authorBooks =
-        booksRes.status === "fulfilled" ? extractList(booksRes.value.data, ["books", "items"]) : [];
+      setBooksLoaded(booksRes.status === "fulfilled");
+      const authorBooks = booksRes.status === "fulfilled" ? booksRes.value : [];
 
-      const publishedBooksList = authorBooks.filter((book) =>
-        ["published", "approved", "active"].includes(normalizeStatus(book.status))
-      );
+      const publishedBooksList = authorBooks.filter((book) => getAuthorBookStage(book) === "published");
       const manuscripts = authorBooks.filter(
-        (book) => !["published", "active"].includes(normalizeStatus(book.status))
+        (book) => !["published", "archived"].includes(getAuthorBookStage(book))
       );
 
       const statusCounts = authorBooks.reduce(
         (counts, book) => {
-          const status = normalizeStatus(book.status);
-          if (status === "pending" || status === "draft") counts.pending += 1;
+          const status = getAuthorBookStage(book);
+          if (status === "draft") counts.pending += 1;
           if (["processing", "under_review", "in_editing", "submitted"].includes(status)) {
             counts.processing += 1;
           }
@@ -179,8 +171,10 @@ export default function AuthorDashboard() {
       setDashboardData(nextData);
       setLastSyncedAt(new Date());
     } catch (err) {
-      console.warn("Error fetching author dashboard data:", err);
-      setDashboardData(emptyDashboardData);
+      console.warn("Error fetching author dashboard data:", describeApiError(err));
+      setSalesSummary(null);
+      setBooksLoaded(false);
+      setProblem("Couldn't load your dashboard. Please retry.");
     } finally {
       setLoading(false);
     }
@@ -196,69 +190,69 @@ export default function AuthorDashboard() {
     () => [
       {
         label: "Total Books",
-        value: dashboardData.totalBooks,
+        value: salesSummary || booksLoaded ? dashboardData.totalBooks : "Unavailable",
         helper: `${dashboardData.publishedBooks} published`,
         icon: BookOpen,
         iconClass: "bg-[#0F3D3E] text-[#D4AF37]",
       },
       {
         label: "Copies Sold",
-        value: dashboardData.totalSold,
+        value: salesSummary ? dashboardData.totalSold : "Unavailable",
         helper: "Live backend sales",
         icon: ShoppingCart,
         iconClass: "bg-emerald-500/10 text-emerald-700 border border-emerald-500/20",
       },
       {
         label: "Pending",
-        value: dashboardData.pendingCount,
+        value: booksLoaded ? dashboardData.pendingCount : "Unavailable",
         helper: "Drafts or waiting review",
         icon: Clock,
         iconClass: "bg-amber-500/10 text-amber-700 border border-amber-500/20",
       },
       {
         label: "Processing",
-        value: dashboardData.processingCount,
+        value: booksLoaded ? dashboardData.processingCount : "Unavailable",
         helper: "Submitted or under review",
         icon: FileText,
         iconClass: "bg-blue-500/10 text-blue-700 border border-blue-500/20",
       },
       {
         label: "Needs Revision",
-        value: dashboardData.rejectedCount,
+        value: booksLoaded ? dashboardData.rejectedCount : "Unavailable",
         helper: "Rejected or changes requested",
         icon: AlertCircle,
         iconClass: "bg-rose-500/10 text-rose-700 border border-rose-500/20",
       },
       {
         label: "Royalty Earned",
-        value: `₹${Number(dashboardData.totalEarnings).toLocaleString("en-IN")}`,
-        helper: `From ₹${Number(dashboardData.grossRevenue).toLocaleString("en-IN")} gross book revenue`,
+        value: salesSummary ? `₹${Number(dashboardData.totalEarnings).toLocaleString("en-IN")}` : "Unavailable",
+        helper: salesSummary ? `From ₹${Number(dashboardData.grossRevenue).toLocaleString("en-IN")} gross book revenue` : "Royalty data could not be loaded",
         icon: DollarSign,
         iconClass: "bg-[#D4AF37]/20 text-[#0F3D3E] border border-[#D4AF37]/40",
       },
       {
         label: "Eligible for Payout",
-        value: `₹${Number(dashboardData.eligibleUnsettled).toLocaleString("en-IN")}`,
+        value: salesSummary ? `₹${Number(dashboardData.eligibleUnsettled).toLocaleString("en-IN")}` : "Unavailable",
         helper: "Not yet in a settlement",
         icon: Wallet,
         iconClass: "bg-emerald-500/10 text-emerald-700 border border-emerald-500/20",
       },
       {
         label: "Payout Pending",
-        value: `₹${Number(dashboardData.pendingPayout).toLocaleString("en-IN")}`,
+        value: salesSummary ? `₹${Number(dashboardData.pendingPayout).toLocaleString("en-IN")}` : "Unavailable",
         helper: "Settled, awaiting transfer",
         icon: Clock,
         iconClass: "bg-amber-500/10 text-amber-700 border border-amber-500/20",
       },
       {
         label: "Paid to You",
-        value: `₹${Number(dashboardData.paidLifetime).toLocaleString("en-IN")}`,
+        value: salesSummary ? `₹${Number(dashboardData.paidLifetime).toLocaleString("en-IN")}` : "Unavailable",
         helper: "Lifetime payouts",
         icon: CheckCircle,
         iconClass: "bg-[#0F3D3E] text-[#D4AF37]",
       },
     ],
-    [dashboardData]
+    [dashboardData, salesSummary, booksLoaded]
   );
 
   // Spinner only before the first load; later reloads update the figures in place.
@@ -279,7 +273,7 @@ export default function AuthorDashboard() {
             Author Workspace
           </h1>
           <p className="text-xs sm:text-sm text-[#5C6E6E] mt-0.5">
-            Welcome back, {user?.name || "Author"}! Your dashboard is synced with backend book, sales, and royalty APIs.
+            Welcome back, {user?.name || "Author"}! Track your books, sales, and royalty earnings.
           </p>
           {lastSyncedAt && (
             <p className="text-[11px] text-[#5C6E6E] mt-1">
@@ -428,12 +422,12 @@ export default function AuthorDashboard() {
                     </p>
                     <p className="text-[11px] text-[#5C6E6E]">
                       {item.updatedAt || item.createdAt
-                        ? `Updated ${new Date(item.updatedAt || item.createdAt).toLocaleDateString("en-IN")}`
+                        ? `Updated ${new Date(item.updatedAt || item.createdAt || "").toLocaleDateString("en-IN")}`
                         : "Awaiting backend timestamp"}
                     </p>
                   </div>
                   <Badge className="bg-amber-50 text-amber-700 border border-amber-200 text-[10px] shrink-0">
-                    {getStatusLabel(item.status)}
+                    {getStatusLabel(getAuthorBookStage(item))}
                   </Badge>
                 </div>
               ))

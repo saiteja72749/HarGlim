@@ -1,6 +1,8 @@
 "use client";
+import { record } from "@/lib/api-error";
 
-import { useState, useEffect } from "react";
+
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
@@ -24,21 +26,24 @@ import { Button } from "@/components/ui/button";
 import { BookCard } from "@/components/books/book-card";
 import { Input } from "@/components/ui/input";
 import api from "@/lib/api";
+import { ErrorState } from "@/components/ui/error-state";
+import type { Book, Category, Author } from "@/types";
 import { fetchBackendCategories } from "@/lib/categories";
 import { onLiveChange } from "@/lib/live-sync";
-import type { Book } from "@/types";
 import { getBookAuthorInfo } from "@/lib/utils";
 
-import { defaultSiteContent, useSiteContent } from "@/context/site-content-context";
+import { useSiteContent } from "@/context/site-content-context";
 import { flattenFaqs, readSection } from "@/lib/page-content";
 import { fetchPublicStats } from "@/lib/public-stats";
 
 const WHY_CHOOSE_ICONS = [Feather, Layers, Truck, ShieldCheck];
 
 
-const extractBooks = (data: any): Book[] => {
-  const items = data?.data?.books || data?.books || data?.data || data || [];
-  return Array.isArray(items) ? items : [];
+const extractBooks = (input: unknown): Book[] => {
+  const data = record(input);
+  const items = record(data.data).books || data.books || data.data || input || [];
+  if (!Array.isArray(items)) throw new Error("The backend returned an invalid book list.");
+  return items as Book[];
 };
 
 const getOptimizedCoverImage = (src?: string) => {
@@ -57,12 +62,13 @@ export default function Home() {
   const { content } = useSiteContent();
   const [featuredBooks, setFeaturedBooks] = useState<Book[]>([]);
   const [bestsellers, setBestsellers] = useState<Book[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
-  const [authors, setAuthors] = useState<any[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [authors, setAuthors] = useState<Author[]>([]);
   // null until the backend answers, so the counters never flash "0+" on refresh.
   const [liveStats, setLiveStats] = useState<{ booksCount: number; authorsCount: number } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [, setError] = useState(false);
+  const [error, setError] = useState(false);
+  const [featuredError, setFeaturedError] = useState(false);
 
   // Hero featured-book rotation
   const [heroIndex, setHeroIndex] = useState(0);
@@ -81,63 +87,57 @@ export default function Home() {
     }
   };
   const savedFaqs = parseFaqs(content?.faqsJson);
-  const activeFaqs = savedFaqs.length > 0 ? savedFaqs : parseFaqs(defaultSiteContent.faqsJson);
+  const activeFaqs = savedFaqs;
   const whyChooseBlocks = readSection<{ title: string; description: string; highlight?: string }>(
     content,
     "homeWhyChooseJson"
   ).map((block, idx) => ({ ...block, icon: WHY_CHOOSE_ICONS[idx % WHY_CHOOSE_ICONS.length] }));
 
-  const fetchHomeData = async () => {
-    try {
-      setLoading(true);
-      setError(false);
-
-      const featuredRes = await api.get("/books?featured=true&limit=8");
-
-      const featuredList = extractBooks(featuredRes.data);
-      // Strictly enforce Feature on Home (isFeatured) flag; new release alone must not qualify
-      setFeaturedBooks(featuredList.filter((b: any) => b.isFeatured === true || b.featured === true));
+  const fetchHomeData = useCallback(async () => {
+    setLoading(true);
+    setError(false);
+    setFeaturedError(false);
+    // These collections are independent. Start them together rather than making
+    // every secondary section wait for the featured-books round trip.
+    const featured = api.get("/books?featured=true&limit=8").then((response) => {
+      setFeaturedBooks(extractBooks(response.data).filter((book) => book.isFeatured === true || book.featured === true));
       setLoading(false);
-
-      const [bestsellersRes, categoriesRes, authorsRes, statsRes] = await Promise.allSettled([
-        // Live backend honours `bestseller=true`; `sort=rating` is ignored (returns default order).
-        api.get("/books?bestseller=true&limit=4"),
-        fetchBackendCategories(),
-        api.get("/authors?limit=6"),
-        fetchPublicStats(),
-      ]);
-
-      if (bestsellersRes.status === "fulfilled") {
-        setBestsellers(extractBooks(bestsellersRes.value.data));
-      }
-
-      if (categoriesRes.status === "fulfilled") {
-        setCategories(categoriesRes.value.filter((category) => category.featured).slice(0, 6));
-      }
-
-      if (authorsRes.status === "fulfilled") {
-        const data = authorsRes.value.data;
-        const items = data?.data?.authors || data?.data || data || [];
-        setAuthors(Array.isArray(items) ? items : []);
-      }
-
-      setLiveStats(statsRes.status === "fulfilled" ? statsRes.value : { booksCount: 0, authorsCount: 0 });
-    } catch (error) {
-      console.error("Failed to fetch home page data:", error);
-      setError(true);
+      return response;
+    }).catch((error: unknown) => {
+      setFeaturedBooks([]);
+      setFeaturedError(true);
       setLoading(false);
-    } finally {
-      setLoading(false);
+      throw error;
+    });
+    const [featuredResult, bestsellersRes, categoriesRes, authorsRes, statsRes] = await Promise.allSettled([
+      featured,
+      api.get("/books?bestseller=true&limit=4"),
+      fetchBackendCategories(),
+      api.get("/authors?limit=6"),
+      fetchPublicStats(),
+    ]);
+    if (bestsellersRes.status === "fulfilled") {
+      try { setBestsellers(extractBooks(bestsellersRes.value.data)); }
+      catch { setError(true); }
     }
-  };
+    if (categoriesRes.status === "fulfilled") setCategories(categoriesRes.value.filter((category) => category.featured).slice(0, 6) as Category[]);
+    if (authorsRes.status === "fulfilled") {
+      const data = authorsRes.value.data;
+      const items = data?.data?.authors || data?.data || data;
+      if (Array.isArray(items)) setAuthors(items);
+      else setError(true);
+    }
+    setLiveStats(statsRes.status === "fulfilled" ? statsRes.value : null);
+    if ([featuredResult, bestsellersRes, categoriesRes, authorsRes, statsRes].some((result) => result.status === "rejected")) setError(true);
+  }, []);
 
   useEffect(() => {
-    fetchHomeData();
-  }, []);
+    void fetchHomeData();
+  }, [fetchHomeData]);
 
   useEffect(() => onLiveChange("categories", () => {
     fetchBackendCategories(true)
-      .then((items) => setCategories(items.filter((category) => category.featured).slice(0, 6)))
+      .then((items) => setCategories(items.filter((category) => category.featured).slice(0, 6) as Category[]))
       .catch(() => setError(true));
   }), []);
 
@@ -157,6 +157,7 @@ export default function Home() {
 
   return (
     <div className="bg-[#F8F9F7] text-[#0F3D3E] overflow-hidden font-sans">
+      {error && <div className="mx-auto max-w-7xl px-4 py-6"><ErrorState title="Some website information could not load" onRetry={fetchHomeData} /></div>}
       
       {/* ------------------------------------------------------------------ */}
       {/* 1. HERO SECTION (Layered Gradient + Floating Book Mockup + CTAs) */}
@@ -184,35 +185,30 @@ export default function Home() {
 
               {/* Main Headline */}
               <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-serif font-bold tracking-tight text-white leading-[1.1] whitespace-pre-line">
-                {content?.homeTitle || "You write, we print.\nYou dream, we publish"}
+                {content.homeTitle || "Harglim Publishers"}
               </h1>
 
               {/* Subtitle */}
               <p className="text-base sm:text-lg text-white/80 max-w-2xl mx-auto lg:mx-0 font-light leading-relaxed">
-                {content?.homeSubtitle ||
-                  "Discover inspiring stories from extraordinary authors across multiple genres, or publish your own literary masterpiece with Harglim Publishers."}
+                {content.homeSubtitle}
               </p>
 
               {/* Action Buttons */}
               <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start pt-2">
-                <Link href="/publish">
-                  <Button
+                <Button
                     size="lg"
                     className="w-full sm:w-auto bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold h-14 px-8 rounded-full shadow-[0_0_25px_rgba(212,175,55,0.4)] hover:shadow-[0_0_35px_rgba(212,175,55,0.6)] transition-all gap-2 text-base"
-                  >
-                    <span>{content?.homeCtaButtonText || "Start Your Publishing Journey"}</span>
+                   asChild><Link href="/publish">
+                    <span>{content.homeCtaButtonText || "Publish"}</span>
                     <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </Link>
+                  </Link></Button>
 
-                <Link href="/books">
-                  <Button
+                <Button
                     size="lg"
                     className="w-full sm:w-auto bg-white/10 hover:bg-white/20 border-2 border-white/40 text-white font-serif font-bold h-14 px-8 rounded-full text-base transition-all"
-                  >
-                    <span>{content?.homeHeroCtaText || "Explore Books Catalog"}</span>
-                  </Button>
-                </Link>
+                   asChild><Link href="/books">
+                    <span>{content.homeHeroCtaText || "Browse Books"}</span>
+                  </Link></Button>
               </div>
 
               {/* Trust Badges */}
@@ -260,6 +256,7 @@ export default function Home() {
                   const heroBooks = featuredBooks;
                   const activeIndex = heroBooks.length > 0 ? heroIndex % heroBooks.length : 0;
                   const heroBook = heroBooks[activeIndex] || null;
+                  if (!heroBook) return <div className="relative rounded-2xl border border-white/20 p-8 text-center text-white/70" role="status">{featuredError ? "Featured books could not load. Please retry above." : "No featured books are currently published."}</div>;
                   const heroAuthor = heroBook ? getBookAuthorInfo(heroBook).name : "Harglim Publishers Catalog";
                   const heroCover = getOptimizedCoverImage(heroBook?.coverImage);
                   const heroTitle = heroBook?.title || "Discover Inspiring Books";
@@ -287,9 +284,9 @@ export default function Home() {
                           <Link href={heroHref} className="block w-full h-full">
                             <Image
                               src={heroCover}
-                              onError={(e: any) => {
+                              onError={(e) => {
                                 if (e?.target) {
-                                  e.target.src = "/logo.png";
+                                  e.currentTarget.src = "/logo.png";
                                 }
                               }}
                               alt={heroTitle}
@@ -442,7 +439,7 @@ export default function Home() {
             >
               {featuredBooks.slice(0, 4).map((book) => (
                 <motion.div
-                  key={book._id || (book as any).id}
+                  key={book._id || book.id}
                   variants={{
                     hidden: { opacity: 0, y: 14 },
                     visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: "easeOut" } }
@@ -518,7 +515,7 @@ export default function Home() {
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-            {categories.slice(0, 6).map((cat: any) => (
+            {categories.slice(0, 6).map((cat) => (
               <Link
                 key={cat._id || cat.id || cat.slug}
                 href={`/categories/${cat.slug || cat._id}`}
@@ -592,7 +589,7 @@ export default function Home() {
               >
                 {bestsellers.map((book) => (
                   <motion.div
-                    key={book._id || (book as any).id}
+                    key={book._id || book.id}
                     variants={{
                       hidden: { opacity: 0, y: 14 },
                       visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: "easeOut" } }
@@ -629,7 +626,7 @@ export default function Home() {
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-5">
-            {authors.slice(0, 6).map((author: any) => (
+            {authors.slice(0, 6).map((author) => (
               <Link
                 key={author._id || author.id}
                 href={`/authors/${author._id || author.id}`}
@@ -731,15 +728,13 @@ export default function Home() {
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-5">
           <h2 className="text-3xl sm:text-4xl font-serif font-bold">{content.homeCtaHeading}</h2>
           <p className="text-sm sm:text-base text-white/80 leading-relaxed">{content.homeCtaSubtitle}</p>
-          <Link href="/publish" className="inline-block pt-2">
-            <Button
+          <Button
               size="lg"
               className="bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold h-14 px-8 rounded-full gap-2 text-base"
-            >
+             asChild><Link href="/publish" className="inline-block pt-2">
               <span>{content.homeCtaButtonText}</span>
               <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
+            </Link></Button>
         </div>
       </section>
 

@@ -1,12 +1,12 @@
 export interface Book {
-  id?: string;
-  featured?: boolean;
-  createdAt?: string;
   _id: string;
   title: string;
+  id?: string;
+  authorName?: string;
+  featured?: boolean;
   slug: string;
-  author: { _id: string; name: string; email?: string } | string | any;
-  category: { _id: string; name: string; slug: string } | string | any;
+  author: { _id: string; name: string; email?: string; fullName?: string; role?: string; id?: string } | string;
+  category: { _id: string; name: string; slug: string } | string;
   description: string;
   coverImage: string;
   mrp?: number;
@@ -22,6 +22,8 @@ export interface Book {
   isNewRelease?: boolean;
   isFeatured?: boolean;
   stock?: number;
+  reservedStock?: number;
+  createdAt?: string;
   isbn?: string;
   publisher?: string;
   publicationDate?: string;
@@ -54,6 +56,8 @@ export interface Author {
   totalSales?: number;
   revenue?: number;
   bookCount?: number;
+  booksCount?: number;
+  id?: string;
   socialLinks?: Record<string, string>;
 }
 
@@ -67,6 +71,8 @@ export interface Category {
   createdAt?: string;
   updatedAt?: string;
   bookCount?: number;
+  booksCount?: number;
+  id?: string;
 }
 
 export interface Review {
@@ -97,14 +103,14 @@ export interface ShippingAddress {
 
 export interface Order {
   _id: string;
-  user: string | any;
+  user: string | { _id: string; name: string; email?: string };
   orderNumber: string;
   items: CartItem[];
   totalAmount: number;
   status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'Placed' | 'Printed' | 'Shipped' | string;
   paymentStatus: 'pending' | 'paid' | 'failed' | 'verified' | 'VERIFIED' | string;
   payment_status?: 'pending' | 'approved' | 'rejected' | string;
-  shippingAddress: ShippingAddress | any;
+  shippingAddress: ShippingAddress;
   createdAt: string;
   courier_name?: string;
   courierName?: string;

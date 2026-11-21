@@ -7,15 +7,17 @@ import { Providers } from './providers';
 import { siteConfig } from '@/config/site';
 import { NoiseOverlay } from '@/components/ui/noise-overlay';
 import { serializeJsonLd } from '@/lib/json-ld';
+import { SiteStructuredData } from '@/components/layout/site-structured-data';
+import { NetworkStatus } from '@/components/layout/network-status';
+import { fetchRecord, MISSING } from '@/lib/fetch-record';
 
-export const metadata: Metadata = {
+const baseMetadata: Metadata = {
   metadataBase: new URL(siteConfig.url),
   title: {
-    default: 'Harglim Publishers | Discover Your Next Great Read',
+    default: 'Harglim Publishers',
     template: '%s | Harglim Publishers',
   },
-  description:
-    'Publish your book or discover amazing reads from talented authors. Harglim Publishers - Where stories come to life.',
+  description: '',
   keywords: [
     'book publishing',
     'authors',
@@ -30,7 +32,7 @@ export const metadata: Metadata = {
   publisher: 'Harglim Publishers',
   openGraph: {
     title: 'Harglim Publishers',
-    description: 'Discover Your Next Great Read',
+    description: '',
     url: siteConfig.url,
     siteName: 'Harglim Publishers',
     locale: 'en_IN',
@@ -39,7 +41,7 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: 'Harglim Publishers',
-    description: 'Discover Your Next Great Read',
+    description: '',
   },
   robots: {
     index: true,
@@ -50,32 +52,28 @@ export const metadata: Metadata = {
   },
 };
 
+export async function generateMetadata(): Promise<Metadata> {
+  const record = await fetchRecord<{ seo?: { title?: string; description?: string; image?: string; keywords?: unknown } }>('/content');
+  const content = record === MISSING ? null : record;
+  const seo = content?.seo;
+  const title = typeof seo?.title === 'string' && seo.title.trim() ? seo.title : siteConfig.name;
+  const description = typeof seo?.description === 'string' ? seo.description : undefined;
+  const image = typeof seo?.image === 'string' && seo.image.trim() ? seo.image : undefined;
+  return {
+    ...baseMetadata,
+    title: { default: title, template: `%s | ${siteConfig.name}` },
+    description,
+    keywords: Array.isArray(seo?.keywords) ? seo.keywords.filter((keyword: unknown) => typeof keyword === 'string') : typeof seo?.keywords === 'string' ? seo.keywords : undefined,
+    openGraph: { ...baseMetadata.openGraph, title, description, images: image ? [image] : undefined },
+    twitter: { ...baseMetadata.twitter, title, description, images: image ? [image] : undefined },
+  };
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const jsonLd = {
-    '@context': 'https://schema.org',
-    '@type': 'Organization',
-    name: siteConfig.name,
-    url: siteConfig.url,
-    logo: `${siteConfig.url}/logo.png`,
-    description: siteConfig.description,
-    sameAs: [
-      siteConfig.social.facebook,
-      siteConfig.social.twitter,
-      siteConfig.social.instagram,
-      siteConfig.social.linkedin,
-    ],
-    contactPoint: {
-      '@type': 'ContactPoint',
-      telephone: siteConfig.contact.phonePrimary,
-      contactType: 'customer support',
-      email: siteConfig.contact.email,
-    },
-  };
-
   const websiteJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
@@ -93,13 +91,11 @@ export default function RootLayout({
       <body className="font-sans antialiased">
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
-        />
-        <script
-          type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: serializeJsonLd(websiteJsonLd) }}
         />
         <Providers>
+          <NetworkStatus />
+          <SiteStructuredData />
           <NoiseOverlay />
           <Navbar />
           <MainContainer>{children}</MainContainer>

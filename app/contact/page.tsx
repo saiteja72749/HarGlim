@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useState } from "react";
 import { Mail, Phone, MapPin, Clock, Send, CheckCircle2, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,43 +16,39 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { siteConfig } from "@/config/site";
 import { useSiteContent, type SiteContent } from "@/context/site-content-context";
 import toast from "react-hot-toast";
 
 import api from "@/lib/api";
 
-// Contact details come from the admin-editable site content (GET /content); siteConfig
-// is only the fallback for a field the backend leaves empty.
+// Contact details come exclusively from GET /content.
 const getContactCards = (content: SiteContent) => [
   {
     icon: Mail,
     title: "Email Us",
     lines: Array.from(
       new Set([
-        content.contactSupportEmail || siteConfig.contact.supportEmail,
-        content.contactEmail || siteConfig.contact.authorsEmail,
+        content.contactSupportEmail,
+        content.contactEmail,
       ])
     ).filter(Boolean),
   },
   {
     icon: Phone,
     title: "Call Us",
-    lines: [content.contactPhone || siteConfig.contact.phonePrimary, siteConfig.contact.phoneSecondary].filter(Boolean),
+    lines: [content.contactPhone].filter(Boolean),
   },
   {
     icon: MapPin,
     title: "Publishing Headquarters",
-    lines: content.contactAddressLine1
-      ? [content.contactAddressLine1, content.contactAddressLine2].filter(Boolean)
-      : [siteConfig.contact.addressLine1, siteConfig.contact.addressLine2].filter(Boolean),
+    lines: [content.contactAddressLine1, content.contactAddressLine2].filter(Boolean),
   },
   {
     icon: Clock,
     title: "Working Hours",
-    lines: [content.contactHours || siteConfig.contact.workingHours.weekdays].filter(Boolean),
+    lines: [content.contactHours].filter(Boolean),
   },
-];
+].filter((card) => card.lines.length > 0);
 
 const inquiryCategories = [
   "General Inquiry",
@@ -92,8 +90,9 @@ export default function ContactPage() {
       });
       setIsSubmitted(true);
       toast.success("Thank you! Your message has been sent.");
-    } catch (err: any) {
-      console.error("Failed to submit contact form:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to submit contact form:", describeApiError(err));
       toast.error(
         err?.response?.data?.message ||
           "Failed to submit message. Please try again or use the email address listed on this page."

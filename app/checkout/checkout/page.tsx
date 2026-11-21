@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { CreditCard, QrCode, CheckCircle2, Loader2, X, Copy, Check } from 'lucide-react';
@@ -177,10 +179,17 @@ export default function CheckoutStepPage() {
         setBackendPayment(paymentObj);
 
         const orderId = orderObj._id || orderObj.id || responseData._id || responseData.id || '';
-        const orderNum = orderObj.orderNumber || responseData.orderNumber || 'HM-ORDER';
+        if (!orderId) throw new Error('The backend did not return an order ID. Check My Orders before retrying.');
+        const orderNum = orderObj.orderNumber || responseData.orderNumber || '';
 
         setCurrentOrderId(orderId);
         setCurrentOrderNumber(orderNum);
+        const serverAmount = paymentObj?.amount ?? orderObj.totalPrice ?? orderObj.totalAmount;
+        if (typeof serverAmount !== 'number' || !Number.isFinite(serverAmount) || serverAmount <= 0) {
+          toast.error('Your order was created, but its payment amount could not be verified. Check My Orders before retrying.');
+          router.push('/dashboard/orders');
+          return;
+        }
         if (saveThisAddress) {
           // Saving the address is separate from the order: a failure here never blocks payment.
           const next = withDefaultAddress(savedAddresses, { ...shippingAddressObj, _id: selectedAddressId || undefined });
@@ -201,7 +210,8 @@ export default function CheckoutStepPage() {
       } else {
         throw new Error(data.message || "Failed to create order");
       }
-    } catch (error: any) {
+    } catch (caughtError) {
+      const error = describeApiError(caughtError);
       toast.error(error.response?.data?.message || error.message || "Failed to create order");
     } finally {
       setSubmitting(false);
@@ -226,11 +236,12 @@ export default function CheckoutStepPage() {
         toast.success("Payment UTR submitted for admin verification! 💳");
         await new Promise(resolve => setTimeout(resolve, 1800));
         setShowUpiModal(false);
-        router.push(`/checkout/success?orderId=${currentOrderNumber}&paymentId=UPI&utr=${sanitizedUtr}`);
+        router.push(`/checkout/success?orderId=${encodeURIComponent(currentOrderId)}`);
       } else {
         throw new Error(data.message || "Payment verification failed");
       }
-    } catch (error: any) {
+    } catch (caughtError) {
+      const error = describeApiError(caughtError);
       toast.error(error.response?.data?.message || error?.message || "Failed to verify payment");
       setUpiStatus('waiting');
     }
@@ -422,13 +433,13 @@ export default function CheckoutStepPage() {
                 </div>
                 <div className="flex items-center justify-between text-sm font-medium text-emerald-600">
                   <span>Shipping</span>
-                  <span>Free</span>
+                  <span>{typeof backendOrder?.shippingPrice === "number" ? `₹${backendOrder.shippingPrice.toFixed(2)}` : "Confirmed with your order"}</span>
                 </div>
               </div>
 
               <div className="border-t border-border pt-4">
                 <div className="flex items-center justify-between text-lg font-semibold">
-                  <span>Order Total</span>
+                  <span>{backendOrder ? "Order Total" : "Estimated book subtotal"}</span>
                   <span>₹{(backendOrder?.totalPrice ?? backendPayment?.amount ?? total).toFixed(2)}</span>
                 </div>
               </div>
@@ -491,10 +502,10 @@ export default function CheckoutStepPage() {
                       </span>
                       <h3 className="text-xl font-serif font-bold text-[#0F3D3E]">Scan to Pay with UPI</h3>
                       <div className="flex items-center justify-center gap-2 text-xs text-[#5C6E6E]">
-                        <span>Amount: <strong className="text-[#0F3D3E] text-base font-bold font-serif">₹{(backendPayment?.amount ?? backendOrder?.totalPrice ?? total).toFixed(2)}</strong></span>
+                        <span>Amount: <strong className="text-[#0F3D3E] text-base font-bold font-serif">₹{(backendPayment?.amount ?? backendOrder?.totalPrice ?? backendOrder?.totalAmount).toFixed(2)}</strong></span>
                         <button
                           type="button"
-                          onClick={() => copyText((backendPayment?.amount ?? backendOrder?.totalPrice ?? total).toFixed(2), 'amt')}
+                          onClick={() => copyText((backendPayment?.amount ?? backendOrder?.totalPrice ?? backendOrder?.totalAmount).toFixed(2), 'amt')}
                           className="p-1 text-[#5C6E6E] hover:text-[#0F3D3E] rounded border border-[#E2E6DF] bg-white text-[10px] font-mono cursor-pointer"
                           title="Copy amount"
                         >

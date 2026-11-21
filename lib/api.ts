@@ -1,25 +1,29 @@
-import axios from 'axios';
+
+import { describeApiError } from "@/lib/api-error";
+import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/auth-store';
 import { UserContextData } from '@/types';
+import { isTrustedApiTarget } from '@/lib/api-origin';
+import { record } from '@/lib/api-error';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
 
 const api = axios.create({
   baseURL: API_URL,
   timeout: 45000,
-  validateStatus: (status) => (status >= 200 && status < 300) || status === 304,
+  validateStatus: (status) => status >= 200 && status < 300,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
 const GET_CACHE_MS = 30 * 1000;
-const inflightGetRequests = new Map<string, Promise<any>>();
-const responseCache = new Map<string, { response: any; expiresAt: number }>();
+const inflightGetRequests = new Map<string, Promise<AxiosResponse<unknown>>>();
+const responseCache = new Map<string, { response: AxiosResponse<unknown>; expiresAt: number }>();
 
-const getCacheKey = (url?: string, params?: any) => {
-  const serializedParams = params ? JSON.stringify(params, Object.keys(params).sort()) : '';
+const getCacheKey = (url?: string, params?: unknown) => {
+  const serializedParams = params ? JSON.stringify(params, typeof params === 'object' ? Object.keys(params).sort() : undefined) : '';
   return `${url || ''}?${serializedParams}`;
 };
 
@@ -34,14 +38,15 @@ export function invalidateApiCache(match: string | RegExp) {
 }
 
 const rawGet = api.get.bind(api);
-api.get = ((url: string, config: any = {}) => {
+api.get = ((url: string, config: AxiosRequestConfig = {}) => {
   const noStore = config?.cache === 'no-store' || config?.headers?.['Cache-Control'] === 'no-store';
   const hasAuthorizationHeader = Boolean(
     config?.headers?.Authorization || config?.headers?.authorization
   );
   const hasSessionToken =
     typeof window !== 'undefined' && Boolean(useAuthStore.getState().token);
-  const cacheable = !noStore && !hasAuthorizationHeader && !hasSessionToken;
+  const bypassCache = noStore || hasAuthorizationHeader || hasSessionToken;
+  const cacheable = !config.signal && !bypassCache;
   const cacheKey = getCacheKey(url, config?.params);
 
   if (cacheable) {
@@ -58,6 +63,12 @@ api.get = ((url: string, config: any = {}) => {
 
   const request = rawGet(url, {
     ...config,
+    // `cache: 'no-store'` is our frontend option. Forward it to the browser too:
+    // disabling this module's cache alone does not prevent HTTP-cached readback.
+    ...(bypassCache ? {
+      adapter: config.adapter ?? 'fetch',
+      fetchOptions: { ...config.fetchOptions, cache: 'no-store' },
+    } : {}),
     metadata: { ...(config?.metadata || {}), cacheKey },
   })
     .then((response) => {
@@ -83,9 +94,9 @@ api.get = ((url: string, config: any = {}) => {
 
 let isRefreshing = false;
 let refreshingSessionToken: string | null = null;
-let failedQueue: Array<{ resolve: (token: string) => void; reject: (err: any) => void }> = [];
+let failedQueue: Array<{ resolve: (token: string) => void; reject: (err: unknown) => void }> = [];
 
-const processQueue = (error: any, token: string | null = null) => {
+const processQueue = (error: unknown, token: string | null = null) => {
   failedQueue.forEach((prom) => {
     if (error) {
       prom.reject(error);
@@ -99,9 +110,11 @@ const processQueue = (error: any, token: string | null = null) => {
 // Interceptor to add JWT token to requests
 api.interceptors.request.use(
   (config) => {
+    if ((config.baseURL || API_URL).replace(/\/$/, '') !== API_URL.replace(/\/$/, '')) throw new Error('The request base URL cannot override the configured backend API.');
+    if (!isTrustedApiTarget(config.url || '', API_URL)) throw new Error('The request target is outside the configured backend API.');
     if (typeof window !== 'undefined') {
       const state = useAuthStore.getState();
-      if (state.token) {
+      if (state.token && !config.headers.Authorization) {
         config.headers.Authorization = `Bearer ${state.token}`;
       }
     }
@@ -135,7 +148,7 @@ api.interceptors.response.use(
 
     if (
       error.response?.status === 401 &&
-      !originalRequest._retry &&
+      originalRequest && !originalRequest._retry &&
       !originalRequest.url?.includes('/auth/login') &&
       !originalRequest.url?.includes('/auth/google') &&
       !originalRequest.url?.includes('/auth/refresh')
@@ -168,7 +181,7 @@ api.interceptors.response.use(
       refreshingSessionToken = refreshToken;
 
       try {
-        const { data } = await axios.post(`${API_URL}/auth/refresh`, { refreshToken });
+        const { data } = await axios.post(`${API_URL}/auth/refresh`, { refreshToken }, { timeout: 15_000 });
         const newAccessToken = data?.data?.token || data?.token;
         const newRefreshToken = data?.data?.refreshToken || data?.refreshToken || refreshToken;
         const expiresAt = data?.data?.refreshTokenExpiresAt || data?.refreshTokenExpiresAt;
@@ -263,8 +276,10 @@ export async function bootstrapUserContext(overrideToken?: string): Promise<User
       }
 
       // no-store: role/capabilities change on admin approval and must never come from the GET cache.
-      const { data } = await api.get('/users/me/context', { headers, cache: 'no-store' } as any);
+      const { data } = await api.get('/users/me/context', { headers, cache: 'no-store' });
       const contextData: UserContextData = data?.data || data;
+      const contextRecord = record(contextData), backendUser = record(contextRecord.user), capabilities = record(contextRecord.capabilities);
+      if (!['reader', 'author', 'admin', 'visitor'].includes(String(backendUser.role)) || typeof backendUser.isActive !== 'boolean' || typeof (backendUser._id || backendUser.id) !== 'string' || !['canPublish', 'canAccessAuthorDashboard', 'canAdminister'].every((key) => typeof capabilities[key] === 'boolean')) throw new Error('The backend returned an invalid session context.');
 
       if (useAuthStore.getState().token !== requestToken) return null;
 
@@ -277,7 +292,7 @@ export async function bootstrapUserContext(overrideToken?: string): Promise<User
       return null;
     } catch (error) {
       if (useAuthStore.getState().token === requestToken) {
-        console.error('Failed to fetch user context:', error);
+        console.error('Failed to fetch user context:', describeApiError(error));
         setContextStatus('error');
       }
       return null;

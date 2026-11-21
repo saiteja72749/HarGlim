@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { describeApiError } from "@/lib/api-error";
+
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import api from "@/lib/api";
 import { ErrorState } from "@/components/ui/error-state";
@@ -81,7 +83,7 @@ export default function AdminManuscriptsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  const fetchManuscripts = async () => {
+  const fetchManuscripts = useCallback(async () => {
     setLoading(true);
     setError(false);
     try {
@@ -107,16 +109,16 @@ export default function AdminManuscriptsPage() {
       }
       setManuscripts(fetchedManuscripts);
     } catch (err) {
-      console.error("Failed to fetch admin manuscripts:", err);
+      console.error("Failed to fetch admin manuscripts:", describeApiError(err));
       setError(true);
     } finally {
       setLoading(false);
     }
-  };
+  }, [searchQuery, statusFilter]);
 
   useEffect(() => {
     fetchManuscripts();
-  }, [statusFilter, searchQuery]);
+  }, [fetchManuscripts]);
 
   const safeManuscripts = Array.isArray(manuscripts) ? manuscripts : [];
   const filteredManuscripts = safeManuscripts.filter((manuscript: any) => {
@@ -150,8 +152,9 @@ export default function AdminManuscriptsPage() {
           ? "Manuscript approved and published as a book."
           : `Manuscript status updated to ${newStatus}`
       );
-    } catch (err: any) {
-      console.error("Failed to update manuscript status:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to update manuscript status:", describeApiError(err));
       toast.error(err.response?.data?.message || "Failed to update manuscript status");
     }
   };
@@ -258,7 +261,7 @@ export default function AdminManuscriptsPage() {
                           {manuscript.package?.name || (typeof manuscript.packageId === 'object' ? manuscript.packageId?.name : manuscript.packageId) || "None"}
                         </TableCell>
                         <TableCell>
-                          {new Date(manuscript.createdAt || manuscript.submittedDate || Date.now()).toLocaleDateString()}
+                          {(manuscript.createdAt || manuscript.submittedDate) ? new Date(manuscript.createdAt || manuscript.submittedDate).toLocaleDateString() : "Unavailable"}
                         </TableCell>
                         <TableCell>
                           <Badge className={`gap-1 ${getStatusColor(manuscript.status)}`}>

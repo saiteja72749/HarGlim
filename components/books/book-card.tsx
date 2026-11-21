@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import Image from "next/image";
 import Link from "next/link";
 import { motion, useMotionValue, useSpring, useTransform } from "framer-motion";
@@ -12,7 +14,8 @@ import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
 import { cn, getBookAuthorInfo } from "@/lib/utils";
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useMediaQuery } from "@/hooks/use-media-query";
 
 interface BookCardProps {
   book: Book;
@@ -30,26 +33,11 @@ export function BookCard({
   const initialImage = book.coverImage && (book.coverImage.startsWith("http") || book.coverImage.startsWith("/"))
     ? book.coverImage
     : "/logo.png";
-  const [imgSrc, setImgSrc] = useState<string>(initialImage);
-  const [imageLoaded, setImageLoaded] = useState<boolean>(false);
-  const [canHover, setCanHover] = useState<boolean>(false);
-
-  useEffect(() => {
-    const validSrc = book.coverImage && (book.coverImage.startsWith("http") || book.coverImage.startsWith("/"))
-      ? book.coverImage
-      : "/logo.png";
-    setImgSrc(validSrc);
-  }, [book.coverImage]);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const mediaQuery = window.matchMedia("(hover: hover) and (pointer: fine)");
-      setCanHover(mediaQuery.matches);
-      const handler = (e: MediaQueryListEvent) => setCanHover(e.matches);
-      mediaQuery.addEventListener("change", handler);
-      return () => mediaQuery.removeEventListener("change", handler);
-    }
-  }, []);
+  const [failedImage, setFailedImage] = useState<string | null>(null);
+  const imgSrc = failedImage === initialImage ? '/logo.png' : initialImage;
+  const [loadedImage, setLoadedImage] = useState<string | null>(null);
+  const imageLoaded = loadedImage === imgSrc;
+  const canHover = useMediaQuery('(hover: hover) and (pointer: fine)');
 
   // 3D Tilt & Glare hooks (active only on desktop fine pointer devices)
   const x = useMotionValue(0);
@@ -87,7 +75,7 @@ export function BookCard({
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (typeof book.stock === "number" && book.stock - Number((book as any).reservedStock || 0) <= 0) {
+    if (typeof book.stock === "number" && book.stock - Number(book.reservedStock || 0) <= 0) {
       toast.error(`"${book.title}" is out of stock right now.`);
       return;
     }
@@ -107,7 +95,8 @@ export function BookCard({
     try {
       await api.post(`/users/${user._id || user.id}/wishlist`, { bookId: book._id });
       toast.success(`"${book.title}" added to your wishlist!`);
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Could not add to wishlist.");
     } finally {
       setAddingToWishlist(false);
@@ -117,8 +106,8 @@ export function BookCard({
   const authorInfo = getBookAuthorInfo(book);
   const authorName = authorInfo.name;
   const price = book.price ?? book.mrp ?? 0;
-  const rating = book.rating ?? (book as any).ratings ?? 0;
-  const totalReviews = book.totalReviews ?? (book as any).reviewCount ?? 0;
+  const rating = book.rating ?? book.ratings ?? 0;
+  const totalReviews = book.totalReviews ?? book.reviewCount ?? 0;
 
   if (variant === "horizontal") {
     return (
@@ -140,14 +129,14 @@ export function BookCard({
             
             <Image
               src={imgSrc}
-              onError={() => setImgSrc("/logo.png")}
+              onError={() => setFailedImage(initialImage)}
               alt={book.title}
               fill
               className={cn(
                 "object-cover transition-transform duration-500 group-hover:scale-105",
                 imageLoaded ? "opacity-100" : "opacity-0"
               )}
-              onLoad={() => setImageLoaded(true)}
+              onLoad={() => setLoadedImage(imgSrc)}
               sizes="96px"
             />
           </div>
@@ -203,14 +192,14 @@ export function BookCard({
 
             <Image
               src={imgSrc}
-              onError={() => setImgSrc("/logo.png")}
+              onError={() => setFailedImage(initialImage)}
               alt={book.title}
               fill
               className={cn(
                 "object-cover group-hover:scale-105 transition-transform duration-500",
                 imageLoaded ? "opacity-100" : "opacity-0"
               )}
-              onLoad={() => setImageLoaded(true)}
+              onLoad={() => setLoadedImage(imgSrc)}
               sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
             />
           </div>
@@ -227,8 +216,7 @@ export function BookCard({
   }
 
   return (
-    <Link
-      href={`/books/${book.slug || book._id}`}
+    <div
       className="block h-full"
       style={canHover ? { perspective: 1200 } : undefined}
     >
@@ -239,8 +227,9 @@ export function BookCard({
         whileHover={canHover ? { y: -6, scale: 1.015 } : undefined}
         whileTap={{ scale: 0.98 }}
         transition={{ type: "spring", stiffness: 260, damping: 22 }}
-        className="group bg-card rounded-2xl overflow-hidden border border-border/50 hover:border-primary/50 shadow-xs hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.08)] hover:shadow-primary/10 transition-all duration-300 flex flex-col h-full active:scale-[0.98]"
+        className="group relative bg-card rounded-2xl overflow-hidden border border-border/50 hover:border-primary/50 shadow-xs hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.08)] hover:shadow-primary/10 transition-all duration-300 flex flex-col h-full active:scale-[0.98]"
       >
+        <Link href={`/books/${book.slug || book._id}`} aria-label={`View ${book.title}`} className="absolute inset-0 z-10 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" />
         {/* Cover Image */}
         <div className="relative aspect-[2/3] overflow-hidden bg-gradient-to-br from-primary/10 to-primary/5 border-b border-border/50">
           {/* Book Spine Effect */}
@@ -254,7 +243,7 @@ export function BookCard({
 
           <Image
             src={imgSrc}
-            onError={() => setImgSrc("/logo.png")}
+            onError={() => setFailedImage(initialImage)}
             alt={book.title}
             fill
             className={cn(
@@ -262,7 +251,7 @@ export function BookCard({
               canHover && "group-hover:scale-105",
               imageLoaded ? "opacity-100" : "opacity-0"
             )}
-            onLoad={() => setImageLoaded(true)}
+            onLoad={() => setLoadedImage(imgSrc)}
             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
           />
 
@@ -303,10 +292,10 @@ export function BookCard({
 
           {/* Quick Actions on desktop hover */}
           {showActions && canHover && (
-            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-2 z-20">
+            <div className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-2 z-20">
               <Button
                 size="icon"
-                className="h-10 w-10 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg backdrop-blur-sm transition-transform hover:scale-110"
+                className="pointer-events-auto h-10 w-10 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg backdrop-blur-sm transition-transform hover:scale-110"
                 onClick={handleAddToCart}
               >
                 <ShoppingCart className="h-4 w-4" />
@@ -315,19 +304,19 @@ export function BookCard({
               <Button
                 size="icon"
                 disabled={addingToWishlist}
-                className="h-10 w-10 rounded-full bg-white/90 backdrop-blur-sm hover:bg-primary hover:text-primary-foreground text-primary shadow-lg transition-transform hover:scale-110"
+                className="pointer-events-auto h-10 w-10 rounded-full bg-white/90 backdrop-blur-sm hover:bg-primary hover:text-primary-foreground text-primary shadow-lg transition-transform hover:scale-110"
                 onClick={handleAddToWishlist}
               >
                 <Heart className="h-4 w-4" />
                 <span className="sr-only">Add to wishlist</span>
               </Button>
-              <Button
+              <Button asChild
                 size="icon"
-                className="h-10 w-10 rounded-full bg-white/90 backdrop-blur-sm hover:bg-primary hover:text-primary-foreground text-primary shadow-lg transition-transform hover:scale-110"
-              >
+                className="pointer-events-auto h-10 w-10 rounded-full bg-white/90 backdrop-blur-sm hover:bg-primary hover:text-primary-foreground text-primary shadow-lg transition-transform hover:scale-110"
+              ><Link href={`/books/${book.slug || book._id}`}>
                 <Eye className="h-4 w-4" />
-                <span className="sr-only">Quick view</span>
-              </Button>
+                <span className="sr-only">View book</span>
+              </Link></Button>
             </div>
           )}
         </div>
@@ -372,6 +361,6 @@ export function BookCard({
           </div>
         </div>
       </motion.div>
-    </Link>
+    </div>
   );
 }

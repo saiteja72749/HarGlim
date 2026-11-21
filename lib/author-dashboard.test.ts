@@ -1,7 +1,8 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { normalizeAuthorDashboard } from "./author-dashboard";
 
-// Trimmed copy of the live GET /authors/me/dashboard response (2026-10-06).
+// Synthetic numeric inputs exercise the documented grouped dashboard contract; no account data is required.
 const live = {
   success: true,
   data: {
@@ -19,8 +20,8 @@ const live = {
     },
     topBooks: [
       {
-        bookId: "6aad6dbd504e3c9247d4dfee",
-        title: "I Thought I Found Me in You",
+        bookId: "000000000000000000000001",
+        title: "Example Book",
         coverImage: "https://res.cloudinary.com/x.png",
         status: "published",
         unitsSold: 3,
@@ -32,9 +33,9 @@ const live = {
     ],
     recentSales: [
       {
-        orderNumber: "HM-D37E358E",
-        bookId: "6aad6dbd504e3c9247d4dfee",
-        bookTitle: "I Thought I Found Me in You",
+        orderNumber: "ORDER-UNIT-1",
+        bookId: "000000000000000000000001",
+        bookTitle: "Example Book",
         quantity: 1,
         unitPrice: 270,
         grossRevenue: 270,
@@ -61,8 +62,12 @@ const live = {
   },
 };
 
-describe("normalizeAuthorDashboard (live payload)", () => {
+describe("normalizeAuthorDashboard (grouped payload)", () => {
   const s = normalizeAuthorDashboard(live);
+
+  it("handles missing grouped book totals without crashing the dashboard", () => {
+    expect(normalizeAuthorDashboard({ data: { books: null, totalBooks: 2 } }).books.total).toBe(2);
+  });
 
   it("reads the grouped totals", () => {
     expect(s.books).toEqual({ total: 1, published: 1, draft: 0, archived: 0 });
@@ -74,8 +79,8 @@ describe("normalizeAuthorDashboard (live payload)", () => {
 
   it("names the book on each sale", () => {
     expect(s.recentSales[0]).toMatchObject({
-      orderNumber: "HM-D37E358E",
-      bookTitle: "I Thought I Found Me in You",
+      orderNumber: "ORDER-UNIT-1",
+      bookTitle: "Example Book",
       bookAvailable: true,
       royalty: 81,
       royaltyPercent: 30,
@@ -87,6 +92,6 @@ describe("normalizeAuthorDashboard (live payload)", () => {
   });
 
   it("maps top books", () => {
-    expect(s.topBooks[0]).toMatchObject({ title: "I Thought I Found Me in You", unitsSold: 3, royalty: 243, royaltyPercent: 30 });
+    expect(s.topBooks[0]).toMatchObject({ title: "Example Book", unitsSold: 3, royalty: 243, royaltyPercent: 30 });
   });
 });

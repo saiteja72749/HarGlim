@@ -26,7 +26,9 @@ export default function AboutPage() {
   const [liveStats, setLiveStats] = useState<{ booksCount: number; authorsCount: number } | null>(null);
 
   useEffect(() => {
-    const fetchLiveStats = async () => setLiveStats(await fetchPublicStats());
+    const fetchLiveStats = async () => {
+      try { setLiveStats(await fetchPublicStats()); } catch { setLiveStats(null); }
+    };
     fetchLiveStats();
   }, []);
 
@@ -53,8 +55,7 @@ export default function AboutPage() {
           </h1>
 
           <p className="text-base sm:text-lg text-white/80 max-w-2xl mx-auto font-light leading-relaxed">
-            {aboutSubtitle ||
-              "Founded with a mission to empower authors and delight readers, Harglim Publishers is a premier independent publishing house, bringing great stories to the world."}
+            {aboutSubtitle}
           </p>
         </div>
       </section>
@@ -98,19 +99,7 @@ export default function AboutPage() {
                       {para.trim()}
                     </p>
                   ))
-              ) : (
-              <>
-              <p>
-                Harglim Publishers was born from a simple yet powerful belief: every aspiring writer deserves an opportunity to become a published author.
-              </p>
-              <p>
-                We recognised that many talented writers, especially first-time authors, struggle to find trustworthy and affordable publishing support. Countless manuscripts remain unpublished because the traditional publishing path often feels confusing, expensive, or out of reach. We provide end-to-end publishing solutions that empower authors to confidently share their work.
-              </p>
-              <p>
-                Today, Harglim Publishers continues to grow as a trusted partner for emerging and established writers alike. Every book we publish represents a dream fulfilled, a voice amplified, and a story brought to life.
-              </p>
-              </>
-              )}
+              ) : null}
               {aboutVision && (
                 <p className="whitespace-pre-line">
                   <span className="font-semibold text-[#0F3D3E]">Our vision: </span>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { motion, useScroll, useSpring } from "framer-motion";
 import {
   Menu,
@@ -50,10 +50,11 @@ const navLinks = [
 
 export function Navbar() {
   const { content } = useSiteContent();
-  const [isOpen, setIsOpen] = useState(false);
+  const [openPath, setOpenPath] = useState<string | null>(null);
   const [isScrolled, setIsScrolled] = useState(false);
   const pathname = usePathname();
-  const router = useRouter();
+  const isOpen = openPath === pathname;
+  const setIsOpen = (open: boolean) => setOpenPath(open ? pathname : null);
   const { user, isAuthenticated, logout } = useAuthStore();
   const rawItemCount = useCartStore((state) => state.items.reduce((total, item) => total + item.quantity, 0));
   const itemCount = (isAuthenticated && user) ? rawItemCount : 0;
@@ -82,9 +83,6 @@ export function Navbar() {
     restDelta: 0.001
   });
 
-  useEffect(() => {
-    setIsOpen(false);
-  }, [pathname]);
 
   const getDashboardLink = () => {
     if (!user) return "/dashboard";
@@ -100,8 +98,7 @@ export function Navbar() {
 
   const handleLogout = () => {
     useCartStore.getState().clearCart();
-    logout();
-    router.push("/");
+    logout({ redirectToHome: true });
   };
 
   if (isHiddenRoute) return null;
@@ -161,16 +158,13 @@ export function Navbar() {
           {/* Right Side Actions */}
           <div className="flex items-center gap-2">
             {/* Search Button */}
-            <Link href="/search">
-              <Button variant="ghost" size="icon" className="hidden sm:flex">
+            <Button variant="ghost" size="icon" className="hidden sm:flex" asChild><Link href="/search">
                 <Search className="h-5 w-5" />
                 <span className="sr-only">Search</span>
-              </Button>
-            </Link>
+              </Link></Button>
 
             {/* Cart */}
-            <Link href={isAuthenticated ? "/checkout/cart" : "/login"}>
-              <Button variant="ghost" size="icon" className="relative">
+            <Button variant="ghost" size="icon" className="relative" asChild><Link href={isAuthenticated ? "/checkout/cart" : "/login"}>
                 <ShoppingCart className="h-5 w-5" />
                 {isAuthenticated && user && isHydrated && itemCount > 0 && (
                   <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-medium">
@@ -178,8 +172,7 @@ export function Navbar() {
                   </span>
                 )}
                 <span className="sr-only">Cart</span>
-              </Button>
-            </Link>
+              </Link></Button>
 
             {/* User Menu (Desktop) */}
             {isAuthenticated && user ? (
@@ -263,14 +256,10 @@ export function Navbar() {
               </DropdownMenu>
             ) : (
               <div className="hidden sm:flex items-center gap-2">
-                <Link href={pathname && pathname !== "/login" && pathname !== "/register" ? `/login?redirect=${encodeURIComponent(pathname)}` : "/login"}>
-                  <Button variant="ghost" size="sm">
+                <Button variant="ghost" size="sm" asChild><Link href={pathname && pathname !== "/login" && pathname !== "/register" ? `/login?redirect=${encodeURIComponent(pathname)}` : "/login"}>
                     Login
-                  </Button>
-                </Link>
-                <Link href={pathname && pathname !== "/login" && pathname !== "/register" ? `/register?redirect=${encodeURIComponent(pathname)}` : "/register"}>
-                  <Button size="sm">Register</Button>
-                </Link>
+                  </Link></Button>
+                <Button size="sm" asChild><Link href={pathname && pathname !== "/login" && pathname !== "/register" ? `/register?redirect=${encodeURIComponent(pathname)}` : "/register"}>Register</Link></Button>
               </div>
             )}
 
@@ -361,22 +350,18 @@ export function Navbar() {
                   </div>
                 ) : (
                   <div className="pt-4 border-t border-border mt-auto space-y-3 pb-6">
-                    <Link
+                    <Button variant="outline" className="w-full" asChild><Link
                       href={pathname && pathname !== "/login" && pathname !== "/register" ? `/login?redirect=${encodeURIComponent(pathname)}` : "/login"}
                       className="block"
                       onClick={() => setIsOpen(false)}
                     >
-                      <Button variant="outline" className="w-full">
                         Login
-                      </Button>
-                    </Link>
-                    <Link
+                      </Link></Button>
+                    <Button className="w-full" asChild><Link
                       href={pathname && pathname !== "/login" && pathname !== "/register" ? `/register?redirect=${encodeURIComponent(pathname)}` : "/register"}
                       className="block"
                       onClick={() => setIsOpen(false)}
-                    >
-                      <Button className="w-full">Register</Button>
-                    </Link>
+                    >Register</Link></Button>
                   </div>
                 )}
               </SheetContent>

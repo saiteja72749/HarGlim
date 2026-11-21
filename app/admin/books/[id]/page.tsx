@@ -1,4 +1,5 @@
 "use client";
+
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect } from "react";
@@ -147,9 +148,10 @@ export default function EditBookPage() {
             }))
           : [];
         setAuthorsList(authors);
-      } catch (err: any) {
+      } catch (caughtError) {
+        const err = describeApiError(caughtError);
         if (err.name !== "CanceledError" && err.name !== "AbortError") {
-          console.warn("Failed to search authors:", err);
+          console.warn("Failed to search authors:", describeApiError(err));
         }
       } finally {
         setFetchingAuthors(false);
@@ -169,7 +171,7 @@ export default function EditBookPage() {
       setFetching(true);
       try {
         // GET /admin/books/{id} returns any status (draft, archived, published).
-        const res = await api.get(`/admin/books/${bookId}`, { cache: "no-store" } as any).catch(() => null);
+        const res = await api.get(`/admin/books/${bookId}`, { cache: "no-store" }).catch(() => null);
         const bookData: any = res?.data?.data?.book || res?.data?.data || null;
 
         if (bookData) {
@@ -236,8 +238,9 @@ export default function EditBookPage() {
         } else {
           toast.error("Book not found in database.");
         }
-      } catch (err: any) {
-        console.error("Failed to fetch book details:", err);
+      } catch (caughtError) {
+        const err = describeApiError(caughtError);
+        console.error("Failed to fetch book details:", describeApiError(err));
         toast.error("Could not load book data.");
       } finally {
         setFetching(false);
@@ -352,7 +355,8 @@ export default function EditBookPage() {
             if (finalAuthorId) {
               toast.success(`Author account created for "${targetAuthorDisplayName}"`);
             }
-          } catch (adminErr: any) {
+          } catch (caughtError) {
+            const adminErr = describeApiError(caughtError);
             console.warn("Admin user creation error:", adminErr?.message);
             finalAuthorId = selectedAuthorId || null;
           }
@@ -446,11 +450,13 @@ export default function EditBookPage() {
       try {
         await api.put(`/admin/books/${bookId}`, jsonPayload);
         updateSuccess = true;
-      } catch (putErr: any) {
+      } catch (caughtError) {
+        const putErr = describeApiError(caughtError);
         console.warn("Primary /admin/books put failed, trying /books fallback:", putErr?.message);
         try {
           throw putErr;
-        } catch (fallbackErr: any) {
+        } catch (caughtError) {
+          const fallbackErr = describeApiError(caughtError);
           throw putErr || fallbackErr;
         }
       }
@@ -460,7 +466,7 @@ export default function EditBookPage() {
         router.push("/admin/books");
       }
     } catch (err) {
-      console.error("Failed to update book:", err);
+      console.error("Failed to update book:", describeApiError(err));
       const errMsg = (err as any)?.response?.data?.message || (err as any)?.message || "Failed to update book";
       toast.error(errMsg);
     } finally {

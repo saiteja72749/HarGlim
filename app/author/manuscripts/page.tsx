@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import api from "@/lib/api";
@@ -54,12 +56,13 @@ import {
 } from "@/components/ui/dialog";
 import { getSafeExternalUrl } from "@/lib/utils";
 import toast from "react-hot-toast";
+import { getAuthorBookStage, type AuthorBookStage as Stage } from "@/lib/author-book-status";
+import { fetchAuthorBooks } from "@/lib/author-books";
 
 /**
  * Publishing stages (handover §46): Book.status + PublishRequest.status
  *   draft (no request) -> SUBMITTED (PENDING) -> UNDER_REVIEW -> CHANGES_REQUESTED / REJECTED -> PUBLISHED
  */
-type Stage = "draft" | "submitted" | "under_review" | "changes_requested" | "rejected" | "published" | "archived";
 
 const STAGES: Record<Stage, { label: string; progress: number; tone: string; icon: typeof Clock }> = {
   draft: { label: "Draft", progress: 10, tone: "bg-muted text-muted-foreground", icon: Edit2 },
@@ -72,23 +75,6 @@ const STAGES: Record<Stage, { label: string; progress: number; tone: string; ico
 };
 
 const getRequest = (m: any) => m.publishRequest || m.latestPublishRequest || m.submission || m.review || {};
-
-const getStage = (m: any): Stage => {
-  const bookStatus = String(m.status || "").toLowerCase();
-  if (bookStatus === "published") return "published";
-  if (bookStatus === "archived") return "archived";
-  const raw = String(
-    getRequest(m).status || m.publishingStatus || m.publishRequestStatus || m.reviewStatus || m.submissionStatus || ""
-  )
-    .toLowerCase()
-    .replace(/\s+/g, "_");
-  if (raw === "approved" || raw === "published") return "published";
-  if (raw === "under_review" || raw === "in_review" || raw === "in_editing") return "under_review";
-  if (raw === "changes_requested" || raw === "revision_required") return "changes_requested";
-  if (raw === "rejected") return "rejected";
-  if (raw === "pending" || raw === "submitted") return "submitted";
-  return "draft";
-};
 
 const text = (value: any) => (typeof value === "string" ? value : value?.name || "");
 
@@ -104,7 +90,7 @@ const toItem = (m: any) => {
     fileUrl: getSafeExternalUrl(request.fileUrl || m.fileUrl || m.manuscriptUrl || ""),
     packageId: String(request.package?._id || request.package || request.packageId || ""),
     date: m.submittedAt || request.createdAt || m.updatedAt || m.createdAt || null,
-    stage: getStage(m),
+    stage: getAuthorBookStage(m),
     // Only plain text is rendered; a populated/object field here would crash React (error #31).
     feedback:
       [
@@ -126,10 +112,9 @@ export default function ManuscriptsPage() {
   const fetchManuscripts = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get("/authors/me/books", { params: { limit: 100 }, cache: "no-store" } as any);
-      setItems(extractList(data, "books").map(toItem));
+      setItems((await fetchAuthorBooks()).map(toItem));
     } catch (err) {
-      console.warn("Failed to fetch manuscripts from API:", err);
+      console.warn("Failed to fetch manuscripts from API:", describeApiError(err));
       toast.error("Could not load your manuscripts. Please refresh.");
       setItems([]);
     } finally {
@@ -154,8 +139,9 @@ export default function ManuscriptsPage() {
       await api.delete(`/authors/me/books/${id}`);
       setItems((prev) => prev.filter((m) => m.id !== id));
       toast.success("Manuscript deleted.");
-    } catch (err: any) {
-      console.error("Failed to delete manuscript:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to delete manuscript:", describeApiError(err));
       toast.error(err.response?.data?.message || "Failed to delete manuscript.");
     }
   };
@@ -417,7 +403,7 @@ function SubmitForReviewDialog({
       .then(({ data }) => {
         const list = extractList(data, "packages").filter((p: any) => p.isActive !== false);
         setPackages(list);
-        setPackageId(item.packageId || list[0]?._id || "");
+        setPackageId(String(item.packageId || list[0]?._id || ""));
       })
       .catch(() => setPackages([]));
   }, [item]);
@@ -457,7 +443,8 @@ function SubmitForReviewDialog({
       });
       toast.success("Sent for editorial review.");
       onSubmitted();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err?.response?.data?.message || err?.message || "Could not submit for review.");
     } finally {
       setSubmitting(false);

@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { describeApiError } from "@/lib/api-error";
+
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import api from "@/lib/api";
 import {
@@ -10,11 +12,9 @@ import {
   Loader2,
   X,
   Layers,
-  Globe,
   Package,
-  ArrowRight,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -34,7 +34,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import toast from "react-hot-toast";
-import { DELIVERY_PLANS, resolveCourierTrackingUrl } from "@/lib/couriers";
+import { ErrorState } from "@/components/ui/error-state";
+import { resolveCourierTrackingUrl } from "@/lib/couriers";
 import {
   SHIPMENT_LABELS,
   canCancelShipment,
@@ -57,14 +58,12 @@ export default function AdminShipmentsPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   // Delivery Plans tab state
-  const [planSearch, setPlanSearch] = useState("");
-  const [selectedPlanCategory, setSelectedPlanCategory] = useState<string>("ALL");
 
   // Assign Courier Modal State
   const [selectedShipmentForCourier, setSelectedShipmentForCourier] = useState<any | null>(null);
   const [courierForm, setCourierForm] = useState({
     provider: "manual",
-    serviceName: "India Post",
+    serviceName: "",
     trackingNumber: "",
     trackingUrl: "",
     estimatedDelivery: "",
@@ -93,7 +92,7 @@ export default function AdminShipmentsPage() {
 
       setShipments(extractList(res?.data, "shipments"));
     } catch (err) {
-      console.warn("Shipments fetch notice:", err);
+      console.warn("Shipments fetch notice:", describeApiError(err));
       // If shipments endpoint not yet seeded, set empty gracefully
       setShipments([]);
     } finally {
@@ -109,7 +108,7 @@ export default function AdminShipmentsPage() {
   const openAssignModal = (shipment: any, defaultCourier?: string) => {
     setSelectedShipmentForCourier(shipment);
     const existing = extractTrackingInfo(shipment);
-    const existingCourier = defaultCourier || existing.courierName || "India Post";
+    const existingCourier = defaultCourier || existing.courierName || "";
     const existingTracking = existing.trackingNumber;
     const existingUrl = existing.trackingUrl || resolveCourierTrackingUrl(existingCourier, existingTracking);
 
@@ -182,7 +181,8 @@ export default function AdminShipmentsPage() {
       toast.success(`Assigned ${courierForm.serviceName} (${finalTrackingNumber.toUpperCase()}).`);
       setSelectedShipmentForCourier(null);
       fetchShipments();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       const status = err.response?.status;
       toast.error(
         status === 409
@@ -214,7 +214,8 @@ export default function AdminShipmentsPage() {
       toast.success(`Shipment updated: ${getShipmentLabel(newStatus)}`);
       setSelectedShipmentForStatus(null);
       fetchShipments();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to update shipment status.");
       if (err.response?.status === 400) fetchShipments();
     } finally {
@@ -231,7 +232,8 @@ export default function AdminShipmentsPage() {
       await api.post(`/admin/shipments/${sId}/cancel`, { reason });
       toast.success("Shipment cancelled.");
       fetchShipments();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to cancel shipment.");
     }
   };
@@ -250,49 +252,6 @@ export default function AdminShipmentsPage() {
   };
 
   // Filter Delivery Plans
-  const filteredPlans = useMemo(() => {
-    return DELIVERY_PLANS.filter((plan) => {
-      const matchesCategory =
-        selectedPlanCategory === "ALL" || plan.category.toLowerCase() === selectedPlanCategory.toLowerCase();
-      const query = planSearch.toLowerCase().trim();
-      const matchesSearch =
-        !query ||
-        plan.name.toLowerCase().includes(query) ||
-        plan.category.toLowerCase().includes(query) ||
-        plan.description.toLowerCase().includes(query);
-
-      return matchesCategory && matchesSearch;
-    });
-  }, [planSearch, selectedPlanCategory]);
-
-  const planCategories = [
-    "ALL",
-    "National Express",
-    "Hyperlocal & Rapid",
-    "Surface & Freight",
-    "Cross-Border & Global",
-    "Postal",
-    "Digital / Virtual",
-  ];
-
-  const getCategoryBadgeClass = (category: string) => {
-    switch (category) {
-      case "National Express":
-        return "bg-blue-50 text-blue-700 border-blue-200";
-      case "Hyperlocal & Rapid":
-        return "bg-amber-50 text-amber-800 border-amber-200";
-      case "Surface & Freight":
-        return "bg-purple-50 text-purple-700 border-purple-200";
-      case "Cross-Border & Global":
-        return "bg-indigo-50 text-indigo-700 border-indigo-200";
-      case "Postal":
-        return "bg-emerald-50 text-emerald-700 border-emerald-200";
-      case "Digital / Virtual":
-        return "bg-teal-50 text-teal-800 border-teal-200";
-      default:
-        return "bg-neutral-100 text-neutral-700 border-neutral-200";
-    }
-  };
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -304,7 +263,7 @@ export default function AdminShipmentsPage() {
             <span>Shipments & Delivery Plans</span>
           </h1>
           <p className="text-xs sm:text-sm text-[#5C6E6E] mt-1">
-            Dispatch orders, assign external courier tracking, and configure {DELIVERY_PLANS.length} active delivery plans.
+            Dispatch orders and assign courier tracking from actual shipment bookings.
           </p>
         </div>
 
@@ -340,7 +299,7 @@ export default function AdminShipmentsPage() {
             <Layers className="h-3.5 w-3.5" />
             <span>Delivery Plans & Categories</span>
             <span className="text-[10px] ml-1 px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-900">
-              {DELIVERY_PLANS.length}
+              Unavailable
             </span>
           </Button>
         </div>
@@ -518,176 +477,7 @@ export default function AdminShipmentsPage() {
           </Card>
         </>
       ) : (
-        /* Tab 2: Delivery Plans & Categories Catalog */
-        <div className="space-y-6">
-          {/* Overview Stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <Card className="bg-white border border-[#E2E6DF] rounded-2xl shadow-2xs p-4">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#5C6E6E] block">
-                Total Delivery Plans
-              </span>
-              <p className="text-2xl font-serif font-bold text-[#0F3D3E] mt-1">
-                {DELIVERY_PLANS.length}
-              </p>
-              <span className="text-[11px] text-emerald-600 font-medium mt-0.5 block">
-                100% Active in Admin Dispatch
-              </span>
-            </Card>
-
-            <Card className="bg-white border border-[#E2E6DF] rounded-2xl shadow-2xs p-4">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#5C6E6E] block">
-                National Express
-              </span>
-              <p className="text-2xl font-serif font-bold text-blue-800 mt-1">
-                {DELIVERY_PLANS.filter((p) => p.category === "National Express").length}
-              </p>
-              <span className="text-[11px] text-[#5C6E6E] font-medium mt-0.5 block">
-                BlueDart, Delhivery, DTDC, etc.
-              </span>
-            </Card>
-
-            <Card className="bg-white border border-[#E2E6DF] rounded-2xl shadow-2xs p-4">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#5C6E6E] block">
-                Hyperlocal & Rapid
-              </span>
-              <p className="text-2xl font-serif font-bold text-amber-800 mt-1">
-                {DELIVERY_PLANS.filter((p) => p.category === "Hyperlocal & Rapid").length}
-              </p>
-              <span className="text-[11px] text-[#5C6E6E] font-medium mt-0.5 block">
-                BLITZ, Shadowfax, Zippee, etc.
-              </span>
-            </Card>
-
-            <Card className="bg-white border border-[#E2E6DF] rounded-2xl shadow-2xs p-4">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#5C6E6E] block">
-                Surface & Cross-Border
-              </span>
-              <p className="text-2xl font-serif font-bold text-indigo-800 mt-1">
-                {DELIVERY_PLANS.filter((p) => p.category === "Surface & Freight" || p.category === "Cross-Border & Global").length}
-              </p>
-              <span className="text-[11px] text-[#5C6E6E] font-medium mt-0.5 block">
-                Safexpress, DPWorld, Gati, etc.
-              </span>
-            </Card>
-          </div>
-
-          {/* Search & Category Filter Pills */}
-          <Card className="border border-[#E2E6DF] bg-white rounded-2xl shadow-2xs p-4 space-y-3">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div className="relative w-full sm:w-96">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#5C6E6E]" />
-                <Input
-                  placeholder="Search delivery plan or courier service..."
-                  value={planSearch}
-                  onChange={(e) => setPlanSearch(e.target.value)}
-                  className="pl-9 text-xs bg-[#F8F9F7]"
-                />
-              </div>
-              <span className="text-xs text-[#5C6E6E]">
-                Showing <strong className="text-[#0F3D3E]">{filteredPlans.length}</strong> of {DELIVERY_PLANS.length} providers
-              </span>
-            </div>
-
-            {/* Category Pills */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-              {planCategories.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedPlanCategory(cat)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer border ${
-                    selectedPlanCategory === cat
-                      ? "bg-[#0F3D3E] text-white border-[#0F3D3E] shadow-2xs"
-                      : "bg-[#F8F9F7] text-[#5C6E6E] border-[#E2E6DF] hover:bg-neutral-100"
-                  }`}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-          </Card>
-
-          {/* Delivery Plans Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredPlans.map((plan) => (
-              <Card
-                key={plan.id}
-                className="bg-white border border-[#E2E6DF] rounded-2xl shadow-2xs hover:shadow-md transition-shadow flex flex-col justify-between"
-              >
-                <CardHeader className="p-4 pb-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <CardTitle className="text-base font-serif font-bold text-[#0F3D3E]">
-                        {plan.name}
-                      </CardTitle>
-                      <Badge className={`mt-1 text-[10px] font-semibold border ${getCategoryBadgeClass(plan.category)}`}>
-                        {plan.category}
-                      </Badge>
-                    </div>
-
-                    <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      Active
-                    </span>
-                  </div>
-
-                  <CardDescription className="text-xs text-[#5C6E6E] mt-2 line-clamp-2">
-                    {plan.description}
-                  </CardDescription>
-                </CardHeader>
-
-                <CardContent className="p-4 pt-2 space-y-3">
-                  <div className="p-2.5 bg-[#F8F9F7] rounded-xl border border-[#E2E6DF]/80 text-[11px] space-y-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E] block">
-                      Tracking Integration
-                    </span>
-                    {plan.prefix ? (
-                      <p className="font-mono text-[10px] text-[#0F3D3E] truncate">
-                        {plan.prefix}&#123;AWB&#125;
-                      </p>
-                    ) : plan.name === "Digital Delivery" ? (
-                      <p className="text-teal-700 font-medium text-[11px]">
-                        Instant eBook / Portal Digital Delivery (No AWB needed)
-                      </p>
-                    ) : (
-                      <p className="text-[#5C6E6E] italic text-[11px]">
-                        Custom / Manual Tracking Portal
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between pt-1 border-t border-[#E2E6DF]/60">
-                    {getSafeExternalUrl(plan.website) ? (
-                      <a
-                        href={getSafeExternalUrl(plan.website)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[11px] text-[#8A6D1E] hover:underline flex items-center gap-1 font-semibold"
-                      >
-                        <Globe className="h-3 w-3" />
-                        <span>Carrier Portal</span>
-                      </a>
-                    ) : (
-                      <span className="text-[11px] text-[#5C6E6E]">Local / System</span>
-                    )}
-
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        setActiveTab("shipments");
-                        toast.success(`Selected ${plan.name} for dispatch assignments!`);
-                      }}
-                      className="h-7 text-xs text-[#0F3D3E] font-bold gap-1 hover:bg-[#0F3D3E]/5"
-                    >
-                      <span>Use in Dispatch</span>
-                      <ArrowRight className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
+        <ErrorState title="Courier catalogue unavailable" message="Enter courier details from your shipment booking when assigning a shipment." />
       )}
 
       {/* Assign Courier / Delivery Plan Modal */}
@@ -707,7 +497,7 @@ export default function AdminShipmentsPage() {
                     Assign Delivery Plan & Tracking
                   </h3>
                   <p className="text-[11px] text-[#5C6E6E]">
-                    Choose from {DELIVERY_PLANS.length} supported courier delivery partners.
+                    Enter courier details from your shipment booking.
                   </p>
                 </div>
               </div>
@@ -726,26 +516,7 @@ export default function AdminShipmentsPage() {
                 <label className="font-bold uppercase tracking-wider text-[#5C6E6E] block">
                   Delivery Plan / Courier Service *
                 </label>
-                <Select
-                  value={courierForm.serviceName}
-                  onValueChange={handleCourierSelect}
-                >
-                  <SelectTrigger className="bg-[#F8F9F7] h-10">
-                    <SelectValue placeholder="Select delivery plan / courier partner" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-72 bg-white">
-                    {DELIVERY_PLANS.map((c) => (
-                      <SelectItem key={c.id} value={c.name}>
-                        <div className="flex items-center justify-between gap-3 w-full py-0.5">
-                          <span className="font-semibold text-xs text-[#0F3D3E]">{c.name}</span>
-                          <span className="text-[10px] text-[#5C6E6E] px-1.5 py-0.2 rounded bg-neutral-100 border border-[#E2E6DF]">
-                            {c.category}
-                          </span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Input aria-label="Courier service" value={courierForm.serviceName} onChange={(event) => handleCourierSelect(event.target.value)} placeholder="Courier from your shipment booking" className="bg-[#F8F9F7] h-10" />
               </div>
 
               <div className="space-y-1.5">

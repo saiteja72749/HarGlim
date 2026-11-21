@@ -1,3 +1,5 @@
+import { record } from '@/lib/api-error';
+
 /**
  * Order + payment state, mapped from the backend contract (HM handover §28 and §32).
  *
@@ -37,11 +39,12 @@ export function mapPaymentStatus(raw: unknown): PaymentState | null {
 }
 
 /** `payment` is the matching Payment record if one was loaded. */
-export function getPaymentState(order: any, payment?: any): PaymentState {
+export function getPaymentState(orderInput: unknown, paymentInput?: unknown): PaymentState {
+  const order = record(orderInput), payment = record(paymentInput);
   if (order?.isPaid === true) return "paid";
   const fromRecord =
     mapPaymentStatus(payment?.status) ??
-    mapPaymentStatus(typeof order?.payment === "object" ? order.payment?.status : null) ??
+    mapPaymentStatus(record(order.payment).status) ??
     mapPaymentStatus(order?.paymentStatus ?? order?.payment_status);
   if (fromRecord) return fromRecord;
   return order?.utr ? "verification_pending" : "awaiting_payment";
@@ -58,7 +61,8 @@ export const FULFILMENT_META: Record<FulfilmentStage, { label: string; tone: str
   cancelled: { label: "Cancelled", tone: "bg-rose-500/10 text-rose-700 border-rose-500/20" },
 };
 
-export function getFulfilmentStage(order: any): FulfilmentStage {
+export function getFulfilmentStage(input: unknown): FulfilmentStage {
+  const order = record(input);
   const s = String(order?.status || order?.orderStatus || "").toUpperCase().replace(/[-_]/g, " ");
   if (s.includes("CANCEL") || s.includes("REJECT")) return "cancelled";
   if (s.includes("DELIVER") || s.includes("COMPLETE")) return "delivered";
@@ -68,9 +72,10 @@ export function getFulfilmentStage(order: any): FulfilmentStage {
   return "placed";
 }
 
-const firstNumber = (...values: any[]) => {
+const firstNumber = (...values: unknown[]) => {
   for (const v of values) {
-    if (v === null || v === undefined || v === "") continue;
+    if (typeof v !== 'number' && typeof v !== 'string') continue;
+    if (typeof v === 'string' && !v.trim()) continue;
     const n = Number(v);
     if (Number.isFinite(n)) return n;
   }
@@ -78,10 +83,14 @@ const firstNumber = (...values: any[]) => {
 };
 
 /** Server totals only (handover: never recompute money client-side when the server sent it). */
-export function getOrderTotal(order: any): number {
+export function getOrderTotal(input: unknown): number {
+  const order = record(input);
   const itemsTotal = Array.isArray(order?.items)
     ? order.items.reduce(
-        (sum: number, item: any) => sum + firstNumber(item.price, item.book?.price, item.book?.mrp) * firstNumber(item.quantity, 1),
+        (sum: number, value: unknown) => {
+          const item = record(value), book = record(item.book);
+          return sum + firstNumber(item.price, book.price, book.mrp) * firstNumber(item.quantity, 1);
+        },
         0
       )
     : 0;
@@ -89,18 +98,26 @@ export function getOrderTotal(order: any): number {
 }
 
 /** Order id stored on a Payment record (string or populated object). */
-export const getPaymentOrderId = (payment: any): string =>
-  String((typeof payment?.order === "object" ? payment.order?._id || payment.order?.id : payment?.order) || payment?.orderId || "");
+export function getPaymentOrderId(input: unknown): string {
+  const payment = record(input), order = record(payment.order);
+  return String((typeof payment.order === 'object' ? order._id || order.id : payment.order) || payment.orderId || '');
+}
+
+const paymentTimestamp = (input: unknown) => {
+  const value = record(input).createdAt;
+  const time = typeof value === 'string' || typeof value === 'number' ? new Date(value).getTime() : value instanceof Date ? value.getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+};
 
 /** Latest payment per order id (a rejected attempt followed by a new one keeps the newest). */
-export function indexPaymentsByOrder(payments: any[]): Map<string, any> {
-  const byOrder = new Map<string, any>();
+export function indexPaymentsByOrder<T>(payments: readonly T[]): Map<string, T> {
+  const byOrder = new Map<string, T>();
   for (const payment of payments) {
     const orderId = getPaymentOrderId(payment);
     if (!orderId) continue;
     const current = byOrder.get(orderId);
-    const t = new Date(payment.createdAt || 0).getTime();
-    if (!current || t >= new Date(current.createdAt || 0).getTime()) byOrder.set(orderId, payment);
+    const t = paymentTimestamp(payment);
+    if (!current || t >= paymentTimestamp(current)) byOrder.set(orderId, payment);
   }
   return byOrder;
 }

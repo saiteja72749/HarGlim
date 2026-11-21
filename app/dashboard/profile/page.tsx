@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { describeApiError } from "@/lib/api-error";
+
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   User,
@@ -37,7 +39,7 @@ export default function ProfilePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isFetching, setIsFetching] = useState(true);
   const [error, setError] = useState(false);
-  const [totalOrders, setTotalOrders] = useState<number>(0);
+  const [totalOrders, setTotalOrders] = useState<number | null>(null);
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
 
   const [formData, setFormData] = useState({
@@ -51,7 +53,7 @@ export default function ProfilePage() {
     pincode: "",
   });
 
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
     setIsFetching(true);
     setError(false);
 
@@ -59,12 +61,14 @@ export default function ProfilePage() {
       const userId = user?._id || user?.id;
       const [res, ordersRes, addressesRes] = await Promise.allSettled([
         // GET /users/me is the documented "current user profile" endpoint.
-        api.get("/users/me", { cache: "no-store" } as any),
+        api.get("/users/me", { cache: "no-store" }),
         // Only the count is shown: pagination.total from a 1-item page.
         api.get(`/users/${userId}/orders`, { params: { limit: 1 } }),
         fetchSavedAddresses(),
       ]);
 
+      if (res.status === 'rejected') throw res.reason;
+      if (addressesRes.status === 'rejected') throw addressesRes.reason;
       // Phone/address come from the default saved address (GET /users/me/addresses).
       const addresses = addressesRes.status === "fulfilled" ? addressesRes.value : [];
       setSavedAddresses(addresses);
@@ -95,27 +99,19 @@ export default function ProfilePage() {
       if (ordersRes.status === "fulfilled") {
         const total = ordersRes.value.data?.pagination?.total;
         const oData = ordersRes.value.data?.data || ordersRes.value.data;
-        setTotalOrders(typeof total === "number" ? total : Array.isArray(oData) ? oData.length : 0);
+        setTotalOrders(typeof total === "number" ? total : typeof oData?.pagination?.total === "number" ? oData.pagination.total : null);
       }
     } catch (err) {
-      console.warn("Could not fetch remote profile details, using session data:", err);
-      if (user) {
-        setFormData((prev) => ({
-          ...prev,
-          name: user.name || prev.name,
-          email: user.email || prev.email,
-        }));
-      } else {
-        setError(true);
-      }
+      console.warn("Could not fetch remote profile details, using session data:", describeApiError(err));
+      setError(true);
     } finally {
       setIsFetching(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     fetchProfile();
-  }, [user]);
+  }, [fetchProfile]);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -166,8 +162,9 @@ export default function ProfilePage() {
       toast.success(
         nextAddresses ? "Profile and default delivery address saved. Checkout will use this address." : "Profile saved."
       );
-    } catch (err: any) {
-      console.error("Failed to update profile", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to update profile", describeApiError(err));
       toast.error(err.response?.data?.message || "Failed to update profile. Please try again.");
     } finally {
       setIsLoading(false);
@@ -294,7 +291,7 @@ export default function ProfilePage() {
                       Orders
                     </p>
                     <p className="font-serif font-bold text-sm text-[#0F3D3E] mt-1">
-                      {totalOrders} Orders
+                      {totalOrders ?? "Unavailable"} Orders
                     </p>
                   </div>
                 </div>

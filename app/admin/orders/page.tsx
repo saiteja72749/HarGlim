@@ -1,9 +1,11 @@
 "use client";
+
+import { describeApiError } from "@/lib/api-error";
 import { cn, getSafeExternalUrl } from "@/lib/utils";
 
 import { useState, useEffect } from "react";
 import api from "@/lib/api";
-import { DELIVERY_PLANS, resolveCourierTrackingUrl } from "@/lib/couriers";
+import { resolveCourierTrackingUrl } from "@/lib/couriers";
 import {
   canEditTracking,
   extractList,
@@ -315,15 +317,16 @@ export default function AdminOrdersPage() {
       // Tracking lives on the Shipment, not the Order, so shipments are merged in; without them
       // the Tracking ID dialog reopened with the old value and saved IDs never showed here.
       const [{ data }, shipmentsRes] = await Promise.all([
-        api.get("/admin/orders", { params, cache: "no-store" } as any),
-        api.get("/admin/shipments", { params: { limit: 100 }, cache: "no-store" } as any).catch(() => null),
+        api.get("/admin/orders", { params, cache: "no-store" }),
+        api.get("/admin/shipments", { params: { limit: 100 }, cache: "no-store" }).catch(() => null),
       ]);
       setOrders(mergeShipmentsIntoOrders(extractList(data, "orders"), extractList(shipmentsRes?.data, "shipments")));
       setTotalOrders(typeof data?.pagination?.total === "number" ? data.pagination.total : null);
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       const status = err?.response?.status;
       // 401 is handled by the api client (refresh or logout) and 403/429 already show a toast.
-      if (status >= 500) {
+      if (status !== undefined && status >= 500) {
         console.error(
           "Admin orders failed:",
           status,
@@ -331,7 +334,7 @@ export default function AdminOrdersPage() {
           err?.response?.headers?.["x-request-id"] || "n/a"
         );
       } else {
-        console.error("Failed to fetch admin orders:", err);
+        console.error("Failed to fetch admin orders:", describeApiError(err));
       }
       setError(true);
     } finally {
@@ -380,7 +383,8 @@ export default function AdminOrdersPage() {
 
       toast.success("Payment confirmed successfully! ✅");
       fetchOrders();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to confirm payment.");
     }
   };
@@ -409,7 +413,8 @@ export default function AdminOrdersPage() {
 
       toast.error("Payment marked as REJECTED.");
       fetchOrders();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to reject payment.");
     }
   };
@@ -429,7 +434,8 @@ export default function AdminOrdersPage() {
 
       toast.success("Order status updated to Printed 🖨️");
       fetchOrders();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to update order status.");
     }
   };
@@ -534,7 +540,8 @@ export default function AdminOrdersPage() {
       setTrackingNumberInput("");
       setTrackingUrlInput("");
       fetchOrders();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       const status = err.response?.status;
       toast.error(
         status === 409
@@ -869,31 +876,7 @@ export default function AdminOrdersPage() {
               <label className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
                 Courier Service / Delivery Plan *
               </label>
-              <Select
-                value={courierInput}
-                onValueChange={(val) => {
-                  setCourierInput(val);
-                  if (trackingNumberInput.trim()) {
-                    setTrackingUrlInput(resolveCourierTrackingUrl(val, trackingNumberInput));
-                  }
-                }}
-              >
-                <SelectTrigger className="border-[#E2E6DF] rounded-xl h-11 text-xs font-semibold">
-                  <SelectValue placeholder="Select Delivery Plan / Courier Service" />
-                </SelectTrigger>
-                <SelectContent className="bg-white border-[#E2E6DF] max-h-72">
-                  {DELIVERY_PLANS.map((courier) => (
-                    <SelectItem key={courier.id} value={courier.name}>
-                      <div className="flex items-center justify-between gap-3 w-full py-0.5">
-                        <span className="font-semibold text-xs text-[#0F3D3E]">{courier.name}</span>
-                        <span className="text-[10px] text-muted-foreground px-1.5 py-0.2 rounded bg-neutral-100 border border-[#E2E6DF]">
-                          {courier.category}
-                        </span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Input aria-label="Courier service" value={courierInput} onChange={(event) => setCourierInput(event.target.value)} placeholder="Courier from your shipment booking" className="border-[#E2E6DF] rounded-xl h-11 text-xs font-semibold" />
             </div>
 
             <div className="space-y-2">

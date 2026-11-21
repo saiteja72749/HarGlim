@@ -1,30 +1,8 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
-export interface Book {
-  _id: string;
-  title: string;
-  slug: string;
-  author: { _id: string; name: string; email?: string } | string;
-  category: { _id: string; name: string; slug: string } | string;
-  description: string;
-  coverImage: string;
-  price: number;
-  discountPrice?: number;
-  mrp?: number;
-  format: string;
-  rating?: number;
-  totalReviews?: number;
-  totalSales?: number;
-  isBestseller?: boolean;
-  isNewRelease?: boolean;
-  isFeatured?: boolean;
-}
-
-export interface CartItem {
-  book: Book;
-  quantity: number;
-}
+import type { Book, CartItem } from '@/types';
+export type { Book, CartItem } from '@/types';
 
 interface CartState {
   items: CartItem[];
@@ -41,10 +19,11 @@ interface CartState {
 
 export const useCartStore = create<CartState>()(
   persist(
-    (set: any, get: any): CartState => ({
+    (set, get): CartState => ({
       items: [],
       
       addItem: (book: Book, quantity: number = 1) => {
+        if (!book._id || !Number.isSafeInteger(quantity) || quantity < 1) return;
         set((state: CartState) => {
           const existingItem = state.items.find((item: CartItem) => item.book._id === book._id);
           if (existingItem) {

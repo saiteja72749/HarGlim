@@ -1,5 +1,8 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
 
+
+import type { AuthorBook, BookPerformance } from "@/types/author-api";
 import { useState, useEffect, useCallback } from "react";
 import type { ReactNode } from "react";
 import Image from "next/image";
@@ -20,27 +23,33 @@ import { getCategoryDisplayName } from "@/lib/categories";
 import { authorPanelProblem } from "@/lib/author-panel";
 import { onLiveChange } from "@/lib/live-sync";
 import { AuthorDataNotice } from "@/components/authors/author-data-notice";
+import { getAuthorBookStage } from "@/lib/author-book-status";
+import { fetchAuthorBooks } from "@/lib/author-books";
 
 export default function AuthorBooksPage() {
   const [searchQuery, setSearchQuery] = useState("");
-  const [books, setBooks] = useState<any[]>([]);
+  const [books, setBooks] = useState<AuthorBook[]>([]);
   const { user } = useAuthStore();
   const [isLoading, setIsLoading] = useState(true);
 
   const [problem, setProblem] = useState<string | null>(null);
+  const [booksLoaded, setBooksLoaded] = useState(false);
+  const [salesLoaded, setSalesLoaded] = useState(false);
 
   const fetchBooks = useCallback(async () => {
     if (!user) return;
     setIsLoading(true);
     try {
-      const noStore = { cache: "no-store" } as any;
+      const noStore = { cache: "no-store" as const };
       const [meResult, performanceResult, dashboardResult] = await Promise.allSettled([
-        api.get("/authors/me/books", { params: { limit: 100 }, ...noStore }),
+        fetchAuthorBooks(),
         api.get("/authors/me/books/performance", noStore),
         // GET /authors/me/books carries no sales fields; the dashboard's topBooks[] does
         // (unitsSold, grossBookRevenue, knownAccruedRoyalty), so it backs up /performance.
         api.get("/authors/me/dashboard", noStore),
       ]);
+      setBooksLoaded(meResult.status === "fulfilled");
+      setSalesLoaded(performanceResult.status === "fulfilled" || dashboardResult.status === "fulfilled");
       setProblem(
         authorPanelProblem([
           { label: "your book list", result: meResult },
@@ -48,17 +57,16 @@ export default function AuthorBooksPage() {
           { label: "your dashboard", result: dashboardResult },
         ])
       );
-      const resMe = meResult.status === "fulfilled" ? meResult.value : null;
       const resPerformance = performanceResult.status === "fulfilled" ? performanceResult.value : null;
       const resDashboard = dashboardResult.status === "fulfilled" ? dashboardResult.value : null;
 
       // Sales/revenue/royalty live on the performance endpoint, keyed by book id.
-      const performanceById = new Map<string, any>();
+      const performanceById = new Map<string, BookPerformance>();
       const dashboardTopBooks = resDashboard?.data?.data?.topBooks ?? resDashboard?.data?.topBooks;
-      const performanceRows = extractList(resPerformance?.data, "books");
+      const performanceRows = extractList<BookPerformance>(resPerformance?.data, "books");
       const topBookRows = Array.isArray(dashboardTopBooks) ? dashboardTopBooks : [];
-      const addPerformanceRows = (rows: any[]) =>
-        rows.forEach((row: any) => {
+      const addPerformanceRows = (rows: BookPerformance[]) =>
+        rows.forEach((row) => {
           const id = String(row.bookId || row.book?._id || row.book || row._id || "");
           if (id) performanceById.set(id, { ...(performanceById.get(id) || {}), ...row });
         });
@@ -67,7 +75,7 @@ export default function AuthorBooksPage() {
       addPerformanceRows(topBookRows);
 
       // Every book assigned to the author, whoever created it, including zero-sale books.
-      const fetchedBooks: any[] = extractList(resMe?.data, "books");
+      const fetchedBooks: AuthorBook[] = meResult.status === "fulfilled" ? meResult.value : [];
 
       setBooks(
         fetchedBooks.map((book) => ({
@@ -76,7 +84,7 @@ export default function AuthorBooksPage() {
         }))
       );
     } catch (error) {
-      console.error("Failed to fetch author books:", error);
+      console.error("Failed to fetch author books:", describeApiError(error));
       toast.error("Could not load author books list.");
     } finally {
       setIsLoading(false);
@@ -121,9 +129,9 @@ export default function AuthorBooksPage() {
       <AuthorDataNotice message={problem} onRetry={fetchBooks} />
 
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={<BookOpen className="h-5 w-5 text-[#0F3D3E]" />} value={`${publishedCount} / ${books.length}`} label="Published / Total" />
-        <StatCard icon={<TrendingUp className="h-5 w-5 text-emerald-600" />} value={totalSales} label="Copies Sold" />
-        <StatCard icon={<DollarSign className="h-5 w-5 text-amber-700" />} value={`₹${totalRevenue.toLocaleString("en-IN")}`} label="Gross Book Revenue" />
+        <StatCard icon={<BookOpen className="h-5 w-5 text-[#0F3D3E]" />} value={booksLoaded ? `${publishedCount} / ${books.length}` : "Unavailable"} label="Published / Total" />
+        <StatCard icon={<TrendingUp className="h-5 w-5 text-emerald-600" />} value={salesLoaded && booksLoaded ? totalSales : "Unavailable"} label="Copies Sold" />
+        <StatCard icon={<DollarSign className="h-5 w-5 text-amber-700" />} value={salesLoaded && booksLoaded ? `₹${totalRevenue.toLocaleString("en-IN")}` : "Unavailable"} label="Gross Book Revenue" />
         <StatCard icon={<Star className="h-5 w-5 text-purple-700 fill-purple-700/20" />} value={ratedBooks.length ? avgRating.toFixed(1) : "—"} label="Reader Rating" />
       </div>
 
@@ -178,7 +186,7 @@ export default function AuthorBooksPage() {
                   <TableRow>
                     <TableCell colSpan={8} className="h-44 text-center">
                       <BookOpen className="h-10 w-10 mx-auto text-[#5C6E6E]/40 mb-2" />
-                      <h3 className="font-serif font-bold text-[#0F3D3E] text-base">No books found</h3>
+                      <h3 className="font-serif font-bold text-[#0F3D3E] text-base">{booksLoaded ? "No books found" : "Book list unavailable"}</h3>
                       <p className="text-xs text-[#5C6E6E] mt-1 max-w-sm mx-auto">
                         Published titles will appear here after editorial approval.
                       </p>
@@ -212,16 +220,15 @@ function StatCard({ icon, value, label }: { icon: ReactNode; value: ReactNode; l
   );
 }
 
-const getUnitsSold = (book: any) =>
+const getUnitsSold = (book: AuthorBook) =>
   Number(book.performance?.unitsSold ?? book.performance?.totalSales ?? book.unitsSold ?? book.totalSales ?? 0) || 0;
-const getGrossRevenue = (book: any) =>
+const getGrossRevenue = (book: AuthorBook) =>
   Number(book.performance?.grossRevenue ?? book.performance?.grossBookRevenue ?? book.performance?.revenue ?? 0) || 0;
-const getRating = (book: any) => Number(book.ratings ?? book.rating ?? 0) || 0;
-const getStatus = (book: any) =>
-  String(book.publishingStatus || book.publishRequest?.status || book.status || "draft").toLowerCase();
-const isPublished = (book: any) => String(book.status || "").toLowerCase() === "published";
+const getRating = (book: AuthorBook) => Number(book.ratings ?? book.rating ?? 0) || 0;
+const getStatus = getAuthorBookStage;
+const isPublished = (book: AuthorBook) => String(book.status || "").toLowerCase() === "published";
 
-function BookRow({ book, index }: { book: any; index: number }) {
+function BookRow({ book, index }: { book: AuthorBook; index: number }) {
   const priceVal = book.mrp || book.price || 0;
   // MRP − printing − platform − delivery, set by the publisher; never invented when missing.
   const unitRoyalty = bookRoyaltyPerCopy(book);
@@ -273,6 +280,9 @@ function BookRow({ book, index }: { book: any; index: number }) {
         )}
       </TableCell>
       <TableCell>
+        <Badge variant="outline" className="text-[10px] capitalize">{getStatus(book).replace(/_/g, " ")}</Badge>
+      </TableCell>
+      <TableCell>
         <span className="font-bold text-[#0F3D3E]">{getUnitsSold(book)}</span>
         <span className="text-[10px] text-[#5C6E6E] block">
           copies{knownRoyalty !== undefined ? ` · ₹${Number(knownRoyalty).toLocaleString("en-IN")} royalty` : ""}
@@ -284,9 +294,6 @@ function BookRow({ book, index }: { book: any; index: number }) {
           <span className="font-bold text-[#0F3D3E]">{getRating(book).toFixed(1)}</span>
           <span className="text-[10px] text-[#5C6E6E]">({book.reviewCount ?? book.totalReviews ?? 0})</span>
         </div>
-      </TableCell>
-      <TableCell>
-        <Badge variant="outline" className="text-[10px] capitalize">{getStatus(book).replace(/_/g, " ")}</Badge>
       </TableCell>
       <TableCell className="text-right">
         {!isPublished(book) ? (

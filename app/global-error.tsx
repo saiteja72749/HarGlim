@@ -1,4 +1,6 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
+
 
 import { useEffect } from "react";
 import "./globals.css";
@@ -10,7 +12,7 @@ import "./globals.css";
  */
 export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
-    console.error("Root layout error:", error);
+    console.error("Root layout error:", describeApiError(error));
   }, [error]);
 
   return (

@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { describeApiError } from "@/lib/api-error";
+
+import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
 import { ErrorState } from "@/components/ui/error-state";
 import { CheckCircle2, XCircle, Search } from "lucide-react";
@@ -40,7 +42,7 @@ export default function AdminAuthorApplicationsPage() {
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
-  const fetchApplications = async () => {
+  const fetchApplications = useCallback(async () => {
     setLoading(true);
     setError(false);
     try {
@@ -52,16 +54,16 @@ export default function AdminAuthorApplicationsPage() {
       const items = data?.data?.applications || data?.applications || data?.data?.items || (Array.isArray(data?.data) ? data.data : []) || (Array.isArray(data) ? data : []);
       setApplications(Array.isArray(items) ? items : []);
     } catch (err) {
-      console.error("Failed to fetch author applications:", err);
+      console.error("Failed to fetch author applications:", describeApiError(err));
       setError(true);
     } finally {
       setLoading(false);
     }
-  };
+  }, [searchQuery, statusFilter]);
 
   useEffect(() => {
     fetchApplications();
-  }, [statusFilter, searchQuery]);
+  }, [fetchApplications]);
 
   const handleApprove = async (id: string) => {
     setProcessingId(id);
@@ -70,7 +72,8 @@ export default function AdminAuthorApplicationsPage() {
 
       toast.success("Author application APPROVED successfully! 🎉");
       fetchApplications();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to approve application.");
     } finally {
       setProcessingId(null);
@@ -87,7 +90,8 @@ export default function AdminAuthorApplicationsPage() {
 
       toast.error("Author application REJECTED.");
       fetchApplications();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to reject application.");
     } finally {
       setProcessingId(null);

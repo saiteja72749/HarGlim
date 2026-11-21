@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Archive, ArchiveRestore, Camera, Edit2, ExternalLink, Loader2, Plus, Search, Upload, X } from "lucide-react";
@@ -36,7 +38,7 @@ const multipart = { headers: { "Content-Type": "multipart/form-data" } };
 async function fetchAllSpotlights(): Promise<AdminSpotlight[]> {
   const all: AdminSpotlight[] = [];
   for (let page = 1; page <= 50; page++) {
-    const { data } = await api.get("/admin/spotlights", { params: { page, limit: 60 }, cache: "no-store" } as any);
+    const { data } = await api.get("/admin/spotlights", { params: { page, limit: 60 }, cache: "no-store" });
     const items: AdminSpotlight[] = Array.isArray(data?.data) ? data.data : [];
     all.push(...items);
     if (items.length === 0 || page >= (data?.pagination?.pages ?? 1)) break;
@@ -64,7 +66,7 @@ export default function AdminSpotlightsPage() {
     try {
       setItems(await fetchAllSpotlights());
     } catch (err) {
-      console.error("Failed to load spotlights:", err);
+      console.error("Failed to load spotlights:", describeApiError(err));
       setError(true);
     } finally {
       setLoading(false);
@@ -130,8 +132,9 @@ export default function AdminSpotlightsPage() {
       toast.success(editing ? "Spotlight updated." : "Spotlight added.");
       setIsModalOpen(false);
       await load();
-    } catch (err: any) {
-      console.error("Failed to save spotlight:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to save spotlight:", describeApiError(err));
       toast.error(errorMessage(err, "Could not save the spotlight."));
     } finally {
       setSaving(false);
@@ -145,7 +148,8 @@ export default function AdminSpotlightsPage() {
       await api.delete(`/admin/spotlights/${item._id}`);
       toast.success("Spotlight archived.");
       await load();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(errorMessage(err, "Could not archive the spotlight."));
     } finally {
       setBusyId(null);
@@ -160,7 +164,8 @@ export default function AdminSpotlightsPage() {
       await api.patch(`/admin/spotlights/${item._id}`, body, multipart);
       toast.success("Spotlight restored to the website.");
       await load();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(errorMessage(err, "Could not restore the spotlight."));
     } finally {
       setBusyId(null);
@@ -194,12 +199,10 @@ export default function AdminSpotlightsPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link href="/spotlight" target="_blank">
-            <Button variant="outline" className="font-bold gap-2">
+          <Button variant="outline" className="font-bold gap-2" asChild><Link href="/spotlight" target="_blank">
               <ExternalLink className="h-4 w-4" />
               <span>View Spotlight page</span>
-            </Button>
-          </Link>
+            </Link></Button>
           <Button onClick={openCreate} className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-bold gap-2 shadow-xs">
             <Plus className="h-4 w-4" />
             <span>Add Photo</span>

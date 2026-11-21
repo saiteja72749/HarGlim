@@ -12,6 +12,11 @@ describe("publish packages", () => {
     expect(parsePackagesJson("{bad")).toEqual([]);
   });
 
+  it('does not invent a free package when the backend price is missing or invalid', () => {
+    expect(normalizePackages([{ name: 'Missing' }, { name: 'Negative', price: '-1' }, { name: 'Invalid', price: 'Contact us' }])).toEqual([]);
+    expect(normalizePackages([{ name: 'Published free package', price: 0 }])[0].price).toBe(0);
+  });
+
   it("drops archived packages", () => {
     expect(normalizePackages([demoPro, { ...demoPro, _id: "x", isActive: false }]).map((p) => p._id)).toEqual(["d2"]);
   });

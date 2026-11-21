@@ -114,12 +114,8 @@ export default function CartPage() {
                   Create an account to start building your personal library.
                 </p>
                 <div className="mt-8 flex justify-center gap-4">
-                  <Link href="/login">
-                    <Button size="lg">Log In</Button>
-                  </Link>
-                  <Link href="/register">
-                    <Button size="lg" variant="outline">Sign Up</Button>
-                  </Link>
+                  <Button size="lg" asChild><Link href="/login">Log In</Link></Button>
+                  <Button size="lg" variant="outline" asChild><Link href="/register">Sign Up</Link></Button>
                 </div>
               </>
             ) : (
@@ -127,11 +123,9 @@ export default function CartPage() {
                 <p className="text-muted-foreground mt-3">
                   Browse our catalog and add a few books to get started.
                 </p>
-                <Link href="/books">
-                  <Button className="mt-8" size="lg">
+                <Button className="mt-8" size="lg" asChild><Link href="/books">
                     Browse Books
-                  </Button>
-                </Link>
+                  </Link></Button>
               </>
             )}
           </div>
@@ -173,9 +167,9 @@ export default function CartPage() {
             <div className="flex items-center gap-3 rounded-2xl bg-emerald-500/10 p-4 border border-emerald-500/20">
               <Truck className="h-5 w-5 text-emerald-600" />
               <div>
-                <p className="text-sm font-bold text-emerald-800">Free Express Delivery</p>
+                <p className="text-sm font-bold text-emerald-800">Delivery details</p>
                 <p className="text-xs text-emerald-700">
-                  No shipping fee on all orders across India.
+                  Review the final delivery charges when your order is created.
                 </p>
               </div>
             </div>
@@ -187,13 +181,13 @@ export default function CartPage() {
               </div>
               <div className="flex items-center justify-between text-sm font-medium text-emerald-600">
                 <span>Shipping</span>
-                <span>Free</span>
+                <span>Confirmed at checkout</span>
               </div>
             </div>
 
             <div className="mt-6 border-t border-border pt-6">
               <div className="flex items-center justify-between text-lg font-semibold">
-                <span>Total</span>
+                <span>Estimated book subtotal</span>
                 <span>₹{total.toFixed(2)}</span>
               </div>
             </div>
@@ -202,11 +196,9 @@ export default function CartPage() {
               <Button className="w-full" onClick={handleCheckout}>
                 Checkout Now
               </Button>
-              <Link href="/books">
-                <Button variant="outline" className="w-full">
+              <Button variant="outline" className="w-full" asChild><Link href="/books">
                   Continue Shopping
-                </Button>
-              </Link>
+                </Link></Button>
             </div>
           </aside>
         </div>

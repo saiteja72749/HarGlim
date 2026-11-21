@@ -1,5 +1,6 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { getSafeExternalUrl, getSafeRedirect, isSafeExternalUrl } from './utils';
+import { getSafeExternalUrl, getSafeRedirect, isSafeExternalUrl, getBookAuthorInfo } from './utils';
 
 describe('getSafeRedirect', () => {
   it('allows a plain relative path', () => {
@@ -61,4 +62,10 @@ describe('getSafeExternalUrl', () => {
     expect(getSafeExternalUrl('not a url')).toBe('');
     expect(isSafeExternalUrl('mailto:test@example.com')).toBe(false);
   });
+});
+
+it('uses the actual backend author instead of a book-specific override', () => {
+  const book = { slug: 'enterprise-risk-management-simplified', author: { _id: '000000000000000000000001', name: 'Backend Author', role: 'author' } };
+  expect(getBookAuthorInfo(book).name).toBe('Backend Author');
+  expect(getBookAuthorInfo(null).name).toBe('Author unavailable');
 });

@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
@@ -76,8 +78,9 @@ function PaidDashboardAccessPurchase() {
       if (resData.purchase) {
         setPurchase(resData.purchase);
       }
-    } catch (err: any) {
-      console.warn("Failed to load dashboard access status:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.warn("Failed to load dashboard access status:", describeApiError(err));
     } finally {
       setLoading(false);
     }
@@ -97,7 +100,8 @@ function PaidDashboardAccessPurchase() {
       setPurchase(purchaseData);
       toast.success("Payment intent created! Please complete UPI payment.");
       loadAccessState();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       if (err.response?.status === 409 && err.response?.data?.error === "AUTHOR_DASHBOARD_PAID_ACCESS_DISABLED") {
         // Flag was switched off after this page loaded: the dashboard is free now.
         toast.success("The author dashboard is now free for approved authors.");
@@ -136,7 +140,8 @@ function PaidDashboardAccessPurchase() {
       toast.success("UTR submitted! Admin will verify your payment shortly.");
       setUtr("");
       loadAccessState();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to submit UTR reference.");
     } finally {
       setVerifying(false);

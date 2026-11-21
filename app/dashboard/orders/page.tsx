@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { describeApiError } from "@/lib/api-error";
+
+import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -177,7 +179,7 @@ export default function OrdersPage() {
     setTimeout(() => setCopiedAwbMap((prev) => ({ ...prev, [orderId]: false })), 2000);
   };
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     if (!user?._id && !user?.id) return;
     const userId = user._id || user.id;
     setLoading(true);
@@ -187,7 +189,7 @@ export default function OrdersPage() {
       // Backend paginates both lists (default limit 10). Without an explicit limit,
       // shipments for older orders were never returned, so their tracking ID was missing.
       // no-store: tracking is assigned by admin at any time; skip the 30s GET cache.
-      const listConfig = { params: { limit: 100 }, cache: "no-store" } as any;
+      const listConfig = { params: { limit: 100 }, cache: "no-store" as const };
       const [ordersRes, shipmentsRes, paymentsRes] = await Promise.allSettled([
         api.get(`/users/${userId}/orders`, listConfig),
         api.get(`/users/${userId}/shipments`, listConfig),
@@ -208,16 +210,16 @@ export default function OrdersPage() {
       setPaymentsByOrder(indexPaymentsByOrder(payments));
       setOrders(mergeShipmentsIntoOrders(list, shipments));
     } catch (err) {
-      console.error("Failed to fetch user orders:", err);
+      console.error("Failed to fetch user orders:", describeApiError(err));
       setError(true);
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     fetchOrders();
-  }, [user]);
+  }, [fetchOrders]);
 
   // On expand: GET /orders/{_id}/tracking returns { shipment, trackingHistory }.
   // 404 just means the shipment isn't created yet (before payment verification + invoice).
@@ -230,7 +232,7 @@ export default function OrdersPage() {
     setTrackingByOrder((prev) => ({ ...prev, [orderMongoId]: { state: "loading", history: prev[orderMongoId]?.history || [] } }));
 
     try {
-      const { data } = await api.get(`/orders/${orderMongoId}/tracking`, { cache: "no-store" } as any);
+      const { data } = await api.get(`/orders/${orderMongoId}/tracking`, { cache: "no-store" });
       const payload = data?.data || data;
       const shipment = payload?.shipment;
       if (shipment && typeof shipment === "object") {
@@ -253,7 +255,8 @@ export default function OrdersPage() {
       await api.delete(`/orders/${orderMongoId}`);
       toast.success(`Order ${orderNumber} cancelled.`);
       fetchOrders();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "This order can no longer be cancelled.");
     } finally {
       setCancellingId(null);
@@ -277,7 +280,8 @@ export default function OrdersPage() {
       toast.success("UTR submitted successfully! Waiting for admin verification.");
       setUtrInputMap((prev) => ({ ...prev, [orderId]: "" }));
       fetchOrders();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to submit UTR number.");
     } finally {
       setSubmittingUtrMap((prev) => ({ ...prev, [orderId]: false }));
@@ -1074,7 +1078,7 @@ function OrderPaymentQr({ userId, order, payment }: { userId: string; order: any
     }
     let cancelled = false;
     api
-      .get(`/users/${userId}/payments/${paymentId}`, { cache: "no-store" } as any)
+      .get(`/users/${userId}/payments/${paymentId}`, { cache: "no-store" })
       .then(({ data }) => {
         if (cancelled) return;
         const detail = data?.data?.payment || data?.data || data;

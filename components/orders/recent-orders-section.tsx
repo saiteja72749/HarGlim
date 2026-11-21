@@ -1,4 +1,6 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
+
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
@@ -38,7 +40,7 @@ export function RecentOrdersSection() {
         );
         setOrders(ordersData.slice(0, 3)); // show top 3 recent orders
       } catch (err) {
-        console.error("Failed to load user orders for recent orders section:", err);
+        console.error("Failed to load user orders for recent orders section:", describeApiError(err));
       } finally {
         setLoading(false);
       }
@@ -173,26 +175,22 @@ export function RecentOrdersSection() {
 
               {/* Action Buttons */}
               <div className="pt-2 flex items-center justify-between border-t border-border/40 gap-2">
-                <Link href="/dashboard/orders">
-                  <Button
+                <Button
                     size="sm"
                     className="gap-1.5 text-xs font-semibold bg-primary hover:bg-primary/90 h-8"
-                  >
+                   asChild><Link href="/dashboard/orders">
                     <Truck className="h-3.5 w-3.5" />
                     <span>View Shipment</span>
-                  </Button>
-                </Link>
+                  </Link></Button>
 
-                <Link href="/dashboard/orders">
-                  <Button
+                <Button
                     size="sm"
                     variant="outline"
                     className="gap-1 text-xs text-muted-foreground hover:text-foreground h-8"
-                  >
+                   asChild><Link href="/dashboard/orders">
                     <span>Details</span>
                     <ExternalLink className="h-3 w-3" />
-                  </Button>
-                </Link>
+                  </Link></Button>
               </div>
             </div>
           );

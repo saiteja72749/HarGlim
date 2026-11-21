@@ -53,7 +53,7 @@ const clean = (address: Partial<SavedAddress>): SavedAddress => {
 };
 
 export async function fetchSavedAddresses(): Promise<SavedAddress[]> {
-  const { data } = await api.get("/users/me/addresses", { cache: "no-store" } as any);
+  const { data } = await api.get("/users/me/addresses", { cache: "no-store" });
   const list = data?.data ?? data?.addresses ?? [];
   return Array.isArray(list) ? list : [];
 }
@@ -70,9 +70,9 @@ export const getDefaultAddress = (addresses: SavedAddress[]) =>
   addresses.find((a) => a.isDefault) || addresses[0] || null;
 
 const sameAddress = (a: Partial<SavedAddress>, b: Partial<SavedAddress>) =>
-  ["fullName", "addressLine1", "addressLine2", "city", "state", "postalCode", "country", "phone"].every(
+  (["fullName", "addressLine1", "addressLine2", "city", "state", "postalCode", "country", "phone"] as const).every(
     (key) =>
-      String((a as any)[key] || "").trim().toLowerCase() === String((b as any)[key] || "").trim().toLowerCase()
+      String(a[key] || "").trim().toLowerCase() === String(b[key] || "").trim().toLowerCase()
   );
 
 /**

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
@@ -23,14 +23,11 @@ import {
   Landmark,
   Wallet,
   UserCircle,
-  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth-store";
 import { AuthGuard } from "@/components/auth/auth-guard";
-import { bootstrapUserContext } from "@/lib/api";
-import { canOpenAuthorDashboard } from "@/lib/author-access";
 
 // Navigation for an approved author (backend handoff "Navigation Rules").
 // Dashboard access is free once approved, so there is no purchase/paywall entry.
@@ -65,11 +62,7 @@ export default function AuthorLayout({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, logout } = useAuthStore();
   const pathname = usePathname();
-  const router = useRouter();
-  const userContext = useAuthStore((state) => state.userContext);
-  const contextStatus = useAuthStore((state) => state.contextStatus);
   const [hash, setHash] = useState("");
-  const [refreshingAccess, setRefreshingAccess] = useState(false);
 
   useEffect(() => {
     const sync = () => setHash(window.location.hash);
@@ -77,17 +70,6 @@ export default function AuthorLayout({
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, [pathname]);
-
-  // Role "author" is checked by AuthGuard. The backend capability is the final word:
-  // with paid access disabled it is true for every approved author, whatever the
-  // historical dashboardAccessStatus (NOT_PURCHASED, REVOKED, ...) says.
-  const accessDenied = contextStatus === "ready" && !canOpenAuthorDashboard(user, userContext);
-
-  const retryAccess = async () => {
-    setRefreshingAccess(true);
-    await bootstrapUserContext();
-    setRefreshingAccess(false);
-  };
 
   return (
     <AuthGuard requiredRole="author">
@@ -193,29 +175,24 @@ export default function AuthorLayout({
 
           {/* Quick Submit Manuscript Action */}
           <div className="p-4 border-t border-[#174C4D] bg-[#0C3233] space-y-2">
-            <Link href="/author/manuscripts/new" passHref>
-              <Button className="w-full bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold text-xs h-10 rounded-xl shadow-xs gap-2">
+            <Button className="w-full bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold text-xs h-10 rounded-xl shadow-xs gap-2" asChild><Link href="/author/manuscripts/new" passHref>
                 <PenTool className="h-4 w-4" />
                 <span>Submit New Manuscript</span>
-              </Button>
-            </Link>
+              </Link></Button>
 
-            <Link href="/" passHref>
-              <Button
+            <Button
                 variant="ghost"
                 className="w-full justify-start gap-3 text-white/70 hover:text-white hover:bg-[#174C4D] h-9 text-xs"
-              >
+               asChild><Link href="/" passHref>
                 <Store className="h-4 w-4" />
                 <span>Main Website</span>
-              </Button>
-            </Link>
+              </Link></Button>
 
             <Button
               variant="ghost"
               className="w-full justify-start gap-3 text-red-300 hover:text-red-200 hover:bg-red-950/40 h-9 text-xs"
               onClick={() => {
-                logout();
-                router.push("/");
+                logout({ redirectToHome: true });
               }}
             >
               <LogOut className="h-4 w-4" />
@@ -225,14 +202,15 @@ export default function AuthorLayout({
         </aside>
 
         {/* Main Content Area */}
-        <div className="lg:pl-64 flex-1 flex flex-col min-h-screen">
+        <div className="lg:pl-64 flex-1 flex flex-col min-h-screen min-w-0">
           {/* Top Author Studio Header Bar */}
           <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-[#E2E6DF] bg-white px-4 sm:px-8 shadow-xs">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 min-w-0">
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => setSidebarOpen(true)}
+                aria-label="Open author navigation"
                 className="text-[#0F3D3E] lg:hidden"
               >
                 <Menu className="h-5 w-5" />
@@ -252,26 +230,7 @@ export default function AuthorLayout({
 
           {/* Main Workspace View */}
           <main className="p-4 sm:p-6 lg:p-8 flex-1 max-w-7xl w-full mx-auto">
-            {accessDenied ? (
-              <div className="max-w-lg mx-auto mt-16 rounded-2xl border border-[#E2E6DF] bg-white p-8 text-center space-y-4 shadow-xs">
-                <ShieldCheck className="h-10 w-10 mx-auto text-[#0F3D3E]" />
-                <h1 className="font-serif font-bold text-xl text-[#0F3D3E]">Author dashboard unavailable</h1>
-                <p className="text-sm text-[#5C6E6E]">
-                  Your account is an author account, but the server did not grant dashboard access for this session.
-                  Refresh your access. If this keeps happening, contact the Harglim team.
-                </p>
-                <Button
-                  onClick={retryAccess}
-                  disabled={refreshingAccess}
-                  className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white gap-2"
-                >
-                  <RefreshCw className={cn("h-4 w-4", refreshingAccess && "animate-spin")} />
-                  <span>{refreshingAccess ? "Refreshing..." : "Refresh access"}</span>
-                </Button>
-              </div>
-            ) : (
-              children
-            )}
+            {children}
           </main>
         </div>
       </div>

@@ -1,3 +1,4 @@
+import { describeApiError } from "@/lib/api-error";
 export type AuthorRequest = { label: string; result: PromiseSettledResult<unknown> };
 
 /**
@@ -9,8 +10,8 @@ export function authorPanelProblem(requests: AuthorRequest[]): string | null {
   if (failed.length === 0) return null;
 
   const reasons = failed.map((r) => (r.result as PromiseRejectedResult).reason);
-  const status = (e: any) => e?.response?.status;
-  const message = (e: any) => e?.response?.data?.message || e?.message || "";
+  const status = (e: unknown) => describeApiError(e).response?.status;
+  const message = (e: unknown) => describeApiError(e).response?.data.message || describeApiError(e).message;
 
   const forbidden = reasons.find((e) => status(e) === 403);
   if (forbidden) {

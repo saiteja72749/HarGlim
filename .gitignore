@@ -18,8 +18,6 @@ node_modules
 *.tsbuildinfo
 test-results/
 playwright-report/
+test-suite-results/
 # Netlify local build output
 .netlify
-
-# Local full-suite logs
-test-suite-results/

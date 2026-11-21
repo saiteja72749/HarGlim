@@ -1,3 +1,4 @@
+import { record } from "@/lib/api-error";
 import { resolveCourierTrackingUrl } from "@/lib/couriers";
 import { getSafeExternalUrl } from "@/lib/utils";
 
@@ -21,50 +22,39 @@ export interface TrackingInfo {
   estimatedDelivery: string;
 }
 
-const firstString = (...values: any[]): string =>
-  values.find((value) => typeof value === "string" && value.trim())?.trim() || "";
+const firstString = (...values: unknown[]): string =>
+  values.find((value): value is string => typeof value === "string" && Boolean(value.trim()))?.trim() || "";
 
-export const extractList = (payload: any, key: string): any[] => {
-  const candidates = [
-    payload?.data?.[key],
-    payload?.[key],
-    payload?.data?.items,
-    payload?.data?.docs,
-    payload?.data,
-    payload?.items,
-    payload,
-  ];
-  return candidates.find(Array.isArray) || [];
+export const extractList = <T = Record<string, unknown>>(input: unknown, key: string): T[] => {
+  const payload = record(input), data = record(payload.data);
+  const candidates = [data[key], payload[key], data.items, data.docs, payload.data, payload.items, input];
+  return (candidates.find(Array.isArray) || []) as T[];
 };
 
-const getShipmentCandidates = (source: any) =>
-  [
-    source?.shipment,
-    source?.shipmentDetails,
-    source?.shipping,
-    source?.fulfillment,
-    source?.delivery,
-    ...(Array.isArray(source?.shipments) ? source.shipments : []),
-  ].filter((value) => value && typeof value === "object");
-
-const getLatestTrackingEvent = (shipment: any) => {
-  const events = Array.isArray(shipment?.tracking) ? shipment.tracking : [];
-  return events[events.length - 1] || {};
+const getShipmentCandidates = (input: unknown) => {
+  const source = record(input);
+  return [source.shipment, source.shipmentDetails, source.shipping, source.fulfillment, source.delivery,
+    ...(Array.isArray(source.shipments) ? source.shipments : [])]
+    .filter((value) => value && typeof value === 'object').map(record);
+};
+const getLatestTrackingEvent = (shipment: Record<string, unknown>) => {
+  const events = Array.isArray(shipment.tracking) ? shipment.tracking : [];
+  return record(events[events.length - 1]);
 };
 
 /** Works for an order (with or without merged shipment) or a raw shipment document. */
-export function extractTrackingInfo(source: any): TrackingInfo {
-  if (!source || typeof source !== "object") {
+export function extractTrackingInfo(input: unknown): TrackingInfo {
+  const source = record(input);
+  if (!input || typeof input !== "object") {
     return { trackingNumber: "", courierName: "", trackingUrl: "", estimatedDelivery: "" };
   }
 
   // A raw shipment is its own candidate; an order carries the shipment nested.
   const shipment = getShipmentCandidates(source)[0] || source;
-  const courier =
-    (typeof shipment.courier === "object" && shipment.courier) ||
-    (typeof source.courier === "object" && source.courier) ||
-    source.courierDetails ||
-    {};
+  const courier = record(
+    (typeof shipment.courier === 'object' && shipment.courier) ||
+    (typeof source.courier === 'object' && source.courier) || source.courierDetails
+  );
   const event = getLatestTrackingEvent(shipment);
 
   const trackingNumber = firstString(
@@ -131,44 +121,31 @@ export function extractTrackingInfo(source: any): TrackingInfo {
 }
 
 /** All ids/numbers an order or shipment can be matched on. */
-export const getOrderMatchKeys = (record: any): string[] =>
-  [
-    record?._id,
-    record?.id,
-    record?.orderId,
-    record?.orderNumber,
-    typeof record?.order === "string" ? record.order : "",
-    typeof record?.order === "object" ? record.order?._id : "",
-    typeof record?.order === "object" ? record.order?.id : "",
-    typeof record?.order === "object" ? record.order?.orderNumber : "",
-  ]
-    .filter(Boolean)
-    .map((value) => String(value));
+export const getOrderMatchKeys = (input: unknown): string[] => {
+  const value = record(input), order = record(value.order);
+  return [value._id, value.id, value.orderId, value.orderNumber,
+    typeof value.order === 'string' ? value.order : '', order._id, order.id, order.orderNumber]
+    .filter(Boolean).map(String);
+};
 
-/** Shipment keys only — excludes the shipment's own _id so it can't collide with an order id. */
-const getShipmentOrderKeys = (shipment: any): string[] =>
-  [
-    shipment?.orderId,
-    shipment?.orderNumber,
-    typeof shipment?.order === "string" ? shipment.order : "",
-    typeof shipment?.order === "object" ? shipment.order?._id : "",
-    typeof shipment?.order === "object" ? shipment.order?.id : "",
-    typeof shipment?.order === "object" ? shipment.order?.orderNumber : "",
-  ]
-    .filter(Boolean)
-    .map((value) => String(value));
+/** Exclude a shipment's own ID when matching it to an order. */
+const getShipmentOrderKeys = (input: unknown): string[] => {
+  const shipment = record(input), order = record(shipment.order);
+  return [shipment.orderId, shipment.orderNumber, typeof shipment.order === 'string' ? shipment.order : '', order._id, order.id, order.orderNumber]
+    .filter(Boolean).map(String);
+};
 
-export const shipmentBelongsToOrder = (shipment: any, order: any) => {
-  const orderKeys = new Set(getOrderMatchKeys(order).filter((key) => key !== String(shipment?._id || "")));
+export const shipmentBelongsToOrder = (shipment: unknown, order: unknown) => {
+  const orderKeys = new Set(getOrderMatchKeys(order).filter((key) => key !== String(record(shipment)._id || "")));
   return getShipmentOrderKeys(shipment).some((key) => orderKeys.has(key));
 };
 
-export function mergeShipmentsIntoOrders(orders: any[], shipments: any[]) {
+export function mergeShipmentsIntoOrders<T extends object>(orders: T[], shipments: unknown[]): Array<T & { shipment?: Record<string, unknown> }> {
   if (!shipments.length) return orders;
 
-  const byOrderKey = new Map<string, any>();
+  const byOrderKey = new Map<string, Record<string, unknown>>();
   shipments.forEach((shipment) => {
-    getShipmentOrderKeys(shipment).forEach((key) => byOrderKey.set(key, shipment));
+    getShipmentOrderKeys(shipment).forEach((key) => byOrderKey.set(key, record(shipment)));
   });
 
   return orders.map((order) => {
@@ -228,21 +205,23 @@ export const canCancelShipment = (status: unknown) =>
   CANCELLABLE_SHIPMENT_STATUSES.includes(normalizeShipmentStatus(status));
 
 /** Timeline rows from GET /orders/{id}/tracking (trackingHistory) or a shipment's tracking[] array. */
-export function getTrackingHistory(source: any): { status: string; description?: string; location?: string; occurredAt?: string }[] {
+export function getTrackingHistory(input: unknown): { status: string; description?: string; location?: string; occurredAt?: string }[] {
+  const source = record(input);
+  const shipment = record(source.shipment);
   const raw =
     (Array.isArray(source?.trackingHistory) && source.trackingHistory) ||
     (Array.isArray(source?.trackingUpdates) && source.trackingUpdates) ||
-    (Array.isArray(source?.shipment?.tracking) && source.shipment.tracking) ||
+    (Array.isArray(shipment.tracking) && shipment.tracking) ||
     (Array.isArray(source?.tracking) && source.tracking) ||
     [];
   return raw
-    .map((e: any) => ({
+    .map(record).map((e) => ({
       status: normalizeShipmentStatus(e.status || e.event || e.currentStatus),
-      description: e.description || e.message || e.note,
-      location: e.location,
-      occurredAt: e.occurredAt || e.timestamp || e.createdAt || e.date,
+      description: firstString(e.description, e.message, e.note),
+      location: firstString(e.location),
+      occurredAt: firstString(e.occurredAt, e.timestamp, e.createdAt, e.date),
     }))
-    .sort((a: any, b: any) => new Date(a.occurredAt || 0).getTime() - new Date(b.occurredAt || 0).getTime());
+    .sort((a, b) => new Date(a.occurredAt || 0).getTime() - new Date(b.occurredAt || 0).getTime());
 }
 
 /** Shipment still on the road (or not yet picked up), so its courier/AWB can be corrected. */

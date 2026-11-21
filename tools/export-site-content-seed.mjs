@@ -1,16 +1,11 @@
-// Writes the frontend's built-in Site Content defaults to api-audit/site-content-seed.json, the
-// document the backend seeds GET /content with (BACKEND_ALIGNMENT_REPORT.md §3).
-// Run: node tools/export-site-content-seed.mjs
-import { createJiti } from "jiti";
-import { writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+// Historical command name retained; exports the real backend document without seeding any content.
+import { existsSync, writeFileSync } from 'node:fs';
 
-const root = fileURLToPath(new URL("..", import.meta.url));
-const jiti = createJiti(import.meta.url, { alias: { "@": root }, jsx: true });
-const { defaultSiteContent } = await jiti.import("../context/site-content-context.tsx");
-
-// adminProfileImage is admin-only, not site content.
-const seed = { ...defaultSiteContent };
-delete seed.adminProfileImage;
-writeFileSync(new URL("../api-audit/site-content-seed.json", import.meta.url), JSON.stringify(seed, null, 2) + "\n");
-console.log(`Wrote ${Object.keys(seed).length} keys to api-audit/site-content-seed.json`);
+if (existsSync('.env.local')) process.loadEnvFile('.env.local');
+const base = process.env.NEXT_PUBLIC_API_URL;
+if (!base) throw new Error('Configure NEXT_PUBLIC_API_URL before exporting backend content.');
+const response = await fetch(`${base}/content`, { signal: AbortSignal.timeout(45_000) });
+if (!response.ok) throw new Error(`Backend content export returned HTTP ${response.status}`);
+const payload = await response.json();
+writeFileSync(new URL('../api-audit/site-content-export.json', import.meta.url), JSON.stringify(payload.data ?? payload, null, 2) + '\n');
+console.log('Exported the live backend document to api-audit/site-content-export.json.');

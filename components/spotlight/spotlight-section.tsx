@@ -61,12 +61,10 @@ export function SpotlightSection() {
           />
           {status === "ready" && (
             <div className="text-center pt-8">
-              <Link href="/spotlight" className="inline-block">
-                <Button className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-serif font-bold h-12 px-8 rounded-xl gap-2">
+              <Button className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-serif font-bold h-12 px-8 rounded-xl gap-2" asChild><Link href="/spotlight" className="inline-block">
                   <span>View more</span>
                   <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
+                </Link></Button>
             </div>
           )}
         </>

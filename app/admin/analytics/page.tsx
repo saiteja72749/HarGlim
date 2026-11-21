@@ -1,4 +1,6 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
+
 
 import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
@@ -18,6 +20,8 @@ import {
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/ui/error-state";
+import type { Book } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -27,51 +31,66 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+interface AnalyticsReport {
+  totalSales: number | null;
+  totalRevenue: number | null;
+  activeUsers: number | null;
+  totalBooks: number | null;
+  topBooks: Partial<Book>[];
+  revenueReport: unknown;
+  paymentStats: { verified: number | null; pending: number | null; rejected: number | null };
+  inventoryStats: { inStock: number | null; lowStock: number | null };
+}
+const count = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : null;
+
 export default function AdminAnalyticsPage() {
   const [period, setPeriod] = useState<"daily" | "weekly" | "monthly" | "yearly">("monthly");
   const [loading, setLoading] = useState(true);
-  const [analyticsData, setAnalyticsData] = useState<any>({
-    totalSales: 0,
-    totalRevenue: 0,
-    activeUsers: 0,
-    totalBooks: 0,
+  const [error, setError] = useState(false);
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsReport>({
+    totalSales: null,
+    totalRevenue: null,
+    activeUsers: null,
+    totalBooks: null,
     topBooks: [],
     revenueReport: null,
-    paymentStats: { verified: 0, pending: 0, rejected: 0 },
-    inventoryStats: { inStock: 0, lowStock: 0 },
+    paymentStats: { verified: null, pending: null, rejected: null },
+    inventoryStats: { inStock: null, lowStock: null },
   });
 
   const fetchAnalytics = useCallback(async () => {
     setLoading(true);
+    setError(false);
     try {
       const { data } = await api.get("/admin/analytics/dashboard", {
         params: { period },
         cache: "no-store",
-      } as any);
+      });
       const dashReport = data?.data?.report || data?.data || data || {};
       const paymentStats = dashReport.paymentStats || dashReport.payments || {};
       const inventoryStats = dashReport.inventoryStats || dashReport.inventory || {};
       const topBooks = dashReport.topBooks || dashReport.topCatalogTitles || [];
 
       setAnalyticsData({
-        totalSales: dashReport?.totalSales ?? dashReport?.orderCount ?? 0,
-        totalRevenue: dashReport?.totalRevenue ?? dashReport?.revenue ?? 0,
-        activeUsers: dashReport?.activeUsers ?? dashReport?.registeredUsers ?? 0,
-        totalBooks: dashReport?.totalBooks ?? dashReport?.catalogTitles ?? 0,
+        totalSales: count(dashReport?.totalSales ?? dashReport?.orderCount),
+        totalRevenue: count(dashReport?.totalRevenue ?? dashReport?.revenue),
+        activeUsers: count(dashReport?.activeUsers ?? dashReport?.registeredUsers),
+        totalBooks: count(dashReport?.totalBooks ?? dashReport?.catalogTitles),
         topBooks: Array.isArray(topBooks) ? topBooks.slice(0, 5) : [],
         revenueReport: dashReport,
         paymentStats: {
-          verified: paymentStats.verified ?? paymentStats.approved ?? 0,
-          pending: paymentStats.pending ?? paymentStats.verificationPending ?? 0,
-          rejected: paymentStats.rejected ?? paymentStats.failed ?? 0,
+          verified: count(paymentStats.verified ?? paymentStats.approved),
+          pending: count(paymentStats.pending ?? paymentStats.verificationPending),
+          rejected: count(paymentStats.rejected ?? paymentStats.failed),
         },
         inventoryStats: {
-          inStock: inventoryStats.inStock ?? inventoryStats.healthyStock ?? 0,
-          lowStock: inventoryStats.lowStock ?? inventoryStats.outOfStock ?? 0,
+          inStock: count(inventoryStats.inStock ?? inventoryStats.healthyStock),
+          lowStock: count(inventoryStats.lowStock ?? inventoryStats.outOfStock),
         },
       });
     } catch (err) {
-      console.warn("Analytics load warning:", err);
+      console.warn("Analytics load warning:", describeApiError(err));
+      setError(true);
     } finally {
       setLoading(false);
     }
@@ -81,10 +100,12 @@ export default function AdminAnalyticsPage() {
     fetchAnalytics();
   }, [fetchAnalytics]);
 
+  if (error) return <ErrorState title="Analytics could not load" onRetry={fetchAnalytics} />;
+
   const dynamicStats = [
     {
       label: "Platform Order Volume",
-      value: analyticsData.totalSales.toString(),
+      value: analyticsData.totalSales?.toLocaleString() ?? "Unavailable",
       icon: ShoppingCart,
       color: "text-emerald-600",
       bgColor: "bg-emerald-500/10",
@@ -92,7 +113,7 @@ export default function AdminAnalyticsPage() {
     },
     {
       label: "Platform Gross Revenue",
-      value: `₹${Number(analyticsData.totalRevenue).toLocaleString("en-IN")}`,
+      value: analyticsData.totalRevenue === null ? 'Unavailable' : `₹${analyticsData.totalRevenue.toLocaleString("en-IN")}`,
       icon: DollarSign,
       color: "text-blue-600",
       bgColor: "bg-blue-500/10",
@@ -100,7 +121,7 @@ export default function AdminAnalyticsPage() {
     },
     {
       label: "Registered Users",
-      value: analyticsData.activeUsers.toString(),
+      value: analyticsData.activeUsers?.toLocaleString() ?? "Unavailable",
       icon: Users,
       color: "text-purple-600",
       bgColor: "bg-purple-500/10",
@@ -108,7 +129,7 @@ export default function AdminAnalyticsPage() {
     },
     {
       label: "Catalog Titles",
-      value: analyticsData.totalBooks.toString(),
+      value: analyticsData.totalBooks?.toLocaleString() ?? "Unavailable",
       icon: BookOpen,
       color: "text-[#D4AF37]",
       bgColor: "bg-[#D4AF37]/15",
@@ -130,7 +151,7 @@ export default function AdminAnalyticsPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Select value={period} onValueChange={(v: any) => setPeriod(v)}>
+          <Select value={period} onValueChange={(v) => { if (v === "daily" || v === "weekly" || v === "monthly" || v === "yearly") setPeriod(v); }}>
             <SelectTrigger className="w-36 text-xs bg-white border-[#E2E6DF]">
               <SelectValue />
             </SelectTrigger>
@@ -200,7 +221,7 @@ export default function AdminAnalyticsPage() {
                 <span className="font-medium text-emerald-950">Verified & Approved</span>
               </div>
               <span className="font-serif font-bold text-base text-emerald-900">
-                {analyticsData.paymentStats.verified}
+                {analyticsData.paymentStats.verified ?? "Unavailable"}
               </span>
             </div>
 
@@ -210,7 +231,7 @@ export default function AdminAnalyticsPage() {
                 <span className="font-medium text-amber-950">Pending Verification</span>
               </div>
               <span className="font-serif font-bold text-base text-amber-900">
-                {analyticsData.paymentStats.pending}
+                {analyticsData.paymentStats.pending ?? "Unavailable"}
               </span>
             </div>
 
@@ -220,7 +241,7 @@ export default function AdminAnalyticsPage() {
                 <span className="font-medium text-rose-950">Rejected / Failed</span>
               </div>
               <span className="font-serif font-bold text-base text-rose-900">
-                {analyticsData.paymentStats.rejected}
+                {analyticsData.paymentStats.rejected ?? "Unavailable"}
               </span>
             </div>
           </div>
@@ -242,19 +263,19 @@ export default function AdminAnalyticsPage() {
             <div className="flex items-center justify-between p-3 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF]">
               <span className="text-[#5C6E6E]">Healthy Stock Titles (&gt; 5)</span>
               <span className="font-serif font-bold text-base text-[#0F3D3E]">
-                {analyticsData.inventoryStats.inStock}
+                {analyticsData.inventoryStats.inStock ?? "Unavailable"}
               </span>
             </div>
 
             <div className="flex items-center justify-between p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
               <span className="text-amber-950 font-medium">Low Stock / Out of Stock (≤ 5)</span>
               <span className="font-serif font-bold text-base text-amber-900">
-                {analyticsData.inventoryStats.lowStock}
+                {analyticsData.inventoryStats.lowStock ?? "Unavailable"}
               </span>
             </div>
 
             <p className="text-[11px] text-[#5C6E6E] pt-2">
-              Physical printing press turnarounds take 2-4 business days. Maintain buffer for bestsellers.
+              Review inventory regularly using the latest backend stock information.
             </p>
           </div>
         </Card>
@@ -275,7 +296,7 @@ export default function AdminAnalyticsPage() {
             {analyticsData.topBooks.length === 0 ? (
               <p className="text-[#5C6E6E] text-center py-6">No book sale records yet.</p>
             ) : (
-              analyticsData.topBooks.map((book: any, i: number) => (
+              analyticsData.topBooks.map((book, i) => (
                 <div key={book._id || i} className="flex items-center justify-between pb-2 border-b border-[#E2E6DF] last:border-0 last:pb-0">
                   <div className="min-w-0 flex-1 pr-2">
                     <p className="font-bold text-[#0F3D3E] truncate">{book.title}</p>

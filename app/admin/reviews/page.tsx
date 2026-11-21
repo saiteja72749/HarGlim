@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
 import {
@@ -41,7 +43,7 @@ export default function AdminReviewsPage() {
       const items = data?.data?.reviews || (Array.isArray(data?.data) ? data.data : []) || (Array.isArray(data) ? data : []);
       setReviews(Array.isArray(items) ? items : []);
     } catch (err) {
-      console.warn("Reviews fetch notice:", err);
+      console.warn("Reviews fetch notice:", describeApiError(err));
       setReviews([]);
     } finally {
       setLoading(false);
@@ -61,7 +63,8 @@ export default function AdminReviewsPage() {
       setReviews((prev) =>
         prev.map((r) => ((r._id || r.id) === reviewId ? { ...r, status: newStatus } : r))
       );
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to moderate review.");
     } finally {
       setActionInProgressId(null);
@@ -76,7 +79,8 @@ export default function AdminReviewsPage() {
       await api.delete(`/admin/reviews/${reviewId}`);
       toast.success("Review deleted successfully.");
       setReviews((prev) => prev.filter((r) => (r._id || r.id) !== reviewId));
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to delete review.");
     } finally {
       setActionInProgressId(null);

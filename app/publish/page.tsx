@@ -129,23 +129,19 @@ export default function PublishPage() {
 
             {/* CTAs */}
             <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start pt-2">
-              <Link href="/dashboard/become-author">
-                <Button
+              <Button
                   size="lg"
                   className="w-full sm:w-auto bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold h-14 px-8 rounded-full shadow-[0_0_25px_rgba(212,175,55,0.4)] transition-all gap-2 text-base"
-                >
+                 asChild><Link href="/dashboard/become-author">
                   <span>Submit Manuscript</span>
                   <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
-              <Link href="#packages">
-                <Button
+                </Link></Button>
+              <Button
                   size="lg"
                   className="w-full sm:w-auto bg-white/10 hover:bg-white/20 border-2 border-white/40 text-white font-serif font-bold h-14 px-8 rounded-full text-base transition-all"
-                >
+                 asChild><Link href="#packages">
                   <span>View Packages</span>
-                </Button>
-              </Link>
+                </Link></Button>
             </div>
 
             {/* Trust Badges Bar */}
@@ -386,9 +382,7 @@ export default function PublishPage() {
                 Try again
               </Button>
             ) : (
-              <Link href="/contact" className="inline-block">
-                <Button className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-bold">Contact us</Button>
-              </Link>
+              <Button className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-bold" asChild><Link href="/contact" className="inline-block">Contact us</Link></Button>
             )}
           </div>
         )}
@@ -409,15 +403,13 @@ export default function PublishPage() {
           <p className="text-sm sm:text-base text-white/80 max-w-xl mx-auto font-light leading-relaxed">
             Submit your manuscript and our editorial team will review it and guide you through every step to publication.
           </p>
-          <Link href="/dashboard/become-author" className="inline-block">
-            <Button
+          <Button
               size="lg"
               className="bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold h-14 px-10 rounded-xl shadow-lg gap-2 text-base"
-            >
+             asChild><Link href="/dashboard/become-author" className="inline-block">
               <span>Start Your Publishing Journey</span>
               <ArrowRight className="h-5 w-5" />
-            </Button>
-          </Link>
+            </Link></Button>
         </div>
       </section>
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { DollarSign, RefreshCw, X, Plus, Send, Calendar, CheckCircle2 } from "lucide-react";
@@ -52,7 +54,7 @@ export default function AdminSettlementsPage() {
   }>({
     paymentMethod: "MANUAL_BANK_TRANSFER",
     transactionReference: "",
-    notes: "Paid through manual bank transfer.",
+    notes: "",
     paidAt: new Date().toISOString().split("T")[0],
   });
   const [submittingPayout, setSubmittingPayout] = useState(false);
@@ -64,8 +66,9 @@ export default function AdminSettlementsPage() {
       const { data } = await api.get("/admin/royalty-settlements");
       const list = data?.data?.settlements || data?.data || data || [];
       setSettlements(Array.isArray(list) ? list : []);
-    } catch (err: any) {
-      console.warn("Failed to load settlements:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.warn("Failed to load settlements:", describeApiError(err));
       toast.error("Failed to load royalty settlements.");
     } finally {
       setLoading(false);
@@ -81,11 +84,11 @@ export default function AdminSettlementsPage() {
         const data = res?.data?.data?.users ?? res?.data?.data ?? [];
         const arr = Array.isArray(data) ? data : [];
         setAuthors(arr);
-        if (arr.length > 0 && !authorId) {
-          setAuthorId(arr[0]._id || arr[0].id);
+        if (arr.length > 0) {
+          setAuthorId((current) => current || arr[0]._id || arr[0].id);
         }
       } catch (e) {
-        console.warn("Could not load authors list:", e);
+        console.warn("Could not load authors list:", describeApiError(e));
       }
     };
     loadAuthors();
@@ -110,7 +113,8 @@ export default function AdminSettlementsPage() {
       const { data } = await api.post("/admin/royalty-settlements/preview", payload);
       setPreviewData(data?.data || data);
       toast.success("Candidate royalties preview generated!");
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to generate settlement preview.");
     } finally {
       setPreviewing(false);
@@ -136,7 +140,8 @@ export default function AdminSettlementsPage() {
       toast.success("Draft settlement batch created! 🎉");
       setActiveTab("settlements");
       loadSettlements();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to create draft settlement batch.");
     } finally {
       setCreatingBatch(false);
@@ -152,7 +157,8 @@ export default function AdminSettlementsPage() {
       });
       toast.success("Settlement batch approved!");
       loadSettlements();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to approve settlement batch.");
     }
   };
@@ -179,7 +185,8 @@ export default function AdminSettlementsPage() {
       toast.success("Manual payout recorded successfully! 💰");
       setSelectedSettlement(null);
       loadSettlements();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to record manual payout.");
     } finally {
       setSubmittingPayout(false);
@@ -197,7 +204,8 @@ export default function AdminSettlementsPage() {
       });
       toast.success("Settlement batch cancelled.");
       loadSettlements();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to cancel settlement batch.");
     }
   };

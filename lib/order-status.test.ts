@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
   getFulfilmentStage,
@@ -47,6 +48,18 @@ describe("getPaymentState", () => {
 });
 
 describe("order helpers", () => {
+  it('does not interpret malformed boolean or blank totals as a monetary amount', () => {
+    expect(getOrderTotal({ totalPrice: true, totalAmount: ' ', amount: 299 })).toBe(299);
+    expect(getOrderTotal({ totalPrice: 0, amount: 299 })).toBe(0);
+  });
+
+  it('allows a valid latest payment to replace a record with an invalid timestamp', () => {
+    const payments = indexPaymentsByOrder([
+      { _id: 'old', order: 'order', createdAt: 'invalid date' },
+      { _id: 'latest', order: 'order', createdAt: '2026-11-20T00:00:00Z' },
+    ]);
+    expect(payments.get('order')?._id).toBe('latest');
+  });
   it("prefers the server totalPrice", () => {
     expect(getOrderTotal({ totalPrice: 598, items: [{ price: 1, quantity: 1 }] })).toBe(598);
     expect(getOrderTotal({ items: [{ price: 299, quantity: 2 }] })).toBe(598);

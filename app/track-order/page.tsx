@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -49,10 +51,11 @@ function TrackOrderContent() {
     setState("loading");
     setResult(null);
     try {
-      const { data } = await api.get(`/orders/track/${encodeURIComponent(value)}`, { cache: "no-store" } as any);
+      const { data } = await api.get(`/orders/track/${encodeURIComponent(value)}`, { cache: "no-store" });
       setResult(data?.data || data);
       setState("found");
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       setState(err?.response?.status === 404 ? "notfound" : "error");
     }
   }, []);

@@ -1,3 +1,4 @@
+import { describeApiError, record } from "@/lib/api-error";
 import api from "@/lib/api";
 
 /**
@@ -94,41 +95,44 @@ export const buildPayload = (
   })),
 });
 
-const listFrom = (payload: any): any[] => {
-  const candidates = [payload?.data?.statements, payload?.data?.items, payload?.data, payload?.statements, payload];
-  return candidates.find(Array.isArray) || [];
+const listFrom = (input: unknown): Record<string, unknown>[] => {
+  const payload = record(input), data = record(payload.data);
+  const candidates = [data.statements, data.items, payload?.data, payload?.statements, input];
+  return (candidates.find(Array.isArray) || []).map(record);
 };
 
-export function normalizeStatement(raw: any): ManualRoyaltyStatement {
-  const items: ManualRoyaltyItem[] = (Array.isArray(raw?.items) ? raw.items : []).map((item: any) => {
+export function normalizeStatement(input: unknown): ManualRoyaltyStatement {
+  const raw = record(input);
+  const items: ManualRoyaltyItem[] = (Array.isArray(raw?.items) ? raw.items : []).map(record).map((item) => {
+    const book = record(item.book);
     const royaltyPerBook = amount(item?.royaltyPerBook);
     const unitsSold = Math.floor(amount(item?.unitsSold));
     return {
-      bookId: (typeof item?.book === "object" ? item.book?._id : item?.book) || item?.bookId || null,
-      bookTitle: item?.bookTitle || item?.book?.title || "Book",
+      bookId: (typeof item.book === "object" ? book._id : item.book) || item.bookId ? String((typeof item.book === "object" ? book._id : item.book) || item.bookId) : null,
+      bookTitle: String(item.bookTitle || book.title || "Book unavailable"),
       royaltyPerBook,
       unitsSold,
       totalRoyalty: item?.totalRoyalty != null ? amount(item.totalRoyalty) : round2(royaltyPerBook * unitsSold),
     };
   });
-  const author = typeof raw?.author === "object" ? raw.author : null;
+  const author = record(raw.author);
   return {
     id: String(raw?._id || raw?.id || ""),
     authorId: String(author?._id || raw?.author || raw?.authorId || ""),
-    authorName: author?.name || raw?.authorName || "",
-    periodStart: raw?.periodStart || "",
-    periodEnd: raw?.periodEnd || "",
-    note: raw?.note || "",
+    authorName: String(author.name || raw.authorName || ""),
+    periodStart: String(raw.periodStart || ""),
+    periodEnd: String(raw.periodEnd || ""),
+    note: String(raw.note || ""),
     status: String(raw?.status || "RECORDED").toUpperCase(),
     items,
     totalUnits: raw?.totalUnits != null ? amount(raw.totalUnits) : items.reduce((s, i) => s + i.unitsSold, 0),
     totalRoyalty: raw?.totalRoyalty != null ? amount(raw.totalRoyalty) : round2(items.reduce((s, i) => s + i.totalRoyalty, 0)),
-    createdAt: raw?.createdAt || "",
+    createdAt: String(raw.createdAt || ""),
   };
 }
 
 /** 404 = the backend has not shipped these routes yet. */
-export const isMissingEndpoint = (err: any) => err?.response?.status === 404;
+export const isMissingEndpoint = (err: unknown) => describeApiError(err).response?.status === 404;
 
 export async function createManualRoyalty(payload: ReturnType<typeof buildPayload>) {
   const { data } = await api.post("/admin/manual-royalties", payload);
@@ -139,7 +143,7 @@ export async function listManualRoyalties(authorId?: string) {
   const { data } = await api.get("/admin/manual-royalties", {
     params: { limit: 100, ...(authorId ? { authorId } : {}) },
     cache: "no-store",
-  } as any);
+  });
   return listFrom(data).map(normalizeStatement);
 }
 
@@ -148,6 +152,6 @@ export async function voidManualRoyalty(id: string, reason: string) {
 }
 
 export async function listMyManualRoyalties() {
-  const { data } = await api.get("/authors/me/manual-royalties", { params: { limit: 100 }, cache: "no-store" } as any);
+  const { data } = await api.get("/authors/me/manual-royalties", { params: { limit: 100 }, cache: "no-store" });
   return listFrom(data).map(normalizeStatement);
 }

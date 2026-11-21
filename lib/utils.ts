@@ -43,28 +43,16 @@ export function isSafeExternalUrl(target: string | null | undefined): boolean {
  * Defends against books mistakenly attributed to the platform admin ("Demo Admin")
  * and handles external / unregistered authors cleanly.
  */
-export function getBookAuthorInfo(book: any): {
+export function getBookAuthorInfo(book: {
+  authorName?: string;
+  author?: string | { name?: string; fullName?: string; _id?: string; id?: string; role?: string };
+} | null | undefined): {
   name: string;
   id: string | null;
   hasProfile: boolean;
 } {
   if (!book) {
-    return { name: "Harglim Author", id: null, hasProfile: false };
-  }
-
-  // Known book-to-author override dictionary for catalog books with external authors
-  const knownAuthorOverrides: Record<string, string> = {
-    "enterprise-risk-management-simplified": "Dr Arjita Biswas and Pretesh Biswas",
-    "6a99bb4f5d102a2fe5a2099d": "Dr Arjita Biswas and Pretesh Biswas",
-  };
-
-  const slugOrId = book.slug || book._id || book.id || "";
-  if (knownAuthorOverrides[slugOrId]) {
-    return {
-      name: knownAuthorOverrides[slugOrId],
-      id: null,
-      hasProfile: false,
-    };
+    return { name: "Author unavailable", id: null, hasProfile: false };
   }
 
   // 1. Direct explicit authorName field
@@ -83,10 +71,7 @@ export function getBookAuthorInfo(book: any): {
       if (explicitAuthorName) {
         return { name: explicitAuthorName, id: null, hasProfile: false };
       }
-      if ((book.title || "").toLowerCase().includes("risk management")) {
-        return { name: "Dr Arjita Biswas and Pretesh Biswas", id: null, hasProfile: false };
-      }
-      return { name: explicitAuthorName || "Harglim Editorial", id: null, hasProfile: false };
+      return { name: explicitAuthorName || "Author unavailable", id: null, hasProfile: false };
     }
 
     if (rawName) {
@@ -110,5 +95,5 @@ export function getBookAuthorInfo(book: any): {
     return { name: explicitAuthorName, id: null, hasProfile: false };
   }
 
-  return { name: "Harglim Author", id: null, hasProfile: false };
+  return { name: "Author unavailable", id: null, hasProfile: false };
 }

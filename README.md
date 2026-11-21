@@ -1,5 +1,7 @@
 # Harglim Publishers 📚
 
+Production release approval is pending. See [PRODUCTION_RELEASE_AUDIT.md](PRODUCTION_RELEASE_AUDIT.md) for current security findings, backend contracts, verification evidence, and staging/admin blockers.
+
 Welcome to the **Harglim Publishers** platform—a next-generation digital publishing and e-commerce ecosystem built for modern readers, authors, and administrators. 
 
 This platform seamlessly connects authors with their audiences through a robust online bookstore, while providing dedicated portals for manuscript submissions, royalty tracking, and system administration.
@@ -19,7 +21,7 @@ A beautifully designed, fast, and SEO-optimized storefront for book discovery an
 
 ### ✍️ The Author Ecosystem
 A dedicated workspace designed to empower writers, protected by the `Author` role.
-- **Manuscript Portal:** Submit and track the status of new manuscripts (`/author/manuscripts/new`). Upon admin approval, readers are automatically upgraded to authors!
+- **Manuscript Portal:** Approved authors can submit and track manuscripts (`/author/manuscripts/new`). Author approval and editorial publication are separate backend workflows.
 - **Analytics & Royalties:** Dashboards tracking sales performance and royalty payouts (`/author/analytics`).
 - **Portfolio Management:** Manage published titles and update author profiles (`/author/books`).
 
@@ -28,7 +30,7 @@ A powerful, entirely secured CMS portal for platform administrators (`/admin`).
 - **Inventory CMS:** Add, edit, and categorize the global book inventory using Cloudinary-ready `multipart/form-data` forms (`/admin/books/new`).
 - **Order Fulfillment:** Track platform-wide physical orders and transition their statuses from Processing to Shipped to Delivered (`/admin/orders`).
 - **User Role Management:** Instantly promote standard Readers to Authors or grant Admin privileges through the visual dashboard (`/admin/users`).
-- **Strict Security:** Enforced by Next.js middleware and `AuthGuard` components to prevent unauthorized access.
+- **Access Controls:** `AuthGuard` waits for fresh backend role/capability context. The backend must independently enforce authorization and ownership on every protected endpoint; client navigation guards do not provide server security.
 
 ---
 
@@ -78,12 +80,16 @@ Built with a focus on high performance, type safety, and exceptional user experi
 
 ---
 
+## Testing
+
+Run `npm run test:all` for unit tests, lint, a production build, and browser tests. See [TESTING.md](TESTING.md) for setup, coverage, and report locations.
+
 ## 🎨 UI/UX Design Philosophy
 
 Our interface is built to feel premium and engaging:
 - **Clean Typography:** Modern fonts with high legibility for long-form reading.
 - **Micro-Interactions:** Subtle hover states and layout animations powered by Framer Motion guide the user's attention without overwhelming them.
-- **Accessible:** Fully keyboard navigable and screen-reader friendly, thanks to Radix UI's underlying architecture.
+- **Accessibility:** Uses Radix UI primitives, with public keyboard, responsive-control, and navigation checks in the browser suite. Complete role-specific accessibility verification remains part of release testing.
 
 ---
 *Developed with modern web standards to redefine the digital publishing experience.*

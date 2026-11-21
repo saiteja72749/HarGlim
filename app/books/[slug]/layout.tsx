@@ -1,3 +1,5 @@
+import type { Book } from "@/types";
+import { siteConfig } from "@/config/site";
 import { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { fetchRecord, MISSING, notFoundMetadata } from '@/lib/fetch-record';
@@ -8,7 +10,7 @@ type Props = {
   children: React.ReactNode;
 };
 
-const getBookData = (slug: string) => fetchRecord(`/books/${slug}`);
+const getBookData = (slug: string) => fetchRecord<Book>(`/books/${slug}`);
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const resolvedParams = await params;
@@ -17,7 +19,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   
   if (book === MISSING) return notFoundMetadata;
   if (!book) return {};
-  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://harglim.com';
+  const APP_URL = siteConfig.url;
 
   return {
     title: book.title,
@@ -43,7 +45,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 export default async function BookLayout({ children, params }: Props) {
   const resolvedParams = await params;
   const book = await getBookData(resolvedParams.slug);
-  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://harglim.com';
+  const APP_URL = siteConfig.url;
 
   if (book === MISSING) notFound();
   if (!book) return <>{children}</>;
@@ -59,13 +61,13 @@ export default async function BookLayout({ children, params }: Props) {
     image: book.coverImage,
     description: book.description,
     isbn: book.isbn,
-    offers: {
+    offers: typeof book.price === 'number' && Number.isFinite(book.price) ? {
       '@type': 'Offer',
-      price: book.price || 0,
+      price: book.price,
       priceCurrency: 'INR',
-      availability: book.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+      availability: typeof book.stock === 'number' ? (book.stock - (book.reservedStock ?? 0) > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock') : undefined,
       url: `${APP_URL}/books/${resolvedParams.slug}`,
-    },
+    } : undefined,
   };
 
   const breadcrumbsJsonLd = {

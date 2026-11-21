@@ -11,7 +11,8 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'jsdom',
+    // Pure data/API helpers need no DOM. Only browser persistence suites opt in.
+    environment: 'node',
     globals: true,
     include: ['app', 'components', 'config', 'context', 'hooks', 'lib', 'store', 'tools']
       .map((directory) => `${directory}/**/*.test.{ts,tsx}`),

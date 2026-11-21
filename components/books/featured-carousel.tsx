@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { Book } from "@/types";
 import { BookCard } from "@/components/books/book-card";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useCarouselState } from "@/hooks/use-carousel-state";
 import { cn } from "@/lib/utils";
 
 interface FeaturedCarouselProps {
@@ -22,24 +23,10 @@ export function FeaturedCarousel({ books }: FeaturedCarouselProps) {
     },
   });
 
-  const [prevBtnEnabled, setPrevBtnEnabled] = useState(false);
-  const [nextBtnEnabled, setNextBtnEnabled] = useState(true);
+  const { canScrollPrev: prevBtnEnabled, canScrollNext: nextBtnEnabled } = useCarouselState(emblaApi);
 
   const scrollPrev = useCallback(() => emblaApi && emblaApi.scrollPrev(), [emblaApi]);
   const scrollNext = useCallback(() => emblaApi && emblaApi.scrollNext(), [emblaApi]);
-
-  const onSelect = useCallback(() => {
-    if (!emblaApi) return;
-    setPrevBtnEnabled(emblaApi.canScrollPrev());
-    setNextBtnEnabled(emblaApi.canScrollNext());
-  }, [emblaApi]);
-
-  useEffect(() => {
-    if (!emblaApi) return;
-    onSelect();
-    emblaApi.on("select", onSelect);
-    emblaApi.on("reInit", onSelect);
-  }, [emblaApi, onSelect]);
 
   if (!books || books.length === 0) return null;
 

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
@@ -88,7 +88,6 @@ export default function AdminLayout({
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
-  const router = useRouter();
   const { user, logout } = useAuthStore();
 
   return (
@@ -205,21 +204,18 @@ export default function AdminLayout({
 
           {/* Bottom Actions */}
           <div className="border-t border-[#174C4D] p-4 space-y-2 bg-[#0F3D3E]">
-            <Link href="/" prefetch={false} passHref>
-              <Button
+            <Button
                 variant="ghost"
                 className="w-full justify-start gap-3 text-white/70 hover:text-white hover:bg-[#174C4D] h-9 text-xs"
-              >
+               asChild><Link href="/" prefetch={false} passHref>
                 <Store className="h-4 w-4" />
                 <span>View Main Website</span>
-              </Button>
-            </Link>
+              </Link></Button>
             <Button
               variant="ghost"
               className="w-full justify-start gap-3 text-red-300 hover:text-red-200 hover:bg-red-950/40 h-9 text-xs"
               onClick={() => {
-                logout();
-                router.push("/");
+                logout({ redirectToHome: true });
               }}
             >
               <LogOut className="h-4 w-4" />

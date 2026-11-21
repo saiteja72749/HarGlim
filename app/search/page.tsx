@@ -1,6 +1,9 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
 
-import { useState, useEffect } from 'react';
+
+import { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Search } from 'lucide-react';
 import { BookCard } from '@/components/books/book-card';
@@ -9,37 +12,48 @@ import type { Book } from '@/types';
 import api from '@/lib/api';
 
 export default function SearchPage() {
-  const [query, setQuery] = useState('');
+  return <Suspense fallback={<p className="p-8">Loading search...</p>}><SearchContent /></Suspense>;
+}
+
+function SearchContent() {
+  const searchParams = useSearchParams();
+  const requestedQuery = searchParams.get('q') || '';
+  return <SearchResults key={requestedQuery} initialQuery={requestedQuery} />;
+}
+
+function SearchResults({ initialQuery }: { initialQuery: string }) {
+  const [query, setQuery] = useState(initialQuery);
+  const [retry, setRetry] = useState(0);
   const [results, setResults] = useState<Book[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
+
   useEffect(() => {
     if (!query.trim()) {
-      setResults([]);
-      setLoading(false);
-      setError(false);
       return;
     }
 
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
       setLoading(true);
       setError(false);
       try {
-        const { data } = await api.get('/search', { params: { q: query } });
+        const { data } = await api.get('/search', { params: { q: query.trim() }, signal: controller.signal });
         const items = data.data?.books || data.data || data || [];
-        setResults(Array.isArray(items) ? items : []);
+        if (!controller.signal.aborted) setResults(Array.isArray(items) ? items : []);
       } catch (err) {
-        console.error("Failed to search books:", err);
+        if (controller.signal.aborted) return;
+        console.error("Failed to search books:", describeApiError(err));
         setError(true);
         setResults([]);
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }, 500); // 500ms debounce
 
-    return () => clearTimeout(timer);
-  }, [query]);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [query, retry]);
 
   return (
     <div className="bg-background min-h-screen py-16">
@@ -56,6 +70,7 @@ export default function SearchPage() {
               <Search className="h-5 w-5 text-muted-foreground" />
               <input
                 type="search"
+                aria-label="Search books"
                 placeholder="Search for a book or author..."
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -65,7 +80,7 @@ export default function SearchPage() {
           </div>
 
           <div className="space-y-6">
-            {query.length === 0 ? (
+            {query.trim().length === 0 ? (
               <div className="rounded-3xl border border-dashed border-muted p-10 text-center text-muted-foreground">
                 Start typing to search our catalog, or browse all books.
               </div>
@@ -83,11 +98,7 @@ export default function SearchPage() {
               <ErrorState 
                 title="Search failed"
                 message="We encountered an error while searching. Please try again."
-                onRetry={() => {
-                  const q = query;
-                  setQuery('');
-                  setTimeout(() => setQuery(q), 0); // Quick hack to re-trigger effect
-                }}
+                onRetry={() => setRetry((value) => value + 1)}
               />
             ) : results.length === 0 ? (
               <div className="rounded-3xl border border-dashed border-muted p-10 text-center text-muted-foreground">

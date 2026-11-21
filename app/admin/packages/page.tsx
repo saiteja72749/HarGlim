@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -68,7 +70,7 @@ const errorMessage = (err: any, fallback: string) => err?.response?.data?.messag
 async function fetchAllPackages(): Promise<PublishPackage[]> {
   const all: PublishPackage[] = [];
   for (let page = 1; page <= 20; page++) {
-    const { data } = await api.get("/admin/publish-packages", { params: { page, limit: 100 }, cache: "no-store" } as any);
+    const { data } = await api.get("/admin/publish-packages", { params: { page, limit: 100 }, cache: "no-store" });
     const items: PublishPackage[] = Array.isArray(data?.data) ? data.data : [];
     all.push(...items);
     if (items.length === 0 || page >= (data?.pagination?.pages ?? 1)) break;
@@ -110,7 +112,7 @@ export default function AdminPackagesPage() {
       setPackages(all);
       return all;
     } catch (err) {
-      console.error("Failed to fetch publish packages:", err);
+      console.error("Failed to fetch publish packages:", describeApiError(err));
       setError(true);
       return null;
     } finally {
@@ -198,8 +200,9 @@ export default function AdminPackagesPage() {
         toast.success(`"${payload.name}" saved. It is live on the Publish page${payload.isActive ? "" : " once activated"}.`);
       }
       setIsModalOpen(false);
-    } catch (err: any) {
-      console.error("Failed to save publish package:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to save publish package:", describeApiError(err));
       toast.error(errorMessage(err, "Could not save the package."));
     } finally {
       setSubmitting(false);
@@ -223,7 +226,8 @@ export default function AdminPackagesPage() {
           .map(({ p, sortOrder }) => api.patch(`/admin/publish-packages/${p._id}`, { sortOrder }))
       );
       await afterChange();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(errorMessage(err, "Could not change the order."));
       fetchPackages();
     } finally {
@@ -240,8 +244,9 @@ export default function AdminPackagesPage() {
       await api.delete(`/admin/publish-packages/${pkg._id}`);
       toast.success(`"${pkg.name}" archived and removed from the Publish page.`);
       await afterChange();
-    } catch (err: any) {
-      console.error("Failed to archive publish package:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to archive publish package:", describeApiError(err));
       toast.error(errorMessage(err, "Could not archive the package."));
     } finally {
       setBusyId(null);
@@ -254,8 +259,9 @@ export default function AdminPackagesPage() {
       await api.patch(`/admin/publish-packages/${pkg._id}`, { isActive: true });
       toast.success(`"${pkg.name}" restored to the Publish page.`);
       await afterChange();
-    } catch (err: any) {
-      console.error("Failed to restore publish package:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to restore publish package:", describeApiError(err));
       toast.error(errorMessage(err, "Could not restore the package."));
     } finally {
       setBusyId(null);
@@ -292,7 +298,8 @@ export default function AdminPackagesPage() {
           try {
             await api.post("/admin/publish-packages", payload);
             created++;
-          } catch (err: any) {
+          } catch (caughtError) {
+            const err = describeApiError(caughtError);
             toast.error(`${payload.name}: ${errorMessage(err, "could not be created.")}`);
           }
         }
@@ -315,8 +322,9 @@ export default function AdminPackagesPage() {
         }
       }
       await afterChange();
-    } catch (err: any) {
-      console.error("Failed to import publish packages:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to import publish packages:", describeApiError(err));
       toast.error(errorMessage(err, "Could not import the packages."));
     } finally {
       setImporting(false);
@@ -350,12 +358,10 @@ export default function AdminPackagesPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link href="/publish#packages" target="_blank">
-            <Button variant="outline" className="font-bold gap-2">
+          <Button variant="outline" className="font-bold gap-2" asChild><Link href="/publish#packages" target="_blank">
               <ExternalLink className="h-4 w-4" />
               <span>View Publish page</span>
-            </Button>
-          </Link>
+            </Link></Button>
           <Button
             variant="outline"
             onClick={handleImportFromSiteContent}

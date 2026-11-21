@@ -1,6 +1,9 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
 
-import { useState, useEffect, useCallback } from "react";
+
+import type { AuthorAnalytics, BookPerformance, AnalyticsPoint } from "@/types/author-api";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   BookOpen,
@@ -21,6 +24,7 @@ import { useHashSection } from "@/hooks/use-hash-section";
 import { authorPanelProblem } from "@/lib/author-panel";
 import { onLiveChange } from "@/lib/live-sync";
 import { AuthorDataNotice } from "@/components/authors/author-data-notice";
+import { AuthorDashboardAccess } from "@/components/authors/author-dashboard-access";
 
 const RANGES = [
   { value: "7d", label: "7 days" },
@@ -29,7 +33,7 @@ const RANGES = [
   { value: "365d", label: "1 year" },
 ];
 
-const num = (...values: any[]) => {
+const num = (...values: unknown[]) => {
   for (const v of values) {
     if (v === null || v === undefined || v === "") continue;
     const n = Number(v);
@@ -39,31 +43,38 @@ const num = (...values: any[]) => {
 };
 
 // Performance rows: { bookId|book, title, unitsSold, grossRevenue, knownRoyalty, status, ... }
-const perfTitle = (b: any) => b.title || b.book?.title || "Untitled";
-const perfUnits = (b: any) => num(b.unitsSold, b.totalSales, b.sales);
-const perfGross = (b: any) => num(b.grossRevenue, b.grossBookRevenue, b.revenue);
-const perfRoyalty = (b: any) => num(b.knownAccruedRoyalty, b.knownRoyalty, b.royalty, b.royaltyEarned, b.accruedRoyalty);
-const perfStatus = (b: any) => String(b.status || b.publishingStatus || b.book?.status || "").toLowerCase();
-const perfRating = (b: any) => num(b.ratings, b.rating, b.book?.ratings);
+const perfTitle = (b: BookPerformance) => b.title || b.book?.title || "Untitled";
+const perfUnits = (b: BookPerformance) => num(b.unitsSold, b.totalSales, b.sales);
+const perfGross = (b: BookPerformance) => num(b.grossRevenue, b.grossBookRevenue, b.revenue);
+const perfRoyalty = (b: BookPerformance) => num(b.knownAccruedRoyalty, b.knownRoyalty, b.royalty, b.royaltyEarned, b.accruedRoyalty);
+const perfStatus = (b: BookPerformance) => String(b.status || b.publishingStatus || b.book?.status || "").toLowerCase();
+const perfRating = (b: BookPerformance) => num(b.ratings, b.rating, b.book?.ratings);
 
 export default function AnalyticsPage() {
+  return <AuthorDashboardAccess><AnalyticsContent /></AuthorDashboardAccess>;
+}
+
+function AnalyticsContent() {
   const { user } = useAuthStore();
   const [loading, setLoading] = useState(true);
   useHashSection(!loading);
   const [range, setRange] = useState("30d");
-  const [analyticsData, setAnalyticsData] = useState<any>(null);
-  const [performanceData, setPerformanceData] = useState<any[]>([]);
+  const [analyticsData, setAnalyticsData] = useState<AuthorAnalytics | null>(null);
+  const [performanceData, setPerformanceData] = useState<BookPerformance[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
+  const latestRequest = useRef(0);
 
   const fetchAnalytics = useCallback(async () => {
     if (!user) return;
+    const requestId = ++latestRequest.current;
     setLoading(true);
     try {
-      const noStore = { cache: "no-store" } as any;
+      const noStore = { cache: "no-store" as const };
       const [analyticsRes, perfRes] = await Promise.allSettled([
         api.get("/authors/me/analytics", { params: { range }, ...noStore }),
         api.get("/authors/me/books/performance", noStore),
       ]);
+      if (requestId !== latestRequest.current) return;
 
       setProblem(
         authorPanelProblem([
@@ -73,14 +84,18 @@ export default function AnalyticsPage() {
       );
       if (analyticsRes.status === "fulfilled") {
         setAnalyticsData(analyticsRes.value.data?.data || analyticsRes.value.data);
+      } else {
+        setAnalyticsData(null);
       }
       if (perfRes.status === "fulfilled") {
-        setPerformanceData(extractList(perfRes.value.data, "books"));
+        setPerformanceData(extractList<BookPerformance>(perfRes.value.data, "books"));
+      } else {
+        setPerformanceData([]);
       }
     } catch (err) {
-      console.error("Failed to fetch author analytics:", err);
+      console.error("Failed to fetch author analytics:", describeApiError(err));
     } finally {
-      setLoading(false);
+      if (requestId === latestRequest.current) setLoading(false);
     }
   }, [user, range]);
 
@@ -91,29 +106,28 @@ export default function AnalyticsPage() {
   }, [fetchAnalytics]);
 
   const summary = { ...(analyticsData || {}), ...(analyticsData?.summary || {}), ...(analyticsData?.totals || {}) };
-  const series: any[] = (
+  const series: AnalyticsPoint[] = (
     analyticsData?.series ||
     analyticsData?.daily ||
     analyticsData?.timeSeries ||
     analyticsData?.data ||
     []
-  ) as any[];
+  );
   const seriesRows = Array.isArray(series) ? series : [];
 
   const publishedCount = performanceData.filter((b) => perfStatus(b) === "published").length;
-  // The cards say "last N days", so they add up the server's series for that range. Lifetime
-  // per-book figures are only the fallback when the series did not load.
-  const rangeLoaded = Array.isArray(analyticsData?.series);
-  const sumSeries = (pick: (row: any) => number) => seriesRows.reduce((sum, row) => sum + pick(row), 0);
+  // Never label lifetime performance totals as sales within the selected date range.
+  const rangeLoaded = [analyticsData?.series, analyticsData?.daily, analyticsData?.timeSeries, analyticsData?.data].some(Array.isArray);
+  const sumSeries = (pick: (row: AnalyticsPoint) => number) => seriesRows.reduce((sum, row) => sum + pick(row), 0);
   const totalUnits = rangeLoaded
     ? sumSeries((r) => num(r.units, r.unitsSold, r.quantity))
-    : num(summary.unitsSold, summary.totalUnitsSold, performanceData.reduce((s, b) => s + perfUnits(b), 0));
+    : num(summary.unitsSold, summary.totalUnitsSold);
   const grossRevenue = rangeLoaded
     ? sumSeries((r) => num(r.revenue, r.grossRevenue))
-    : num(summary.grossBookRevenue, summary.grossRevenue, summary.revenue, performanceData.reduce((s, b) => s + perfGross(b), 0));
+    : num(summary.grossBookRevenue, summary.grossRevenue, summary.revenue);
   const royalty = rangeLoaded
     ? sumSeries((r) => num(r.knownRoyalty, r.royalty, r.royaltyAmount))
-    : num(summary.royalty, summary.accruedKnown, summary.knownRoyalty, performanceData.reduce((s, b) => s + perfRoyalty(b), 0));
+    : num(summary.royalty, summary.accruedKnown, summary.knownRoyalty);
   const unresolved = rangeLoaded
     ? sumSeries((r) => num(r.unresolvedLegacyCount))
     : num(summary.historicalUnresolvedSales, summary.unresolvedSales, summary.historicalUnresolvedCount);
@@ -122,9 +136,9 @@ export default function AnalyticsPage() {
 
   const stats = [
     { label: "Published Titles", value: `${publishedCount}`, sub: `${performanceData.length} titles total`, icon: BookOpen, color: "text-primary", bgColor: "bg-primary/10" },
-    { label: "Units Sold", value: totalUnits.toLocaleString("en-IN"), sub: `Last ${RANGES.find((r) => r.value === range)?.label}`, icon: ShoppingCart, color: "text-emerald-500", bgColor: "bg-emerald-500/10" },
-    { label: "Gross Book Revenue", value: `₹${grossRevenue.toLocaleString("en-IN")}`, sub: "Before royalty split", icon: TrendingUp, color: "text-indigo-500", bgColor: "bg-indigo-500/10" },
-    { label: "Royalty Earned", value: `₹${royalty.toLocaleString("en-IN")}`, sub: "Known royalty", icon: DollarSign, color: "text-blue-500", bgColor: "bg-blue-500/10" },
+    { label: "Units Sold", value: analyticsData ? totalUnits.toLocaleString("en-IN") : "Unavailable", sub: `Last ${RANGES.find((r) => r.value === range)?.label}`, icon: ShoppingCart, color: "text-emerald-500", bgColor: "bg-emerald-500/10" },
+    { label: "Gross Book Revenue", value: analyticsData ? `₹${grossRevenue.toLocaleString("en-IN")}` : "Unavailable", sub: "Before royalty split", icon: TrendingUp, color: "text-indigo-500", bgColor: "bg-indigo-500/10" },
+    { label: "Royalty Earned", value: analyticsData ? `₹${royalty.toLocaleString("en-IN")}` : "Unavailable", sub: "Known royalty", icon: DollarSign, color: "text-blue-500", bgColor: "bg-blue-500/10" },
     { label: "Average Rating", value: rated.length ? avgRating.toFixed(1) : "—", sub: `${rated.length} rated titles`, icon: Star, color: "text-amber-500", bgColor: "bg-amber-500/10" },
   ];
 
@@ -205,7 +219,7 @@ export default function AnalyticsPage() {
         </CardHeader>
         <CardContent>
           {seriesRows.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">No sales in this period.</p>
+            <p className="py-8 text-center text-sm text-muted-foreground">{analyticsData ? "No sales in this period." : "Sales data is unavailable. Please retry."}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -270,7 +284,7 @@ export default function AnalyticsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y border-b">
-                  {performanceData.map((book: any, i) => (
+                  {performanceData.map((book, i) => (
                     <tr key={book.bookId || book._id || book.id || i} className="hover:bg-muted/30">
                       <td className="py-3 px-4 font-medium">{perfTitle(book)}</td>
                       <td className="py-3 px-4">

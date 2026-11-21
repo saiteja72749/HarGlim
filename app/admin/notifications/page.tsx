@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
 import {
@@ -42,7 +44,7 @@ export default function AdminNotificationsPage() {
       const items = res?.data?.data?.notifications || res?.data?.notifications || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];
       setNotifications(Array.isArray(items) ? items : []);
     } catch (err) {
-      console.warn("Notifications fetch notice:", err);
+      console.warn("Notifications fetch notice:", describeApiError(err));
       setNotifications([]);
     } finally {
       setLoading(false);
@@ -63,7 +65,8 @@ export default function AdminNotificationsPage() {
       });
       toast.success("Notification redelivery queued! 📬");
       fetchNotifications();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to retry notification.");
     } finally {
       setRetryingId(null);

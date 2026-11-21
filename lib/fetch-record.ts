@@ -11,14 +11,15 @@ export const notFoundMetadata: Metadata = { title: { absolute: 'Page Not Found |
  * Returns MISSING on a backend 404 so the layout can call notFound() before anything streams,
  * and null on network or server errors so the page still renders and loads the data itself.
  */
-export async function fetchRecord(path: string): Promise<any | null | typeof MISSING> {
+export async function fetchRecord<T = Record<string, unknown>>(path: string): Promise<T | null | typeof MISSING> {
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
-  const res = await fetch(`${API_URL}${path}`, { next: { revalidate: 300 } }).catch(() => null);
+  const res = await fetch(`${API_URL}${path}`, { next: { revalidate: 300, tags: path === '/content' ? ['public-content'] : undefined }, signal: AbortSignal.timeout(15_000) }).catch(() => null);
   if (res?.status === 404) return MISSING;
   if (!res?.ok) return null;
   try {
     const data = await res.json();
-    return data?.data || data;
+    const value: unknown = data?.data ?? data;
+    return value && typeof value === "object" && !Array.isArray(value) ? value as T : null;
   } catch {
     return null;
   }

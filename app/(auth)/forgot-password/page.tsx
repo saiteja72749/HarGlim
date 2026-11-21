@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -33,7 +35,8 @@ export default function ForgotPasswordPage() {
       
       setIsSubmitted(true);
       toast.success("Password reset instructions sent to your email!");
-    } catch (error: any) {
+    } catch (caughtError) {
+      const error = describeApiError(caughtError);
       toast.error(error.response?.data?.message || "Failed to send reset link. Please check your email.");
     } finally {
       setIsLoading(false);
@@ -102,11 +105,9 @@ export default function ForgotPasswordPage() {
                 >
                   Try Another Email
                 </Button>
-                <Link href="/login">
-                  <Button className="w-full">
+                <Button className="w-full" asChild><Link href="/login">
                     Return to Sign In
-                  </Button>
-                </Link>
+                  </Link></Button>
               </div>
             </motion.div>
           ) : (

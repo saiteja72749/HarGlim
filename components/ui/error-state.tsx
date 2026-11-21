@@ -11,12 +11,12 @@ interface ErrorStateProps {
 
 export function ErrorState({
   title = "Oops! Something went wrong",
-  message = "Our servers are taking a little nap. We're working on waking them up!",
+  message = "Information could not be loaded. Check your connection and retry.",
   onRetry,
   className = "",
 }: ErrorStateProps) {
   return (
-    <Card className={`border-dashed bg-muted/20 ${className}`}>
+    <Card role="alert" className={`border-dashed bg-muted/20 ${className}`}>
       <CardContent className="flex flex-col items-center justify-center p-12 text-center">
         <div className="relative mb-6">
           <div className="absolute inset-0 animate-ping rounded-full bg-destructive/20" />

@@ -1,4 +1,6 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
+
 
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
@@ -67,7 +69,7 @@ export default function AdminAuthorsPage() {
         setPagination(data.pagination);
       }
     } catch (err) {
-      console.error("Failed to fetch authors list:", err);
+      console.error("Failed to fetch authors list:", describeApiError(err));
       setError(true);
     } finally {
       setLoading(false);
@@ -90,7 +92,7 @@ export default function AdminAuthorsPage() {
       // 1. Rich admin author detail + 2. sales dashboard (which books sold, in which orders)
       const [res, dashRes] = await Promise.all([
         api.get(`/admin/authors/${aId}`).catch(() => null),
-        api.get(`/admin/authors/${aId}/dashboard`, { cache: "no-store" } as any).catch(() => null),
+        api.get(`/admin/authors/${aId}/dashboard`, { cache: "no-store" }).catch(() => null),
       ]);
       if (dashRes?.data) setAuthorSales(normalizeAuthorDashboard(dashRes.data));
       if (res?.data?.data) {
@@ -103,7 +105,7 @@ export default function AdminAuthorsPage() {
         });
       }
     } catch (err) {
-      console.warn("Failed to load detailed author record:", err);
+      console.warn("Failed to load detailed author record:", describeApiError(err));
       setAuthorDetail({
         author,
         bookCounts: { published: 0, drafts: 0, total: 0 },
@@ -141,12 +143,10 @@ export default function AdminAuthorsPage() {
             Manage author accounts, manuscript entitlements, publication status, and royalty settlements.
           </p>
         </div>
-        <Link href="/admin/author-applications" prefetch={false}>
-          <Button variant="outline" className="text-xs font-bold gap-1.5 border-[#0F3D3E]/30 text-[#0F3D3E]">
+        <Button variant="outline" className="text-xs font-bold gap-1.5 border-[#0F3D3E]/30 text-[#0F3D3E]" asChild><Link href="/admin/author-applications" prefetch={false}>
             <span>Review Applications</span>
             <ChevronRight className="h-3.5 w-3.5" />
-          </Button>
-        </Link>
+          </Link></Button>
       </div>
 
       {/* Filter Card */}

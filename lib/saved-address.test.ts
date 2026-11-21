@@ -1,6 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
-
-vi.mock("@/lib/api", () => ({ default: {} }));
+import { describe, expect, it } from "vitest";
 
 import { getDefaultAddress, withDefaultAddress, type SavedAddress } from "./saved-address";
 

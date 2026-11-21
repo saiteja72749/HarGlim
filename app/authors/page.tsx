@@ -1,6 +1,8 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
 
-import { useState, useEffect } from "react";
+
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { motion } from "framer-motion";
@@ -32,7 +34,7 @@ export default function AuthorsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("books");
 
-  const fetchAuthors = async () => {
+  const fetchAuthors = useCallback(async () => {
     setLoading(true);
     setError(false);
     try {
@@ -44,17 +46,17 @@ export default function AuthorsPage() {
       const items = data.data?.authors || (Array.isArray(data.data) ? data.data : []) || (Array.isArray(data) ? data : []);
       setAuthors(Array.isArray(items) ? items : []);
     } catch (err) {
-      console.error("Failed to fetch authors:", err);
+      console.error("Failed to fetch authors:", describeApiError(err));
       setError(true);
       setAuthors([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [searchQuery]);
 
   useEffect(() => {
     fetchAuthors();
-  }, [searchQuery]);
+  }, [fetchAuthors]);
 
   const filteredAuthors = authors
     .filter((author) => {

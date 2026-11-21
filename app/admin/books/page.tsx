@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { describeApiError } from "@/lib/api-error";
+
+import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import api from "@/lib/api";
@@ -93,7 +95,7 @@ export default function AdminBooksPage() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  const fetchBooks = async () => {
+  const fetchBooks = useCallback(async () => {
     setLoading(true);
     setError(false);
     try {
@@ -110,17 +112,17 @@ export default function AdminBooksPage() {
       const apiBooks = Array.isArray(items) ? items : [];
       setBooks(apiBooks);
     } catch (err) {
-      console.error("Failed to fetch books from API:", err);
+      console.error("Failed to fetch books from API:", describeApiError(err));
       setError(true);
       setBooks([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [categoryFilter, searchQuery, statusFilter]);
 
   useEffect(() => {
     fetchBooks();
-  }, [searchQuery, categoryFilter, statusFilter]);
+  }, [fetchBooks]);
 
   const getCategoryName = (category: any) => 
     typeof category === "object" && category !== null ? category.name : category;
@@ -159,8 +161,9 @@ export default function AdminBooksPage() {
       await api.delete(`/admin/books/${id}`);
       await fetchBooks();
       toast.success("Book deleted successfully! 🗑️");
-    } catch (err: any) {
-      console.error("Failed to delete book:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to delete book:", describeApiError(err));
       toast.error(err.response?.data?.message || "Failed to delete book.");
     }
   };

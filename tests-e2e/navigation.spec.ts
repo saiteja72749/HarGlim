@@ -50,9 +50,14 @@ test.describe('Public navigation', () => {
 
   test('login rejects an empty submit without calling the API', async ({ page }) => {
     await page.goto('/login', { waitUntil: 'domcontentloaded' });
-    await page.getByRole('button', { name: /log ?in|sign ?in/i }).first().click();
+    let loginRequests = 0;
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/auth/login')) loginRequests++;
+    });
+    await page.getByRole('button', { name: 'Sign In with Password', exact: true }).click();
     // Should stay on the login page — no navigation away on empty/invalid submit.
     await expect(page).toHaveURL(/\/login/);
+    expect(loginRequests).toBe(0);
   });
 
   test('an unknown route renders the branded 404 page', async ({ page }) => {
@@ -61,22 +66,42 @@ test.describe('Public navigation', () => {
     await expect(page.getByText(/404|not been published/i).first()).toBeVisible();
   });
 
-  test('static content pages load', async ({ page }) => {
-    for (const path of ['/about', '/contact', '/faq', '/terms', '/privacy']) {
+  for (const path of [
+    '/about', '/contact', '/faq', '/terms', '/privacy', '/publish',
+    '/author-guidelines', '/royalty-info', '/spotlight', '/returns', '/careers',
+    '/authors', '/categories', '/track-order', '/forgot-password', '/reset-password',
+  ]) {
+    test(`${path} renders its page heading`, async ({ page }) => {
       await page.goto(path, { waitUntil: 'domcontentloaded' });
       await expect(page.locator('h1').first()).toBeVisible();
-    }
-  });
+    });
+  }
 
   test('search page accepts a query without erroring', async ({ page }) => {
-    await page.goto('/search?q=book', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('body')).not.toContainText('Application error');
+    await page.goto('/search', { waitUntil: 'domcontentloaded' });
+    const response = page.waitForResponse((res) => {
+      const url = new URL(res.url());
+      return url.pathname.endsWith('/api/search') && url.searchParams.get('q') === 'book';
+    });
+    await page.getByRole('searchbox').fill('book');
+    expect((await response).ok()).toBe(true);
+    await expect(page.getByRole('heading', { name: 'Search Books', exact: true })).toBeVisible();
   });
 });
 
 test.describe('Cart (client-side only, no checkout submission)', () => {
   test('cart page renders an empty-cart state for a fresh session', async ({ page }) => {
     await page.goto('/checkout/cart', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('body')).not.toContainText('Application error');
+    await expect(page.getByRole('heading', { name: 'Your cart is empty' })).toBeVisible();
   });
+});
+
+test.describe('Protected routes without a session', () => {
+  for (const path of ['/author', '/author/books', '/admin', '/dashboard/orders']) {
+    test(`${path} requires login and preserves the destination`, async ({ page }) => {
+      await page.goto(path, { waitUntil: 'domcontentloaded' });
+      await expect(page).toHaveURL(new RegExp(`/login\\?redirect=${encodeURIComponent(path)}`, 'i'));
+      await expect(page.getByLabel(/email/i).first()).toBeVisible();
+    });
+  }
 });

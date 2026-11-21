@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError, record } from "@/lib/api-error";
+
 import { useState, useEffect } from "react";
 import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
@@ -77,18 +79,19 @@ export default function AuthorSettingsPage() {
   });
 
   // Accepts the masked payout object returned by GET/PUT payment-details.
-  const applyPayoutDetails = (details: any) => {
+  const applyPayoutDetails = (input: unknown) => {
+    const details = record(input);
     if (!details || typeof details !== "object") return;
     const payment = {
-      accountHolderName: details.accountHolderName || "",
-      bankName: details.bankName || "",
+      accountHolderName: typeof details.accountHolderName === "string" ? details.accountHolderName : "",
+      bankName: typeof details.bankName === "string" ? details.bankName : "",
       accountNumber: "", // never pre-filled: only a masked value exists
-      ifscCode: details.ifscCode || "",
-      upiId: details.upiId || "",
+      ifscCode: typeof details.ifscCode === "string" ? details.ifscCode : "",
+      upiId: typeof details.upiId === "string" ? details.upiId : "",
     };
     setPaymentForm(payment);
     setSavedPayment(payment);
-    setMaskedAccount(details.accountNumberMasked || "");
+    setMaskedAccount(typeof details.accountNumberMasked === "string" ? details.accountNumberMasked : "");
   };
 
   useEffect(() => {
@@ -99,8 +102,8 @@ export default function AuthorSettingsPage() {
         // Profile from the authenticated GET /users/me (the public author API no longer
         // carries email); payout details from GET /authors/me/payment-details (masked).
         const [meRes, payoutRes] = await Promise.all([
-          api.get("/users/me", { cache: "no-store" } as any).catch(() => null),
-          api.get("/authors/me/payment-details", { cache: "no-store" } as any).catch(() => null),
+          api.get("/users/me", { cache: "no-store" }).catch(() => null),
+          api.get("/authors/me/payment-details", { cache: "no-store" }).catch(() => null),
         ]);
         const me = meRes?.data?.data?.user || meRes?.data?.data || meRes?.data?.user || {};
         const imgUrl = me.profilePicture || me.profileImage || user?.profileImage || "";
@@ -117,7 +120,7 @@ export default function AuthorSettingsPage() {
 
         applyPayoutDetails(payoutRes?.data?.data);
       } catch (e) {
-        console.error("Failed to load author settings:", e);
+        console.error("Failed to load author settings:", describeApiError(e));
       }
     };
     fetchSettings();
@@ -166,7 +169,8 @@ export default function AuthorSettingsPage() {
           const uploadedUrl = uploadRes?.data?.data?.url || uploadRes?.data?.url;
           if (!uploadedUrl) throw new Error("no url");
           finalImage = uploadedUrl;
-        } catch (imgErr: any) {
+        } catch (caughtError) {
+          const imgErr = describeApiError(caughtError);
           // Don't save a base64 preview as the profile photo; tell the author instead.
           toast.error(imgErr?.response?.data?.message || "Photo upload failed. Other changes were not saved.");
           return;
@@ -202,7 +206,8 @@ export default function AuthorSettingsPage() {
       setIsEditingProfile(false);
 
       toast.success("Author profile updated successfully! 👤");
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to update profile.");
     } finally {
       setLoading(false);
@@ -238,14 +243,17 @@ export default function AuthorSettingsPage() {
       const authorId = user?._id || user?.id;
       // Only filled fields are sent; the account number is sent only when re-entered.
       const paymentDetails = Object.fromEntries(Object.entries(trimmed).filter(([, value]) => value));
-      const { data } = await api.put(`/authors/${authorId}/payment-details`, { paymentDetails });
+      await api.put(`/authors/${authorId}/payment-details`, { paymentDetails });
+      const { data } = await api.get('/authors/me/payment-details', { cache: 'no-store' });
 
       // The response carries the masked record; the typed account number is dropped here.
-      applyPayoutDetails(data?.data || { ...trimmed, accountNumberMasked: maskedAccount });
+      if (!data?.data || typeof data.data !== 'object') throw new Error('Saved payout details could not be verified. Reload before retrying.');
+      applyPayoutDetails(data.data);
       setIsEditingPayment(false);
 
       toast.success(data?.message || "Payment and payout details saved securely");
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to save payment details.");
     } finally {
       setLoading(false);

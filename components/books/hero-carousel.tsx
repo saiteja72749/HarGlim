@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import Autoplay from "embla-carousel-autoplay";
 import { motion } from "framer-motion";
@@ -9,6 +9,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Sparkles, ChevronLeft, ChevronRight } from "lucide-react";
+import { useCarouselState } from "@/hooks/use-carousel-state";
 import { cn } from "@/lib/utils";
 
 interface HeroCarouselProps {
@@ -21,22 +22,10 @@ export function HeroCarousel({ books }: HeroCarouselProps) {
     [Autoplay({ delay: 5000, stopOnInteraction: false })]
   );
   
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const { selectedIndex } = useCarouselState(emblaApi);
 
   const scrollPrev = useCallback(() => emblaApi && emblaApi.scrollPrev(), [emblaApi]);
   const scrollNext = useCallback(() => emblaApi && emblaApi.scrollNext(), [emblaApi]);
-
-  const onSelect = useCallback(() => {
-    if (!emblaApi) return;
-    setSelectedIndex(emblaApi.selectedScrollSnap());
-  }, [emblaApi, setSelectedIndex]);
-
-  useEffect(() => {
-    if (!emblaApi) return;
-    onSelect();
-    emblaApi.on("select", onSelect);
-    emblaApi.on("reInit", onSelect);
-  }, [emblaApi, onSelect]);
 
   const staggerContainer = {
     hidden: { opacity: 0 },
@@ -76,11 +65,11 @@ export function HeroCarousel({ books }: HeroCarouselProps) {
                 </motion.div>
                 
                 <motion.h1 variants={fadeInUp} className="text-4xl md:text-5xl lg:text-6xl font-serif font-bold mb-6 leading-tight tracking-tight line-clamp-2">
-                  {book.title || "Discover Your Next Great Read"}
+                  {book.title}
                 </motion.h1>
                 
                 <motion.p variants={fadeInUp} className="text-lg md:text-xl mb-10 text-primary-foreground/90 font-light leading-relaxed line-clamp-3 max-w-xl">
-                  {book.description || "Immerse yourself in this captivating story that will take you on an unforgettable journey."}
+                  {book.description}
                 </motion.p>
                 
                 <motion.div variants={fadeInUp} className="flex flex-col sm:flex-row gap-4 justify-center md:justify-start">

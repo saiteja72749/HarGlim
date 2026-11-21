@@ -1,4 +1,6 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
+
 
 import { useEffect } from "react";
 import Link from "next/link";
@@ -13,7 +15,7 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error("Unhandled route error:", error);
+    console.error("Unhandled route error:", describeApiError(error));
   }, [error]);
 
   return (

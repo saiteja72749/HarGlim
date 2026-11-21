@@ -1,3 +1,5 @@
+import type { Author } from "@/types";
+import { siteConfig } from "@/config/site";
 import { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { fetchRecord, MISSING, notFoundMetadata } from '@/lib/fetch-record';
@@ -10,7 +12,7 @@ type Props = {
 
 // Author URLs use the Mongo _id; anything else cannot exist.
 const getAuthorData = async (id: string) =>
-  /^[a-f0-9]{24}$/i.test(id) ? fetchRecord(`/authors/${id}`) : MISSING;
+  /^[a-f0-9]{24}$/i.test(id) ? fetchRecord<Author>(`/authors/${id}`) : MISSING;
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const resolvedParams = await params;
@@ -19,7 +21,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   
   if (author === MISSING) return notFoundMetadata;
   if (!author) return {};
-  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://harglim.com';
+  const APP_URL = siteConfig.url;
 
   const title = `${author.name} | Author Profile`;
   const description = author.bio || `Read books by ${author.name} on Harglim Publishers.`;
@@ -42,7 +44,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function AuthorLayout({ children, params }: Props) {
   const resolvedParams = await params;
   const author = await getAuthorData(resolvedParams.id);
-  const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://harglim.com';
+  const APP_URL = siteConfig.url;
 
   if (author === MISSING) notFound();
   if (!author) return <>{children}</>;

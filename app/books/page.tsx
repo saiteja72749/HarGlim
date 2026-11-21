@@ -2,7 +2,7 @@
 import { describeApiError } from "@/lib/api-error";
 
 
-import { useState, useEffect, Suspense, useRef } from "react";
+import { useState, useEffect, useCallback, Suspense, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -46,6 +46,7 @@ import type { Book as BookType, Category } from "@/types";
 import api from "@/lib/api";
 import { fetchBackendCategories } from "@/lib/categories";
 import { onLiveChange } from "@/lib/live-sync";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { cn } from "@/lib/utils";
 
 const priceRanges = [
@@ -61,6 +62,8 @@ function BooksContent() {
   const [error, setError] = useState(false);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedQuery = useDebouncedValue(searchQuery.trim());
+  const [reloadVersion, setReloadVersion] = useState(0);
   const [sortBy, setSortBy] = useState("newest");
   
   // Filter States
@@ -88,24 +91,32 @@ function BooksContent() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
-  const fetchCategories = async (fresh = false) => {
+  const fetchCategories = useCallback(async (fresh = false) => {
     setCategoryError(false);
     try {
       const items = (await fetchBackendCategories(fresh)) as Category[];
       setCategories(items);
+      setSelectedCategories((previous) => {
+        const valid = previous.filter((id) => items.some((category) => category._id === id || category.slug === id));
+        return valid.length === previous.length ? previous : valid;
+      });
     } catch (err) {
       console.error("Failed to fetch categories:", describeApiError(err));
       setCategoryError(true);
     }
-  };
-
-  useEffect(() => {
-    fetchCategories();
-    // A category added, renamed or deactivated by an admin shows in the filter without a reload.
-    return onLiveChange("categories", () => fetchCategories(true));
   }, []);
 
-  const fetchBooks = async () => {
+  useEffect(() => {
+    void fetchCategories();
+    return onLiveChange(["categories", "author-data"], () => {
+      void fetchCategories(true).finally(() => setReloadVersion((version) => version + 1));
+    });
+  }, [fetchCategories]);
+
+  const selectedCategorySlug = categories.find((category) => category._id === selectedCategories[0] || category.slug === selectedCategories[0])?.slug;
+  const resultsPending = loading || searchQuery.trim() !== debouncedQuery;
+
+  const fetchBooks = useCallback(async (signal: AbortSignal) => {
     setLoading(true);
     setError(false);
     try {
@@ -114,14 +125,11 @@ function BooksContent() {
         limit: 12,
       };
 
-      if (searchQuery.trim()) {
-        params.search = searchQuery.trim();
-        params.q = searchQuery.trim();
+      if (debouncedQuery) {
+        params.search = debouncedQuery;
+        params.q = debouncedQuery;
       }
-      if (selectedCategories.length > 0) {
-        const catObj = categories.find((c) => c._id === selectedCategories[0] || c.slug === selectedCategories[0]);
-        params.category = catObj?.slug || selectedCategories[0];
-      }
+      if (selectedCategorySlug) params.category = selectedCategorySlug;
 
       if (selectedPriceRange) {
         const range = priceRanges.find((r) => r.label === selectedPriceRange);
@@ -143,11 +151,11 @@ function BooksContent() {
 
       // Live backend: GET /books ignores `search`/`q` (returns the unfiltered list),
       // so text queries go to GET /search?q=, which does full-text matching.
-      const query = searchQuery.trim();
+      const query = debouncedQuery;
       const intersectCategory = Boolean(query && params.category);
       const { data } = query
-        ? await api.get("/search", { params: { q: query, page: intersectCategory ? 1 : currentPage, limit: intersectCategory ? 100 : 12 } })
-        : await api.get("/books", { params });
+        ? await api.get("/search", { params: { q: query, page: intersectCategory ? 1 : currentPage, limit: intersectCategory ? 100 : 12 }, signal })
+        : await api.get("/books", { params, signal });
 
       const items = data.data?.books || (Array.isArray(data.data) ? data.data : []) || (Array.isArray(data) ? data : []);
       const pagination = data.pagination || data.data?.pagination || {};
@@ -156,7 +164,7 @@ function BooksContent() {
       if (intersectCategory) {
         const searchPages = pagination.pages ?? pagination.totalPages ?? 1;
         for (let page = 2; page <= searchPages; page++) {
-          const next = await api.get("/search", { params: { q: query, page, limit: 100 } });
+          const next = await api.get("/search", { params: { q: query, page, limit: 100 }, signal });
           const nextItems = next.data?.data?.books ?? next.data?.data;
           if (!Array.isArray(nextItems)) throw new Error("Invalid search results.");
           result.push(...nextItems);
@@ -204,20 +212,24 @@ function BooksContent() {
         );
       }
 
+      if (signal.aborted) return;
       setBooks(intersectCategory ? result.slice((currentPage - 1) * 12, currentPage * 12) : result);
       setTotalPages(intersectCategory ? Math.max(1, Math.ceil(result.length / 12)) : (pagination.pages || Math.ceil((pagination.total || result.length) / 12) || 1));
     } catch (err) {
+      if (signal.aborted) return;
       console.error("Failed to fetch books:", describeApiError(err));
       setError(true);
       setBooks([]);
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  };
+  }, [debouncedQuery, sortBy, selectedCategorySlug, selectedCategories, selectedFormats, selectedPriceRange, minRatingFilter, quickTagFilter, currentPage]);
 
   useEffect(() => {
-    fetchBooks();
-  }, [searchQuery, sortBy, selectedCategories, selectedFormats, selectedPriceRange, minRatingFilter, quickTagFilter, currentPage, categories]);
+    const controller = new AbortController();
+    void fetchBooks(controller.signal);
+    return () => controller.abort();
+  }, [fetchBooks, reloadVersion]);
 
   // Click outside listener for suggestions
   useEffect(() => {
@@ -255,7 +267,7 @@ function BooksContent() {
     searchQuery.trim() !== "";
 
   // Suggestions matches
-  const suggestions = searchQuery.trim()
+  const suggestions = !resultsPending && searchQuery.trim()
     ? books.slice(0, 4)
     : [];
 
@@ -475,6 +487,7 @@ function BooksContent() {
                   type="text"
                   placeholder="Search by title, author, category..."
                   aria-label="Search catalog"
+                  aria-busy={resultsPending}
                   value={searchQuery}
                   onFocus={() => setShowSuggestions(true)}
                   onChange={(e) => {
@@ -678,7 +691,7 @@ function BooksContent() {
             </div>
 
             {/* Main Books Grid / List Rendering */}
-            {loading ? (
+            {resultsPending ? (
               <div
                 className={
                   viewMode === "grid"
@@ -694,7 +707,7 @@ function BooksContent() {
               <ErrorState
                 title="Unable to load catalog"
                 message="We encountered an issue fetching the books list. Please try again."
-                onRetry={fetchBooks}
+                onRetry={() => setReloadVersion((version) => version + 1)}
               />
             ) : books.length === 0 ? (
               <div className="text-center py-16 bg-white border border-dashed border-[#E2E6DF] rounded-2xl space-y-4">

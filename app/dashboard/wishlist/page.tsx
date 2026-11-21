@@ -1,6 +1,8 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
 
-import { useState } from "react";
+
+import { useState, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -24,13 +26,13 @@ export default function WishlistPage() {
   const [error, setError] = useState(false);
   const { addItem } = useCartStore();
 
-  const fetchWishlist = async () => {
+  const fetchWishlist = useCallback(async () => {
     if (!user?._id && !user?.id) return;
     const userId = user._id || user.id;
     setLoading(true);
     setError(false);
     try {
-      const { data } = await api.get(`/users/${userId}/wishlist`, { params: { limit: 100 }, cache: "no-store" } as any);
+      const { data } = await api.get(`/users/${userId}/wishlist`, { params: { limit: 100 }, cache: "no-store" });
       const wishlistData = extractList(data, "wishlist");
       // Entries may be books or { book: {...} } join rows; DELETE needs the *book* id.
       setItems(
@@ -39,16 +41,16 @@ export default function WishlistPage() {
           .filter((book: any) => book && (book._id || book.id))
       );
     } catch (err) {
-      console.error("Failed to fetch wishlist:", err);
+      console.error("Failed to fetch wishlist:", describeApiError(err));
       setError(true);
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     fetchWishlist();
-  }, [user]);
+  }, [fetchWishlist]);
 
   const removeFromWishlist = async (id: string) => {
     if (!user?._id && !user?.id) return;

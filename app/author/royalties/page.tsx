@@ -1,5 +1,8 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
 
+
+import type { RoyaltyLine, RoyaltySettlement } from "@/types/royalty-api";
 import { useState, useEffect } from "react";
 import api from "@/lib/api";
 import { DollarSign, FileText, Download, CheckCircle2, RefreshCw, Layers, Eye } from "lucide-react";
@@ -22,12 +25,18 @@ import { ManualRoyaltyTable } from "@/components/royalties/manual-royalty-table"
 import { AuthorDataNotice } from "@/components/authors/author-data-notice";
 import { authorPanelProblem } from "@/lib/author-panel";
 import { fetchRoyaltyHistory, isRoyaltyUnavailable, type RoyaltyHistory } from "@/lib/author-royalties";
+import { csvCell } from "@/lib/csv";
 import { onLiveChange } from "@/lib/live-sync";
+import { AuthorDashboardAccess } from "@/components/authors/author-dashboard-access";
 
 export default function AuthorRoyaltiesPage() {
+  return <AuthorDashboardAccess><AuthorRoyaltiesContent /></AuthorDashboardAccess>;
+}
+
+function AuthorRoyaltiesContent() {
   const { user } = useAuthStore();
-  const [royaltyEntries, setRoyaltyEntries] = useState<any[]>([]);
-  const [settlements, setSettlements] = useState<any[]>([]);
+  const [royaltyEntries, setRoyaltyEntries] = useState<RoyaltyLine[]>([]);
+  const [settlements, setSettlements] = useState<RoyaltySettlement[]>([]);
   // Royalty statements the publisher entered by hand (Admin → Manual Royalties).
   const [manualStatements, setManualStatements] = useState<ManualRoyaltyStatement[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,7 +55,7 @@ export default function AuthorRoyaltiesPage() {
     if (!user) return;
     setLoading(true);
     try {
-      const listConfig = { params: { page: 1, limit: 100 }, cache: "no-store" } as any;
+      const listConfig = { params: { page: 1, limit: 100 }, cache: "no-store" as const };
       const [royaltiesRes, settlementsRes, manualRes] = await Promise.allSettled([
         fetchRoyaltyHistory(),
         api.get("/authors/me/royalty-settlements", listConfig),
@@ -57,12 +66,16 @@ export default function AuthorRoyaltiesPage() {
         authorPanelProblem([
           { label: "royalty history", result: royaltiesRes },
           { label: "settlements", result: settlementsRes },
+          { label: "publisher royalty statements", result: manualRes },
         ])
       );
 
       if (royaltiesRes.status === "fulfilled") {
         setSummaryData(royaltiesRes.value);
         setRoyaltyEntries(royaltiesRes.value.entries);
+      } else {
+        setSummaryData(null);
+        setRoyaltyEntries([]);
       }
 
       if (settlementsRes.status === "fulfilled") {
@@ -71,7 +84,7 @@ export default function AuthorRoyaltiesPage() {
         setSettlements(Array.isArray(sList) ? sList : []);
       }
     } catch (err) {
-      console.error("Failed to fetch royalties:", err);
+      console.error("Failed to fetch royalties:", describeApiError(err));
     } finally {
       setLoading(false);
       setLoadedOnce(true);
@@ -95,7 +108,7 @@ export default function AuthorRoyaltiesPage() {
     }
     const headers = ["Book Title", "Order", "Copies Sold", "Unit Price (INR)", "Line Revenue (INR)", "Printing, Platform & Delivery (INR)", "Royalty (INR)", "Date"];
     // Quote every cell and double inner quotes so titles with commas/quotes stay in one column.
-    const cell = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const cell = csvCell;
     const rows = royaltyEntries.map((e) => [
       getTitle(e),
       e.orderNumber || e.order?.orderNumber || "",
@@ -116,6 +129,7 @@ export default function AuthorRoyaltiesPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1_000);
     toast.success("Royalty statement exported as CSV! 📄");
   };
 
@@ -172,7 +186,7 @@ export default function AuthorRoyaltiesPage() {
               Total Lifetime Royalties
             </span>
             <p className="text-3xl font-serif font-bold text-[#0F3D3E]">
-              ₹{Number(totalEarnings).toLocaleString("en-IN")}
+              {summaryData ? `₹${Number(totalEarnings).toLocaleString("en-IN")}` : "Unavailable"}
             </p>
             <p className="text-[11px] text-[#5C6E6E]">Calculated from published book sales</p>
           </div>
@@ -411,7 +425,7 @@ export default function AuthorRoyaltiesPage() {
 }
 
 // Royalty line field readers (backend line DTOs vary by controller path).
-const num = (...values: any[]) => {
+const num = (...values: unknown[]) => {
   for (const v of values) {
     if (v === null || v === undefined || v === "") continue;
     const n = Number(v);
@@ -419,22 +433,22 @@ const num = (...values: any[]) => {
   }
   return 0;
 };
-const getTitle = (e: any) => e.bookTitle || e.book?.title || e.title || "Book";
-const getQty = (e: any) => num(e.quantity, e.copiesSold, e.qty, 1);
-const getUnitPrice = (e: any) => num(e.unitPrice, e.price, e.amountPerBook, e.mrp);
-const getLineRevenue = (e: any) => num(e.grossBookRevenue, e.lineTotal, e.grossAmount, e.totalRevenue, e.revenue, getUnitPrice(e) * getQty(e));
-const getRoyalty = (e: any) => num(e.royaltyAmount, e.royalty, e.amount);
+const getTitle = (e: RoyaltyLine) => e.bookTitle || e.book?.title || e.title || "Book";
+const getQty = (e: RoyaltyLine) => num(e.quantity, e.copiesSold, e.qty, 1);
+const getUnitPrice = (e: RoyaltyLine) => num(e.unitPrice, e.price, e.amountPerBook, e.mrp);
+const getLineRevenue = (e: RoyaltyLine) => num(e.grossBookRevenue, e.lineTotal, e.grossAmount, e.totalRevenue, e.revenue, getUnitPrice(e) * getQty(e));
+const getRoyalty = (e: RoyaltyLine) => num(e.royaltyAmount, e.royalty, e.amount);
 // The per-copy royalty stored on the sale; the book's current value is never used for old sales.
-const getPerCopy = (e: any): number | null => {
+const getPerCopy = (e: RoyaltyLine): number | null => {
   const v = e.royaltyPerCopySnapshot;
   return v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
 };
 // Printing + platform + delivery charges taken out of the line before the author's royalty.
-const getDeductions = (e: any) => Math.max(0, Math.round((getLineRevenue(e) - getRoyalty(e)) * 100) / 100);
-const getDate = (e: any) => e.saleDate || e.date || e.soldAt || e.paidAt || e.createdAt || "";
+const getDeductions = (e: RoyaltyLine) => Math.max(0, Math.round((getLineRevenue(e) - getRoyalty(e)) * 100) / 100);
+const getDate = (e: RoyaltyLine) => e.saleDate || e.date || e.soldAt || e.paidAt || e.createdAt || "";
 
-const getSettlementAmount = (s: any) => num(s.totalRoyalty, s.amount, s.totalAmount, s.payoutAmount);
-const getSettlementStatus = (s: any) => {
+const getSettlementAmount = (s: RoyaltySettlement) => num(s.totalRoyalty, s.amount, s.totalAmount, s.payoutAmount);
+const getSettlementStatus = (s: RoyaltySettlement) => {
   const raw = String(s.status || s.paymentStatus || "").toUpperCase();
   if (raw === "PAID" || raw === "COMPLETED") return { label: "Paid", tone: "bg-emerald-500/10 text-emerald-700 border-emerald-500/20" };
   if (raw.includes("CANCEL")) return { label: "Cancelled", tone: "bg-gray-500/10 text-gray-600 border-gray-500/20" };
@@ -446,7 +460,7 @@ const getSettlementStatus = (s: any) => {
 
 /** GET /authors/me/royalty-settlements/{id}: books/orders included, total, payout transaction. */
 function SettlementDetailDialog({ settlementId, onClose }: { settlementId: string | null; onClose: () => void }) {
-  const [detail, setDetail] = useState<any>(null);
+  const [detail, setDetail] = useState<RoyaltySettlement | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   useEffect(() => {
@@ -454,7 +468,7 @@ function SettlementDetailDialog({ settlementId, onClose }: { settlementId: strin
     setLoadingDetail(true);
     setDetail(null);
     api
-      .get(`/authors/me/royalty-settlements/${settlementId}`, { cache: "no-store" } as any)
+      .get(`/authors/me/royalty-settlements/${settlementId}`, { cache: "no-store" })
       .then(({ data }) => setDetail(data?.data?.settlement || data?.data || data))
       .catch((err) => {
         toast.error(err?.response?.data?.message || "Could not load settlement details.");
@@ -463,7 +477,7 @@ function SettlementDetailDialog({ settlementId, onClose }: { settlementId: strin
       .finally(() => setLoadingDetail(false));
   }, [settlementId, onClose]);
 
-  const lines: any[] = detail?.items || detail?.lines || detail?.sourceLines || detail?.royalties || [];
+  const lines: RoyaltyLine[] = detail?.items || detail?.lines || detail?.sourceLines || detail?.royalties || [];
   const status = detail ? getSettlementStatus(detail) : null;
   const payout = detail?.payment || detail?.payout || detail?.payoutDetails || {};
 
@@ -501,7 +515,7 @@ function SettlementDetailDialog({ settlementId, onClose }: { settlementId: strin
                 <p>Reference: <span className="font-mono">{payout.transactionReference || detail.transactionReference || "—"}</span></p>
                 <p>Method: {String(payout.paymentMethod || detail.paymentMethod || "—").replace(/_/g, " ")}</p>
                 {(payout.paidAt || detail.paidAt) && (
-                  <p>Paid on: {new Date(payout.paidAt || detail.paidAt).toLocaleDateString("en-IN")}</p>
+                  <p>Paid on: {new Date(payout.paidAt || detail.paidAt || "").toLocaleDateString("en-IN")}</p>
                 )}
               </div>
             )}

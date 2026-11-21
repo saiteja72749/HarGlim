@@ -1,3 +1,4 @@
+import { record } from "@/lib/api-error";
 /**
  * Royalty per copy = MRP − printing cost − platform charges − delivery charges.
  *
@@ -48,7 +49,8 @@ export const royaltyPercentFromCosts = (mrp: unknown, costs: RoyaltyCosts) => {
  * Per-copy royalty for display: the backend's royaltyPerCopy when it sends one, else MRP − stored
  * costs, else the stored percentage.
  */
-export const bookRoyaltyPerCopy = (book: any): number | null => {
+export const bookRoyaltyPerCopy = (input: unknown): number | null => {
+  const book = record(input);
   if (typeof book?.royaltyPerCopy === "number") return round2(book.royaltyPerCopy);
   const mrp = book?.mrp ?? book?.price;
   const costs = readCosts(book);

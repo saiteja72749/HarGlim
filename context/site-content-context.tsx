@@ -1,9 +1,13 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { describeApiError, record } from "@/lib/api-error";
+
+
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import api from '@/lib/api';
+import { useAuthStore } from '@/store/auth-store';
 import { notifyLiveChange, onLiveChange } from '@/lib/live-sync';
-import { defaultFaqsJson, pageSectionDefaults, type PageSectionKey } from '@/lib/page-content';
+import { PAGE_SECTION_KEYS, type PageSectionKey } from '@/lib/page-content';
 
 export interface SiteContent extends Record<PageSectionKey, string> {
   // Announcement Bar
@@ -51,212 +55,52 @@ export interface SiteContent extends Record<PageSectionKey, string> {
 
   // Admin Profile & Avatar
   adminProfileImage?: string;
+  seoTitle: string;
+  seoDescription: string;
+  seoKeywords: string;
+  seoImage: string;
 }
 
+// Empty shape only. Business content is supplied exclusively by GET /content.
 export const defaultSiteContent: SiteContent = {
-  adminProfileImage: "",
-  // Announcement Bar
   announcementActive: false,
   announcementText: "",
-
-  // Home Page
-  homeTitle: "You write, we print.\nYou dream, we publish",
-  homeSubtitle: "Explore inspiring books from talented authors across multiple genres, or publish your own masterpiece with Harglim Publishers. We make reading enjoyable and publishing effortless.",
-  homeHeroCtaText: "Browse Books Catalog",
-  homeFeaturedTitle: "Featured Releases",
-  homeBestsellerTitle: "Top Rated This Week",
-  homeCtaHeading: "Ready to Publish Your Masterpiece?",
-  homeCtaSubtitle: "Join hundreds of successful authors who brought their stories to life with Harglim Publishers.",
-  homeCtaButtonText: "Start Publishing Journey",
-
-  // Contact Info & Company
-  contactPhone: "+91 9392346914",
-  contactEmail: "harglimpublication@gmail.com",
-  contactSupportEmail: "harglim.support@gmail.com",
-  contactAddressLine1: "GSP Towers, Beside ESI Hospital Metro Station, Metro pillar no: 1008",
-  contactAddressLine2: "Opposite TIMS, 500038, SR Nagar, Hyderabad, Telangana, India.",
-  contactHours: "Mon - Sun: 9:00 AM - 10:00 PM",
-  socialFacebook: "https://facebook.com/harglimpublishers",
-  socialTwitter: "https://twitter.com/harglim",
-  socialInstagram: "https://instagram.com/harglimpublishers",
-  socialLinkedin: "https://linkedin.com/company/harglim",
-
-  // Publish Page
-  publishTitle: "Turn Your Manuscript Into a Published Book",
-  publishSubtitle: "From professional editing to cover design and global retail distribution — we handle everything so you can focus on writing.",
-  packagesJson: JSON.stringify([
-    {
-      id: "pkg-999",
-      name: "Starter Package",
-      tagline: "Essential e-book & digital publishing starter kit",
-      price: 999,
-      highlighted: false,
-      features: [
-        "ISBN & Barcode Allocation",
-        "Cover Design",
-        "Book formatting & Manuscript design",
-        "E-book & E-certificate",
-        "50% Royalty",
-        "Author copies at printing cost (Lifetime)",
-        "Book available on Amazon and Kindle",
-        "Page limit – 120",
-        "Book launch poster",
-        "Books will be taken to book fairs under HarGlim (if the author pays for copies)"
-      ]
-    },
-    {
-      id: "pkg-1999",
-      name: "Standard Package",
-      tagline: "Standard paperback publishing with 80% royalty share",
-      price: 1999,
-      highlighted: false,
-      features: [
-        "ISBN & Barcode Allocation",
-        "Cover Design",
-        "Book formatting & Manuscript design",
-        "1 Author copy (Paperback)",
-        "Certificate",
-        "80% Royalty",
-        "Author copies at printing cost (Lifetime)",
-        "Book available on Amazon and Kindle",
-        "Page limit – 120",
-        "Book launch poster",
-        "Books will be taken to book fairs under HarGlim (if the author pays for copies)"
-      ]
-    },
-    {
-      id: "pkg-2999",
-      name: "Silver Package",
-      tagline: "100% Royalty & global distribution across 12+ platforms",
-      price: 2999,
-      highlighted: false,
-      features: [
-        "ISBN & Barcode Allocation",
-        "Cover Design",
-        "Book formatting & Manuscript design",
-        "2 Author copies (Paperback)",
-        "Certificate",
-        "100% Royalty",
-        "Author copies at printing cost (Lifetime)",
-        "Book available on Amazon, Kindle, and 12+ International platforms",
-        "Page limit – 150",
-        "Book launch posters",
-        "Books will be taken to book fairs under HarGlim (if the author pays for copies)"
-      ]
-    },
-    {
-      id: "pkg-3499",
-      name: "Gold Package",
-      tagline: "Extended 300 page limit & full global distribution",
-      price: 3499,
-      highlighted: false,
-      features: [
-        "ISBN & Barcode Allocation",
-        "Cover Design",
-        "Book formatting & Manuscript design",
-        "2 Author copies (Paperback)",
-        "Certificate",
-        "100% Royalty",
-        "Author copies at printing cost (Lifetime)",
-        "Book available on Amazon, Kindle, and 12+ International platforms",
-        "Page limit – 300",
-        "Book launch posters",
-        "Books will be taken to book fairs under HarGlim (if the author pays for copies)"
-      ]
-    },
-    {
-      id: "pkg-4999",
-      name: "Platinum Bestseller Package",
-      tagline: "Full promotional kit with video trailer & author interview",
-      price: 4999,
-      highlighted: true,
-      badge: "Most Popular Choice",
-      features: [
-        "ISBN & Barcode Allocation",
-        "Cover Design",
-        "Book formatting & Manuscript design",
-        "4 Author copies (Paperback)",
-        "Certificate",
-        "100% Royalty",
-        "Author copies at printing cost (Lifetime)",
-        "Book available on Amazon, Kindle, and 12+ International platforms",
-        "Page limit – 250",
-        "Book launch posters",
-        "Books will be taken to book fairs under HarGlim (if the author pays for copies)",
-        "Video trailer",
-        "Author interview (Recorded video will be sent to the author and posted on our social media)"
-      ]
-    },
-    {
-      id: "pkg-9999",
-      name: "VIP Executive Mastermind",
-      tagline: "Ultimate publishing package with 1-on-1 dedicated guide & custom bookmarks",
-      price: 9999,
-      highlighted: false,
-      features: [
-        "ISBN & Barcode Allocation",
-        "Cover Design (2 options)",
-        "Professional Customised Book formatting & Manuscript design",
-        "6 Author copies (Paperback)",
-        "Certificate",
-        "100% Royalty",
-        "Author copies at printing cost (Lifetime)",
-        "Book available on Amazon, Kindle, and 12+ International platforms",
-        "Page limit – 300",
-        "Book launch posters",
-        "Books will be taken to book fairs under HarGlim (if the author pays for copies)",
-        "Author interview (Recorded video will be sent to the author and posted on our social media)",
-        "Bookmarks with book cover image & author's signature (30)",
-        "Video trailer",
-        "Dedicated project guide assigned (5 sessions, 1 hour each, complete guidance from scratch)"
-      ]
-    }
-  ], null, 2),
-  royaltySummary: "Your royalty on every copy is the MRP minus printing, platform and delivery charges, with every sale shown live in your dashboard.",
-  authorGuidelinesText: "We welcome manuscripts across Fiction, Non-Fiction, Poetry, Academic, and Business. Submissions must be original and in MS Word or PDF format.",
-
-  // About Us & FAQ Pages
-  aboutTitle: "About Harglim Publishers",
-  aboutSubtitle: "Empowering authors and delighting readers worldwide.",
-  aboutMission: "Our mission is to democratize publishing by giving every voice a platform and bringing high-quality literature to readers everywhere.",
-  aboutVision: "To become South Asia's premier publishing house recognized for literary excellence, author empowerment, and innovative digital distribution.",
-  faqsJson: defaultFaqsJson,
-
-  // Careers
-  careersEmail: "harglimpublication@gmail.com",
-
-  // Long-form page sections (Admin → Site Content → Page Sections)
-  ...pageSectionDefaults,
+  homeTitle: "",
+  homeSubtitle: "",
+  homeHeroCtaText: "",
+  homeFeaturedTitle: "",
+  homeBestsellerTitle: "",
+  homeCtaHeading: "",
+  homeCtaSubtitle: "",
+  homeCtaButtonText: "",
+  contactPhone: "",
+  contactEmail: "",
+  contactSupportEmail: "",
+  contactAddressLine1: "",
+  contactAddressLine2: "",
+  contactHours: "",
+  socialFacebook: "",
+  socialTwitter: "",
+  socialInstagram: "",
+  socialLinkedin: "",
+  publishTitle: "",
+  publishSubtitle: "",
+  packagesJson: "[]",
+  royaltySummary: "",
+  authorGuidelinesText: "",
+  aboutTitle: "",
+  aboutSubtitle: "",
+  aboutMission: "",
+  aboutVision: "",
+  faqsJson: "[]",
+  careersEmail: "",
+  adminProfileImage: "",
+  seoTitle: '',
+  seoDescription: '',
+  seoKeywords: '',
+  seoImage: '',
+  ...Object.fromEntries(PAGE_SECTION_KEYS.map((key) => [key, "[]"])) as Record<PageSectionKey, string>,
 };
-
-/**
- * Old built-in defaults. The editor saves every field, so these may be stored on the backend
- * without an admin ever choosing them; they are treated as unedited so corrected copy shows.
- */
-const LEGACY_DEFAULTS: Partial<Record<keyof SiteContent, string>> = {
-  homeFeaturedTitle: "Featured Masterpieces",
-  homeBestsellerTitle: "Popular & Bestselling Books",
-  publishTitle: "Publish Your Book With Us",
-  publishSubtitle: "Transform your manuscript into a professionally published book. We handle everything from editing to distribution, so you can focus on writing.",
-  aboutSubtitle: "Empowering authors and delighting readers worldwide since 2020.",
-  royaltySummary: "Earn up to 70% royalties on every book sold. Transparent monthly reporting and direct payouts.",
-  faqsJson: JSON.stringify([
-      {
-        question: "How do I submit my manuscript?",
-        answer: "You can submit your manuscript through our Publish With Us page or directly email our editorial team at harglimpublication@gmail.com."
-      },
-      {
-        question: "What royalties do authors receive?",
-        answer: "Authors earn between 50% to 70% royalties depending on the selected publishing package and sales channel."
-      },
-      {
-        question: "How long does the publishing process take?",
-        answer: "Typically 3 to 6 weeks from final manuscript submission to worldwide availability."
-      }
-    ], null, 2),
-};
-
-const STORAGE_KEY = 'harglim_site_content_cache';
 
 /** What a save stored: the content read back from the server and the keys it did not keep. */
 export type SaveResult = {
@@ -270,15 +114,19 @@ interface SiteContentContextType {
   content: SiteContent;
   updateContent: (newContent: Partial<SiteContent>) => Promise<SaveResult>;
   loading: boolean;
+  error: string | null;
+  refreshContent: () => Promise<void>;
 }
 
 const SiteContentContext = createContext<SiteContentContextType>({
   content: defaultSiteContent,
-  updateContent: async () => ({ stored: defaultSiteContent, notSaved: [], verified: false }),
-  loading: false,
+  updateContent: async () => { throw new Error('Site content provider is unavailable.'); },
+  loading: true,
+  error: null,
+  refreshContent: async () => {},
 });
 
-const nonEmpty = (value: any) => (typeof value === 'string' && value.trim() ? value : undefined);
+const nonEmpty = (value: unknown) => (typeof value === 'string' && value.trim() ? value : undefined);
 
 /**
  * Flat keys the backend's Content model stores at the top level (ContentUpdateRequest plus the
@@ -307,14 +155,13 @@ const BACKEND_FLAT_KEYS = new Set<string>([
 /** Admin-only or derived keys that are never stored in the public content bag. */
 const NOT_IN_BAG = new Set<string>(['adminProfileImage', 'contactAddressLine1', 'contactAddressLine2']);
 
-/** Site content keys present in `source`, minus legacy defaults and empty strings. */
-function pickContentKeys(source: any): Record<string, any> {
-  const picked: Record<string, any> = {};
-  if (!source || typeof source !== 'object') return picked;
-  for (const [key, value] of Object.entries(source)) {
-    if (typeof value === 'string' && value === LEGACY_DEFAULTS[key as keyof SiteContent]) continue;
-    if (key in defaultSiteContent && (typeof value === 'boolean' || nonEmpty(value) !== undefined)) {
-      picked[key] = value;
+/** Keep backend values verbatim, including intentionally empty fields. */
+function pickContentKeys(source: unknown): Partial<SiteContent> {
+  const picked: Partial<SiteContent> = {};
+  for (const [key, value] of Object.entries(record(source))) {
+    if (key === 'announcementActive' && typeof value === 'boolean') picked.announcementActive = value;
+    else if (Object.hasOwn(defaultSiteContent, key) && key !== 'announcementActive' && typeof value === 'string') {
+      picked[key as Exclude<keyof SiteContent, 'announcementActive'>] = value;
     }
   }
   return picked;
@@ -324,93 +171,157 @@ function pickContentKeys(source: any): Record<string, any> {
  * GET /content returns both the flat keys the admin editor saves (homeTitle, packagesJson, ...)
  * and the backend's own grouped sections (hero{}, about{}, contact{}, faq[], socialLinks{}).
  * Flat keys win, then the `siteSettings.siteContent` bag (keys the backend has no column for),
- * then the grouped sections, so content saved any of these ways reaches the site instead of
- * being shadowed by the built-in defaults.
+ * then the grouped sections. Documented SEO, FAQ and announcement groups are authoritative
+ * when present, including explicit clears; stale legacy copies must not mask saved values.
  */
-export function fromBackendContent(api: any): Partial<SiteContent> {
+export function fromBackendContent(input: unknown): Partial<SiteContent> {
+  const api = record(input);
+  const hero = record(api.hero), about = record(api.about), contact = record(api.contact);
+  const settings = record(api.siteSettings), social = record(api.socialLinks);
+  const seo = record(api.seo);
   const flat = pickContentKeys(api);
-  const bag = pickContentKeys(api?.siteSettings?.siteContent);
+  const bag = pickContentKeys(settings.siteContent);
 
   const grouped: Partial<SiteContent> = {};
-  const set = (key: keyof SiteContent, value: any) => {
+  const set = (key: Exclude<keyof SiteContent, 'announcementActive'>, value: unknown) => {
     const v = nonEmpty(value);
-    if (v !== undefined) (grouped as any)[key] = v;
+    if (v !== undefined) grouped[key] = v;
   };
-  set('homeTitle', api?.hero?.title);
-  set('homeSubtitle', api?.hero?.subtitle);
-  set('aboutTitle', api?.about?.title);
-  set('aboutSubtitle', api?.about?.subtitle);
-  set('aboutMission', api?.about?.mission || api?.about?.body);
-  set('aboutVision', api?.about?.vision);
-  set('contactEmail', api?.contact?.email);
-  set('contactPhone', api?.contact?.phone);
-  set('contactHours', api?.contact?.hours);
+  set('homeTitle', hero.title);
+  set('homeSubtitle', hero.subtitle);
+  set('aboutTitle', about.title);
+  set('aboutSubtitle', about.subtitle);
+  set('aboutMission', about.mission ?? about.body);
+  set('aboutVision', about.vision);
+  set('contactEmail', contact.email);
+  set('contactPhone', contact.phone);
+  set('contactHours', contact.hours);
   // The backend keeps one address string (contact.address / contactAddress).
-  set('contactAddressLine1', api?.contactAddress || api?.contact?.address);
+  set('contactAddressLine1', api?.contactAddress || contact.address);
   // A single backend address line must not get the built-in second line appended to it.
   if (grouped.contactAddressLine1) grouped.contactAddressLine2 = '';
-  set('contactSupportEmail', api?.siteSettings?.supportEmail);
-  set('socialFacebook', api?.socialLinks?.facebook);
-  set('socialTwitter', api?.socialLinks?.twitter);
-  set('socialInstagram', api?.socialLinks?.instagram);
-  set('socialLinkedin', api?.socialLinks?.linkedin);
-  if (Array.isArray(api?.faq) && api.faq.length > 0) grouped.faqsJson = JSON.stringify(api.faq);
+  set('contactSupportEmail', settings.supportEmail);
+  set('socialFacebook', social.facebook);
+  set('socialTwitter', social.twitter);
+  set('socialInstagram', social.instagram);
+  set('socialLinkedin', social.linkedin);
+  set('seoTitle', seo.title);
+  set('seoDescription', seo.description);
+  set('seoKeywords', Array.isArray(seo.keywords) ? seo.keywords.filter((value): value is string => typeof value === 'string').join(', ') : seo.keywords);
+  set('seoImage', seo.image);
+  if (Array.isArray(api?.faq)) grouped.faqsJson = JSON.stringify(api.faq);
   const activeAnnouncement = Array.isArray(api?.announcements)
-    ? api.announcements.find((a: any) => a && a.isActive !== false && nonEmpty(a.text ?? a.message ?? a.title))
+    ? api.announcements.map(record).find((a) => a && a.isActive !== false && nonEmpty(a.text ?? a.message ?? a.title))
     : null;
   if (activeAnnouncement) {
     grouped.announcementActive = true;
-    grouped.announcementText = activeAnnouncement.text ?? activeAnnouncement.message ?? activeAnnouncement.title;
+    grouped.announcementText = nonEmpty(activeAnnouncement.text ?? activeAnnouncement.message ?? activeAnnouncement.title);
   }
 
-  return { ...grouped, ...bag, ...flat };
+  const result = { ...grouped, ...bag, ...flat };
+  const hasCanonicalSeo = api.seo !== null && typeof api.seo === 'object' && !Array.isArray(api.seo);
+  for (const [key, value] of [
+    ['seoTitle', seo.title], ['seoDescription', seo.description], ['seoImage', seo.image],
+  ] as const) {
+    if (hasCanonicalSeo) result[key] = typeof value === 'string' ? value : '';
+  }
+  if (Array.isArray(seo.keywords)) result.seoKeywords = seo.keywords.filter((value): value is string => typeof value === 'string').join(', ');
+  else if (hasCanonicalSeo) result.seoKeywords = typeof seo.keywords === 'string' ? seo.keywords : '';
+  if (Array.isArray(api.faq) || api.faq === null) result.faqsJson = JSON.stringify(api.faq ?? []);
+  if (Array.isArray(api.announcements)) {
+    const announcement = record(api.announcements[editableAnnouncementIndex(api.announcements)]);
+    const text = announcement.text ?? announcement.message ?? announcement.title;
+    result.announcementText = typeof text === 'string' ? text : '';
+    result.announcementActive = announcement.isActive !== false && Boolean(result.announcementText.trim());
+  }
+  return result;
+}
+
+/** Edit the displayed announcement while preserving other records and their metadata. */
+function editableAnnouncementIndex(announcements: unknown[]): number {
+  const hasText = (value: unknown) => {
+    const announcement = record(value);
+    return Boolean(nonEmpty(announcement.text ?? announcement.message ?? announcement.title));
+  };
+  const active = announcements.findIndex((value) => record(value).isActive !== false && hasText(value));
+  if (active >= 0) return active;
+  const inactive = announcements.findIndex(hasText);
+  return inactive >= 0 ? inactive : announcements.length ? 0 : -1;
+}
+
+function updatedAnnouncements(content: SiteContent, current: Record<string, unknown>): unknown[] {
+  const announcements = Array.isArray(current.announcements) ? [...current.announcements] : [];
+  const previous = fromBackendContent(current);
+  const text = content.announcementText.trim();
+  if (text === (previous.announcementText ?? '').trim() && content.announcementActive === Boolean(previous.announcementActive)) return announcements;
+  if (content.announcementActive && !text) throw new Error('Enter an announcement message or turn off the announcement before saving.');
+  const index = editableAnnouncementIndex(announcements);
+  const edited = { ...record(announcements[index]), text, isActive: content.announcementActive };
+  if (index >= 0) announcements[index] = edited;
+  else if (text) announcements.push(edited);
+  return announcements;
 }
 
 /**
  * PUT /admin/content body: the flat keys, the extra keys in `siteSettings.siteContent`, and the
  * backend's grouped sections kept in sync, so every field survives the backend's schema.
  */
-export function toBackendPayload(content: SiteContent, current: any): Record<string, any> {
+export function toBackendPayload(content: SiteContent, input: unknown) {
+  const current = record(input);
   // The backend keeps one address string (contactAddress / contact.address).
   const contactAddress = [content.contactAddressLine1, content.contactAddressLine2]
     .map((line) => line?.trim())
     .filter(Boolean)
     .join(', ');
 
-  const bag: Record<string, any> = {};
+  const bag: Record<string, unknown> = { ...record(record(current.siteSettings).siteContent) };
+  for (const key of [...BACKEND_FLAT_KEYS, ...NOT_IN_BAG]) delete bag[key];
   for (const [key, value] of Object.entries(content)) {
     if (!BACKEND_FLAT_KEYS.has(key) && !NOT_IN_BAG.has(key)) bag[key] = value;
   }
 
-  const announcementText = content.announcementText?.trim() || '';
+  // Admin profile data belongs to /users/me, and split address fields are derived UI state.
+  const { adminProfileImage: _profile, contactAddressLine1: _line1, contactAddressLine2: _line2, ...publicContent } = content;
+  const faq: unknown = JSON.parse(content.faqsJson || '[]');
+  if (!Array.isArray(faq) || faq.some((item) => !item || typeof item !== 'object' || Array.isArray(item))) {
+    throw new Error('FAQs must be a JSON list of objects.');
+  }
   return {
-    ...content,
+    ...publicContent,
     contactAddress,
-    hero: { ...(current?.hero || {}), title: content.homeTitle, subtitle: content.homeSubtitle },
+    hero: { ...record(current.hero), title: content.homeTitle, subtitle: content.homeSubtitle },
     about: {
-      ...(current?.about || {}),
+      ...record(current.about),
       title: content.aboutTitle,
       subtitle: content.aboutSubtitle,
       mission: content.aboutMission,
       vision: content.aboutVision,
     },
     contact: {
-      ...(current?.contact || {}),
+      ...record(current.contact),
       email: content.contactEmail,
       phone: content.contactPhone,
       address: contactAddress,
       hours: content.contactHours,
     },
     socialLinks: {
-      ...(current?.socialLinks || {}),
+      ...record(current.socialLinks),
       facebook: content.socialFacebook,
       twitter: content.socialTwitter,
       instagram: content.socialInstagram,
       linkedin: content.socialLinkedin,
     },
-    announcements: announcementText ? [{ text: announcementText, isActive: Boolean(content.announcementActive) }] : [],
+    seo: {
+      ...record(current.seo),
+      title: content.seoTitle,
+      description: content.seoDescription,
+      keywords: content.seoKeywords.split(',').map((keyword) => keyword.trim()).filter(Boolean),
+      image: content.seoImage,
+    },
+    faq,
+    announcements: updatedAnnouncements(content, current),
     siteSettings: {
-      ...(current?.siteSettings || {}),
+      ...record(current.siteSettings),
       supportEmail: content.contactSupportEmail,
       siteContent: bag,
     },
@@ -420,12 +331,62 @@ export function toBackendPayload(content: SiteContent, current: any): Record<str
 /** Keys whose saved value did not come back from the backend (dropped or rejected). */
 export function unsavedKeys(sent: SiteContent, stored: SiteContent): (keyof SiteContent)[] {
   return (Object.keys(sent) as (keyof SiteContent)[]).filter((key) => {
+    if (key === 'contactAddressLine1' || key === 'contactAddressLine2') {
+      const address = (value: SiteContent) => [value.contactAddressLine1, value.contactAddressLine2].map((line) => line.trim()).filter(Boolean).join(', ');
+      return address(sent) !== address(stored);
+    }
+    if (key === 'seoKeywords') {
+      const keywords = (value: string) => value.split(',').map((word) => word.trim()).filter(Boolean).join(',');
+      return keywords(sent.seoKeywords) !== keywords(stored.seoKeywords);
+    }
+    if (key === 'announcementText') return sent.announcementText.trim() !== stored.announcementText.trim();
+    if (key === 'faqsJson') {
+      try { return !containsRequestedValues(JSON.parse(sent.faqsJson), JSON.parse(stored.faqsJson)); }
+      catch { return true; }
+    }
     if (NOT_IN_BAG.has(key)) return false;
     const value = sent[key];
-    // Empty or built-in values read back as the default, so there is nothing to compare.
-    if (typeof value === 'string' && (!value.trim() || value === defaultSiteContent[key])) return false;
     return value !== stored[key];
   });
+}
+
+/** Server-added IDs/metadata are allowed, while every requested value must be retained. */
+function containsRequestedValues(expected: unknown, stored: unknown): boolean {
+  if (Array.isArray(expected)) return Array.isArray(stored) && expected.length === stored.length && expected.every((value: unknown, index) => containsRequestedValues(value, stored[index]));
+  if (expected !== null && typeof expected === 'object') {
+    if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) return false;
+    const document = record(stored);
+    return Object.entries(record(expected)).every(([key, value]) => Object.hasOwn(document, key) && containsRequestedValues(value, document[key]));
+  }
+  return Object.is(expected, stored);
+}
+
+/** A legacy mirror must not make a dropped canonical field appear successfully saved. */
+export function canonicalContentNotSaved(content: SiteContent, stored: unknown): (keyof SiteContent)[] {
+  const document = record(stored), seo = record(document.seo);
+  const missing = new Set<keyof SiteContent>();
+  for (const [key, field] of [['seoTitle', 'title'], ['seoDescription', 'description'], ['seoImage', 'image']] as const) {
+    const value = seo[field];
+    if (content[key] !== (typeof value === 'string' ? value : '')) missing.add(key);
+  }
+  const keywords = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : typeof value === 'string' ? value.split(',').map((item) => item.trim()).filter(Boolean) : [];
+  if (!containsRequestedValues(keywords(content.seoKeywords), keywords(seo.keywords))) missing.add('seoKeywords');
+  const faq: unknown = JSON.parse(content.faqsJson || '[]');
+  if (!containsRequestedValues(faq, document.faq ?? [])) missing.add('faqsJson');
+  const bag = record(record(document.siteSettings).siteContent);
+  for (const [key, value] of Object.entries(content)) {
+    if (!BACKEND_FLAT_KEYS.has(key) && !NOT_IN_BAG.has(key) && !containsRequestedValues(value, bag[key])) missing.add(key as keyof SiteContent);
+  }
+  return [...missing];
+}
+
+function verifyPreservedContent(payload: ReturnType<typeof toBackendPayload>, input: unknown) {
+  const stored = record(input);
+  if (!containsRequestedValues(payload.announcements, stored.announcements ?? [])) throw new Error('The backend did not retain the complete announcement collection.');
+  const bag = record(record(stored.siteSettings).siteContent);
+  for (const [key, value] of Object.entries(payload.siteSettings.siteContent)) {
+    if (!Object.hasOwn(defaultSiteContent, key) && !containsRequestedValues(value, bag[key])) throw new Error('The backend did not preserve existing content metadata.');
+  }
 }
 
 /** Backend rule: every key ending in Json is a JSON list string of at most 100 KB. */
@@ -437,7 +398,8 @@ export function invalidJsonField(content: Partial<SiteContent>): { key: keyof Si
     if (!key.endsWith('Json') || typeof value !== 'string') continue;
     try {
       if (!Array.isArray(JSON.parse(value || '[]'))) return { key: key as keyof SiteContent, reason: 'must be a JSON list [ … ]' };
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       return { key: key as keyof SiteContent, reason: `is not valid JSON (${err?.message || 'syntax error'})` };
     }
     if (new Blob([value]).size > MAX_JSON_BYTES) return { key: key as keyof SiteContent, reason: 'is larger than 100 KB' };
@@ -445,79 +407,77 @@ export function invalidJsonField(content: Partial<SiteContent>): { key: keyof Si
   return null;
 }
 
-async function fetchBackendContent(): Promise<any | null> {
-  const res = await api.get('/content', { cache: 'no-store' } as any).catch(() => null);
+async function fetchBackendContent(): Promise<Record<string, unknown>> {
+  const res = await api.get('/content', { cache: 'no-store' });
   const apiData = res?.data?.data || res?.data;
-  return apiData && typeof apiData === 'object' ? apiData : null;
+  if (!apiData || typeof apiData !== 'object' || Array.isArray(apiData)) throw new Error('The backend returned invalid site content.');
+  return apiData;
 }
-
-// Runs before the browser paints on the client (plain effect on the server), so cached
-// backend content replaces the built-in defaults without a visible text swap on refresh.
-const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 export function SiteContentProvider({ children }: { children: React.ReactNode }) {
   const [content, setContent] = useState<SiteContent>(defaultSiteContent);
   const [loading, setLoading] = useState(true);
-
-  useIsomorphicLayoutEffect(() => {
-    try {
-      const cached = localStorage.getItem(STORAGE_KEY);
-      if (cached) setContent({ ...defaultSiteContent, ...fromBackendContent(JSON.parse(cached)) });
-    } catch {
-      // Unreadable cache: the backend response below replaces it.
-    }
-  }, []);
+  const [error, setError] = useState<string | null>(null);
 
   // The last GET /content document, so a save keeps backend-only fields (siteName, seo, ...).
-  const backendDocRef = useRef<any>(null);
+  const backendDocRef = useRef<unknown>(null);
 
-  /** Loads GET /content into state and the local cache; returns the merged content. */
-  const applyBackendContent = (apiData: any): SiteContent => {
+  /** Only confirmed backend documents enter shared content state. */
+  const applyBackendContent = useCallback((apiData: unknown): SiteContent => {
     backendDocRef.current = apiData;
     const merged = { ...defaultSiteContent, ...fromBackendContent(apiData) };
     setContent(merged);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(apiData));
-    } catch {
-      // Storage full/blocked: the live content is already in state.
-    }
     return merged;
-  };
+  }, []);
 
-  useEffect(() => {
-    const loadContent = async () => {
+  const refreshContent = useCallback(async () => {
+      setLoading(true);
       try {
         const apiData = await fetchBackendContent();
-        if (apiData) applyBackendContent(apiData);
+        applyBackendContent(apiData);
+        setError(null);
       } catch (err) {
-        console.error('Error fetching global site content:', err);
+        console.error('Error fetching global site content:', describeApiError(err));
+        setError('Website information could not be loaded. Please retry.');
       } finally {
         setLoading(false);
       }
-    };
+  }, [applyBackendContent]);
 
-    loadContent();
-    // An admin save in another tab, or coming back to this tab, reloads the live content.
-    return onLiveChange('site-content', loadContent);
-  }, []);
+  useEffect(() => {
+    refreshContent();
+    return onLiveChange('site-content', refreshContent);
+  }, [refreshContent]);
 
   /**
    * Saves to the backend, then reads GET /content back so the site (and the admin editor) shows
    * what was actually stored, and tells the site's other open tabs to reload.
    */
   const updateContent = async (newFields: Partial<SiteContent>): Promise<SaveResult> => {
+    if (!backendDocRef.current) throw new Error('Load the current backend content before saving changes.');
+    const { data: adminResponse } = await api.get('/admin/content', { cache: 'no-store' });
+    const adminDocument = adminResponse?.data ?? adminResponse;
+    if (!adminDocument || typeof adminDocument !== 'object' || Array.isArray(adminDocument)) throw new Error('The current administrator content could not be loaded.');
     const updated = { ...content, ...newFields };
-    await api.put('/admin/content', toBackendPayload(updated, backendDocRef.current));
+    const payload = toBackendPayload(updated, adminDocument);
+    await api.put('/admin/content', payload);
     notifyLiveChange('site-content');
 
-    const stored = await fetchBackendContent();
-    if (!stored) {
-      // Saved, but the read-back failed: show what was sent until the next load.
-      setContent(updated);
-      return { stored: updated, notSaved: [], verified: false };
+    try {
+      const [stored, adminReadback] = await Promise.all([
+        fetchBackendContent(), api.get('/admin/content', { cache: 'no-store' }),
+      ]);
+      const savedAdminDocument: unknown = adminReadback.data?.data ?? adminReadback.data;
+      verifyPreservedContent(payload, savedAdminDocument);
+      const merged = applyBackendContent(stored);
+      const token = useAuthStore.getState().token;
+      const refreshed = await fetch('/api/content/revalidate', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000) });
+      if (!refreshed.ok) throw new Error('Published metadata could not be refreshed.');
+      return { stored: merged, notSaved: [...new Set([...unsavedKeys(updated, merged), ...canonicalContentNotSaved(updated, stored), ...canonicalContentNotSaved(updated, savedAdminDocument)])], verified: true };
+    } catch {
+      setError('Changes were sent, but the saved website information could not be verified. Please retry.');
+      return { stored: content, notSaved: Object.keys(newFields) as (keyof SiteContent)[], verified: false };
     }
-    const merged = applyBackendContent(stored);
-    return { stored: merged, notSaved: unsavedKeys(updated, merged), verified: true };
   };
 
   return (
@@ -526,22 +486,28 @@ export function SiteContentProvider({ children }: { children: React.ReactNode })
         content,
         updateContent,
         loading,
+        error,
+        refreshContent,
       }}
     >
+      {error && (
+        <div role="alert" className="fixed bottom-4 left-4 right-4 z-[100] rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 shadow-lg">
+          {error}
+          <button type="button" className="ml-3 underline" onClick={refreshContent} disabled={loading}>Retry</button>
+        </div>
+      )}
       {children}
     </SiteContentContext.Provider>
   );
 }
 
 /**
- * The value an admin saved for `key`, or undefined while it is still the built-in default.
- * Pages with their own long-form copy use this so backend edits show without replacing
- * that copy with the shorter defaults above.
+ * The actual backend string, or undefined when the field is unpublished.
  */
 export function editedContent(content: SiteContent | undefined, key: keyof SiteContent): string | undefined {
   const value = content?.[key];
   if (typeof value !== 'string' || !value.trim()) return undefined;
-  return value === defaultSiteContent[key] ? undefined : value;
+  return value;
 }
 
 export function useSiteContent() {

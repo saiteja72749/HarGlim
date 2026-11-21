@@ -1,4 +1,6 @@
 "use client";
+import { describeApiError } from "@/lib/api-error";
+
 
 import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
@@ -52,7 +54,7 @@ export default function AdminInventoryPage() {
       }
       setLowStockBooks(items);
     } catch (err) {
-      console.warn("Low stock fetch notice:", err);
+      console.warn("Low stock fetch notice:", describeApiError(err));
     } finally {
       setLoadingLowStock(false);
     }
@@ -66,7 +68,7 @@ export default function AdminInventoryPage() {
       const items = res?.data?.data?.reservations || res?.data?.reservations || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];
       setReservations(Array.isArray(items) ? items : []);
     } catch (err) {
-      console.warn("Reservations fetch notice:", err);
+      console.warn("Reservations fetch notice:", describeApiError(err));
     } finally {
       setLoadingReservations(false);
     }
@@ -80,7 +82,7 @@ export default function AdminInventoryPage() {
       const items = res?.data?.data?.timeline || res?.data?.timeline || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];
       setLedgerTimeline(Array.isArray(items) ? items : []);
     } catch (err) {
-      console.warn("Ledger timeline fetch notice:", err);
+      console.warn("Ledger timeline fetch notice:", describeApiError(err));
     } finally {
       setLoadingTimeline(false);
     }
@@ -104,12 +106,10 @@ export default function AdminInventoryPage() {
             Monitor real-time book copies, checkout reservations, low-stock thresholds, and stock movement ledger.
           </p>
         </div>
-        <Link href="/admin/books" prefetch={false}>
-          <Button variant="outline" className="text-xs font-bold gap-1.5 border-[#0F3D3E]/30 text-[#0F3D3E]">
+        <Button variant="outline" className="text-xs font-bold gap-1.5 border-[#0F3D3E]/30 text-[#0F3D3E]" asChild><Link href="/admin/books" prefetch={false}>
             <BookOpen className="h-4 w-4" />
             <span>Manage Catalog Stock</span>
-          </Button>
-        </Link>
+          </Link></Button>
       </div>
 
       {/* Tabs */}
@@ -186,11 +186,9 @@ export default function AdminInventoryPage() {
                             )}
                           </TableCell>
                           <TableCell className="text-right">
-                            <Link href={`/admin/books`} prefetch={false}>
-                              <Button size="sm" variant="outline" className="h-8 text-xs font-bold text-[#0F3D3E]">
+                            <Button size="sm" variant="outline" className="h-8 text-xs font-bold text-[#0F3D3E]" asChild><Link href={`/admin/books`} prefetch={false}>
                                 Restock Copies
-                              </Button>
-                            </Link>
+                              </Link></Button>
                           </TableCell>
                         </TableRow>
                       );

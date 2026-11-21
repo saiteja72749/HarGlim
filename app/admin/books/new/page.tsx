@@ -1,7 +1,8 @@
 "use client";
+
 import { describeApiError } from "@/lib/api-error";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import api from "@/lib/api";
 import { ArrowLeft, Save, Upload, User, Plus, Search, Check, Loader2, X, RefreshCw } from "lucide-react";
@@ -165,7 +166,7 @@ export default function AddBookPage() {
   });
 
   // Fetch all registered & public authors immediately on mount
-  const loadAllAuthors = async () => {
+  const loadAllAuthors = useCallback(async () => {
     setFetchingAuthors(true);
     try {
       // Every author is a user with role "author": GET /admin/users (limit max 100).
@@ -209,15 +210,15 @@ export default function AddBookPage() {
         }
       }
     } catch (err) {
-      console.warn("Failed to load authors:", err);
+      console.warn("Failed to load authors:", describeApiError(err));
     } finally {
       setFetchingAuthors(false);
     }
-  };
+  }, [initialAuthor, selectedAuthorId, setAuthorsList, setSelectedAuthorId, setSelectedAuthorName]);
 
   useEffect(() => {
     loadAllAuthors();
-  }, []);
+  }, [loadAllAuthors]);
 
   // Background search to pull any authors matching query not in initial page
   useEffect(() => {
@@ -253,9 +254,10 @@ export default function AddBookPage() {
             return [...prev, ...newAuthors].sort((a, b) => a.name.localeCompare(b.name));
           });
         }
-      } catch (err: any) {
+      } catch (caughtError) {
+        const err = describeApiError(caughtError);
         if (err.name !== "CanceledError" && err.name !== "AbortError") {
-          console.warn("Failed to search authors:", err);
+          console.warn("Failed to search authors:", describeApiError(err));
         }
       }
     }, 400);
@@ -276,15 +278,14 @@ export default function AddBookPage() {
 
     setIsCreatingQuickAuthor(true);
     try {
-      const cleanSlug = quickAuthorName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 15) || "writer";
       const normalizedEmail = quickAuthorEmail.trim() ? normalizeEmailForStorage(quickAuthorEmail) : "";
-      if (normalizedEmail && !isValidEmailAddress(normalizedEmail)) {
+      if (!normalizedEmail || !isValidEmailAddress(normalizedEmail)) {
         toast.error("Please enter a valid author email address.");
         setIsCreatingQuickAuthor(false);
         return;
       }
 
-      const emailToUse = normalizedEmail || `author.${cleanSlug}.${Date.now().toString().slice(-4)}@harglim.internal`;
+      const emailToUse = normalizedEmail;
 
       const adminUserRes = await createAuthorUser({
         name: quickAuthorName.trim(),
@@ -319,8 +320,9 @@ export default function AddBookPage() {
       setQuickAuthorEmail("");
 
       toast.success(`Author "${quickAuthorName.trim()}" created and selected! ✍️`);
-    } catch (err: any) {
-      console.error("Failed to create author:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to create author:", describeApiError(err));
       toast.error(err.response?.data?.message || err.message || "Failed to create author.");
     } finally {
       setIsCreatingQuickAuthor(false);
@@ -414,10 +416,10 @@ export default function AddBookPage() {
 
         // Check if an existing author matches this exact name or email
         const normalizedAuthorEmail =
-          authorType === "new" && newAuthorEmail.trim()
+          newAuthorEmail.trim()
             ? normalizeEmailForStorage(newAuthorEmail)
             : "";
-        if (authorType === "new" && !normalizedAuthorEmail) {
+        if (!normalizedAuthorEmail) {
           toast.error("Please enter the author's email address.");
           setLoading(false);
           return;
@@ -441,11 +443,7 @@ export default function AddBookPage() {
           // Ensure role is author
           await api.patch(`/admin/users/${finalAuthorId}`, { role: "author" });
         } else {
-          // Generate a valid email & temporary credentials for the new author
-          const cleanSlug = targetName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 15) || "writer";
-          const emailToUse = normalizedAuthorEmail
-            ? normalizedAuthorEmail
-            : `author.${cleanSlug}.${Date.now().toString().slice(-4)}@harglim.internal`;
+          const emailToUse = normalizedAuthorEmail;
 
           toast.loading(`Creating author account for "${targetName}"...`, { id: "create-author" });
 
@@ -463,7 +461,8 @@ export default function AddBookPage() {
                 adminUserRes?.data?.data ||
                 adminUserRes?.data;
               newUserId = uData?._id || uData?.id;
-            } catch (adminErr: any) {
+            } catch (caughtError) {
+              const adminErr = describeApiError(caughtError);
               if (adminErr?.response?.status === 409) {
                 throw adminErr;
               }
@@ -476,8 +475,9 @@ export default function AddBookPage() {
 
             finalAuthorId = newUserId;
             toast.success(`Author account created for "${targetName}"!`, { id: "create-author" });
-          } catch (regErr: any) {
-            console.warn("Author registration check/fallback:", regErr);
+          } catch (caughtError) {
+            const regErr = describeApiError(caughtError);
+            console.warn("Author registration check/fallback:", describeApiError(regErr));
             // If already registered by email, look up existing user
             const lookup = await api.get("/admin/users", {
               params: { role: "author", search: emailToUse, limit: 20 },
@@ -589,8 +589,9 @@ export default function AddBookPage() {
       } else {
         throw new Error(res.data?.message || "Backend catalog creation failed.");
       }
-    } catch (err: any) {
-      console.error("Failed to create book:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to create book:", describeApiError(err));
       const errMsg = err?.response?.data?.message || err?.message || "An error occurred while publishing the book to the backend catalog.";
       toast.error(errMsg);
     } finally {
@@ -920,7 +921,7 @@ export default function AddBookPage() {
             {authorType === "external" && (
               <div className="space-y-3 pt-2 border-t border-[#E2E6DF]">
                 <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-xl text-[11px] text-blue-800">
-                  💡 An author profile and user account will be automatically provisioned for this guest/external author to ensure proper catalog attribution and author detail population.
+                  Provide the external author&apos;s real email address to create their account and send an invitation.
                 </div>
 
                 <div className="space-y-1.5">
@@ -935,6 +936,8 @@ export default function AddBookPage() {
                     className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs font-bold"
                     required
                   />
+                  <Label htmlFor="externalAuthorEmail">Author Email *</Label>
+                  <Input id="externalAuthorEmail" type="email" value={newAuthorEmail} onChange={(e) => setNewAuthorEmail(e.target.value)} required />
                 </div>
               </div>
             )}
@@ -1265,18 +1268,18 @@ export default function AddBookPage() {
 
             <div className="space-y-2">
               <Label htmlFor="quickAuthorEmail" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                Email (Optional)
+                Email *
               </Label>
               <Input
                 id="quickAuthorEmail"
                 type="email"
-                placeholder="author@example.com, or leave blank"
+                placeholder="author@example.com"
                 value={quickAuthorEmail}
                 onChange={(e) => setQuickAuthorEmail(e.target.value)}
                 className="border-[#E2E6DF] rounded-xl text-xs"
               />
               <p className="text-[11px] text-[#5C6E6E]">
-                If left blank, an internal placeholder email will be generated for the account.
+                Use the author&apos;s real email address so they can receive their account invitation.
               </p>
             </div>
 

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { PAGE_SECTION_KEYS, defaultFaqsJson, flattenFaqs, pageSectionDefaults, readSection } from "./page-content";
 
@@ -6,15 +7,16 @@ describe("page content", () => {
     for (const key of PAGE_SECTION_KEYS) expect(Array.isArray(JSON.parse(pageSectionDefaults[key]))).toBe(true);
   });
 
-  it("uses the saved list, falling back to the default when it is invalid", () => {
+  it("uses only the saved backend list and leaves invalid or missing sections empty", () => {
     expect(readSection({ aboutValuesJson: '[{"title":"A"}]' }, "aboutValuesJson")).toEqual([{ title: "A" }]);
-    expect(readSection({ aboutValuesJson: "{bad" }, "aboutValuesJson")).toEqual(JSON.parse(pageSectionDefaults.aboutValuesJson));
+    expect(readSection({ aboutValuesJson: "{bad" }, "aboutValuesJson")).toEqual([]);
+    expect(readSection(undefined, "aboutTeamJson")).toEqual([]);
     expect(readSection({ careersBenefitsJson: "[]" }, "careersBenefitsJson")).toEqual([]);
   });
 
-  it("flattens categorised FAQs and keeps no old royalty percentage claims", () => {
+  it("does not include seeded FAQ content", () => {
     const faqs = flattenFaqs(JSON.parse(defaultFaqsJson));
-    expect(faqs.length).toBeGreaterThan(10);
+    expect(faqs).toEqual([]);
     expect(flattenFaqs([{ question: "Q", answer: "A" }])).toEqual([{ question: "Q", answer: "A" }]);
     expect(defaultFaqsJson).not.toMatch(/70%/);
   });

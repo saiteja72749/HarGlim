@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useEffect, useState, useRef } from "react";
 import { useAuthStore } from "@/store/auth-store";
 import api, { bootstrapUserContext } from "@/lib/api";
@@ -36,7 +38,7 @@ export function GoogleLoginButton({
   const login = useAuthStore((state) => state.login);
   const setAuthStatus = useAuthStore((state) => state.setAuthStatus);
 
-  // Read environment Google Client ID with a fallback for dev/demo mode
+  // OAuth must use this deployment's configured client ID.
   const rawClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
   const cleanClientId = rawClientId
     .replace(/^https?:\/\//, "")
@@ -45,11 +47,11 @@ export function GoogleLoginButton({
   const clientId =
     cleanClientId && !cleanClientId.includes("CHANGE_ME")
       ? cleanClientId
-      : "13886691041-flfn7g4qteies5jul4efud04v826oc3q.apps.googleusercontent.com";
+      : "";
 
   // 1. Dynamically load Google Identity Services SDK script
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !clientId) return;
 
     if (window.google?.accounts?.id) {
       setIsSdkLoaded(true);
@@ -72,7 +74,7 @@ export function GoogleLoginButton({
       console.warn("Google Identity Services script failed to load from CDN.");
     };
     document.body.appendChild(script);
-  }, []);
+  }, [clientId]);
 
   // 2. Callback triggered when user selects a Google Account
   const handleGoogleCallback = async (response: { credential?: string }) => {
@@ -106,8 +108,8 @@ export function GoogleLoginButton({
           email: user.email,
           role: user.role,
           profileImage: user.profilePicture || user.profileImage,
-          emailVerified: true,
-          isActive: true,
+          emailVerified: user.emailVerified,
+          isActive: user.isActive,
         },
         token,
         refreshToken,
@@ -128,7 +130,8 @@ export function GoogleLoginButton({
       if (onSuccess) {
         onSuccess();
       }
-    } catch (error: any) {
+    } catch (caughtError) {
+      const error = describeApiError(caughtError);
       setAuthStatus("error");
       const status = error.response?.status;
       const errorCode = error.response?.data?.error;
@@ -173,7 +176,7 @@ export function GoogleLoginButton({
 
   // 3. Initialize GSI client once script is loaded
   useEffect(() => {
-    if (!isSdkLoaded || !window.google?.accounts?.id) return;
+    if (!clientId || !isSdkLoaded || !window.google?.accounts?.id) return;
 
     try {
       window.google.accounts.id.initialize({
@@ -194,7 +197,7 @@ export function GoogleLoginButton({
         });
       }
     } catch (err) {
-      console.warn("GSI initialization info:", err);
+      console.warn("GSI initialization info:", describeApiError(err));
     }
   }, [isSdkLoaded, clientId]);
 
@@ -233,7 +236,7 @@ export function GoogleLoginButton({
       <button
         type="button"
         onClick={triggerGoogleSignIn}
-        disabled={disabled || isLoading}
+        disabled={disabled || isLoading || !clientId}
         className={`w-full relative flex items-center justify-center gap-3 px-4 py-3 rounded-xl font-medium text-sm transition-all duration-200 border bg-card/80 hover:bg-card text-foreground border-border/80 hover:border-primary/40 shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 focus:outline-none focus:ring-2 focus:ring-primary/20 ${
           disabled || isLoading ? "opacity-70 cursor-not-allowed" : "cursor-pointer"
         }`}

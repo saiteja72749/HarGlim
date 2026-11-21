@@ -4,6 +4,8 @@ const withBundleAnalyzer = bundleAnalyzer({
   enabled: process.env.ANALYZE === 'true',
 })
 
+const apiOrigin = new URL(process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api').origin
+
 /** @type {import('next').NextConfig} */
 
 const csp = [
@@ -12,7 +14,7 @@ const csp = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
-  "connect-src 'self' https://harglimpublish-backend.onrender.com https://accounts.google.com https://vitals.vercel-insights.com",
+  `connect-src 'self' ${apiOrigin} https://accounts.google.com https://vitals.vercel-insights.com`,
   "frame-src https://www.google.com https://accounts.google.com",
   "frame-ancestors 'none'",
   "object-src 'none'",
@@ -21,6 +23,7 @@ const csp = [
 ].join('; ')
 
 const nextConfig = {
+  poweredByHeader: false,
   typescript: {
     ignoreBuildErrors: false,
   },
@@ -31,10 +34,7 @@ const nextConfig = {
       { protocol: 'https', hostname: 'lh3.googleusercontent.com' },
     ],
   },
-  devIndicators: {
-    buildActivity: false,
-    appIsrStatus: false,
-  },
+  devIndicators: false,
   async redirects() {
     return [
       // Same page as /reset-password: invitation emails may say "set password".
@@ -56,7 +56,7 @@ const nextConfig = {
           { key: 'Content-Security-Policy', value: csp },
           { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
-          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Referrer-Policy', value: 'no-referrer' },
           { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
         ],

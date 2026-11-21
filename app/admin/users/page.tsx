@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { describeApiError } from "@/lib/api-error";
+
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import api from "@/lib/api";
 import { announceInvite, resendAuthorInvite } from "@/lib/admin-authors";
@@ -84,7 +86,7 @@ export default function AdminUsersPage() {
   const [roleFilter, setRoleFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     setLoading(true);
     setError(false);
     try {
@@ -99,16 +101,16 @@ export default function AdminUsersPage() {
       const items = data?.data?.users || (Array.isArray(data?.data) ? data.data : []) || (Array.isArray(data) ? data : []);
       setUsers(Array.isArray(items) ? items : []);
     } catch (err) {
-      console.error("Failed to fetch admin users:", err);
+      console.error("Failed to fetch admin users:", describeApiError(err));
       setError(true);
     } finally {
       setLoading(false);
     }
-  };
+  }, [roleFilter, searchQuery, statusFilter]);
 
   useEffect(() => {
     fetchUsers();
-  }, [searchQuery, roleFilter, statusFilter]);
+  }, [fetchUsers]);
 
   const filteredUsers = users.filter((user: any) => {
     const name = user.name || user.fullName || "";
@@ -184,8 +186,9 @@ export default function AdminUsersPage() {
         isActive: true,
       });
       await fetchUsers();
-    } catch (err: any) {
-      console.error("Failed to create user:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to create user:", describeApiError(err));
       if (err.response?.status === 409) {
         toast.error("A user with this email address already exists (409 Conflict).");
       } else {
@@ -228,8 +231,9 @@ export default function AdminUsersPage() {
       toast.success(`Password reset successfully for ${resetPasswordUser.name}! 🔑`);
       setResetPasswordUser(null);
       setNewPasswordInput("");
-    } catch (err: any) {
-      console.error("Password reset error:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Password reset error:", describeApiError(err));
       toast.error(err.response?.data?.message || "Failed to reset password.");
     } finally {
       setIsSubmittingReset(false);
@@ -255,8 +259,9 @@ export default function AdminUsersPage() {
 
       toast.success(`User "${name}" deactivated (soft deleted) successfully.`);
       await fetchUsers();
-    } catch (err: any) {
-      console.error("Failed to delete user:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to delete user:", describeApiError(err));
       toast.error(err.response?.data?.message || "Failed to deactivate user.");
     } finally {
       setDeletingId(null);
@@ -290,8 +295,9 @@ export default function AdminUsersPage() {
       toast.success(`User details for "${editForm.name}" updated successfully!`);
       setEditingUser(null);
       await fetchUsers();
-    } catch (err: any) {
-      console.error("Failed to update user details:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to update user details:", describeApiError(err));
       toast.error(err.response?.data?.message || "Failed to update user details in backend.");
     } finally {
       setIsSubmittingEdit(false);
@@ -314,7 +320,7 @@ export default function AdminUsersPage() {
       toast.success(`User status updated to ${newStatus}`);
       await fetchUsers();
     } catch (err) {
-      console.error("Failed to update user status:", err);
+      console.error("Failed to update user status:", describeApiError(err));
       toast.error("Failed to update user status");
     }
   };
@@ -503,7 +509,7 @@ export default function AdminUsersPage() {
                         ₹{(user.spent || 0).toLocaleString()}
                       </TableCell>
                       <TableCell>
-                        {new Date(user.createdAt || user.joinDate || Date.now()).toLocaleDateString()}
+                        {(user.createdAt || user.joinDate) ? new Date(user.createdAt || user.joinDate).toLocaleDateString() : "Unavailable"}
                       </TableCell>
                       <TableCell>
                         <Badge className={getStatusColor(status)}>

@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { describeApiError } from "@/lib/api-error";
+
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -21,7 +23,6 @@ import {
   Plus,
   Edit3,
   Trash2,
-  ThumbsUp,
   RefreshCw,
   Sparkles,
   CheckCircle2,
@@ -53,27 +54,29 @@ export default function BookDetailPage() {
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [reviewsError, setReviewsError] = useState(false);
+  const [relatedError, setRelatedError] = useState(false);
   const [quantity, setQuantity] = useState(1);
   const [copiedIsbn, setCopiedIsbn] = useState(false);
 
-  const handleCopyIsbn = (text: string) => {
+  const handleCopyIsbn = async (text: string) => {
     if (!text || text === "N/A") return;
-    navigator.clipboard.writeText(text);
+    try {
+    await navigator.clipboard.writeText(text);
     setCopiedIsbn(true);
-    toast.success("ISBN copied to clipboard! 📋");
+    toast.success("ISBN copied to clipboard!");
     setTimeout(() => setCopiedIsbn(false), 2000);
+    } catch {
+      toast.error("Could not copy the ISBN. Please select and copy it manually.");
+    }
   };
   const [selectedImage, setSelectedImage] = useState(0);
   // format is read directly from book.format
   const [isSynopsisExpanded, setIsSynopsisExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<"synopsis" | "details" | "reviews">("synopsis");
 
-  // Helpful count state per review
-  const [helpfulMap, setHelpfulMap] = useState<Record<string, number>>({});
-  const [votedHelpful, setVotedHelpful] = useState<Record<string, boolean>>({});
-
   // Review Form state
-  const [newRating, setNewRating] = useState<number>(5);
+  const [newRating, setNewRating] = useState<number>(0);
   const [newComment, setNewComment] = useState<string>("");
   const [submittingReview, setSubmittingReview] = useState<boolean>(false);
   const [editingReviewId, setEditingReviewId] = useState<string | null>(null);
@@ -87,16 +90,21 @@ export default function BookDetailPage() {
     try {
       const res = await api.get(`/books/${params.slug}/reviews?page=1&limit=20`);
       const reviewsData = res.data.data || res.data;
-      if (reviewsData) {
-        setReviews(Array.isArray(reviewsData) ? reviewsData : []);
-      }
+      if (!Array.isArray(reviewsData)) throw new Error("Invalid review list response");
+      setReviews(reviewsData);
+      setReviewsError(false);
     } catch (e) {
-      console.error("Failed to fetch reviews:", e);
+      setReviewsError(true);
+      console.error("Failed to fetch reviews:", describeApiError(e));
     }
   };
 
   const handleReviewSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (!user || !book?._id || !Number.isInteger(newRating) || newRating < 1 || newRating > 5) {
+      toast.error("Sign in and select a rating from 1 to 5 before submitting.");
+      return;
+    }
     if (!newComment.trim()) {
       toast.error("Please enter a review comment.");
       return;
@@ -111,17 +119,19 @@ export default function BookDetailPage() {
         toast.success("Review updated successfully!");
       } else {
         await api.post(`/books/${params.slug}/reviews`, {
+          book: book._id,
           rating: newRating,
           comment: newComment,
         });
-        toast.success("Review posted successfully!");
+        toast.success("Review submitted. Publication depends on moderation.");
       }
       setNewComment("");
-      setNewRating(5);
+      setNewRating(0);
       setEditingReviewId(null);
       setIsWriteReviewOpen(false);
       await fetchReviews();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to submit review");
     } finally {
       setSubmittingReview(false);
@@ -130,7 +140,7 @@ export default function BookDetailPage() {
 
   const handleEditClick = (review: any) => {
     setEditingReviewId(review._id || review.id);
-    setNewRating(review.rating || 5);
+    setNewRating(Number(review.rating) || 0);
     setNewComment(review.comment || "");
     setIsWriteReviewOpen(true);
     setActiveTab("reviews");
@@ -143,28 +153,23 @@ export default function BookDetailPage() {
       await api.delete(`/books/${params.slug}/reviews/${reviewId}`);
       toast.success("Review deleted!");
       await fetchReviews();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to delete review");
     }
   };
 
-  const handleToggleHelpful = (reviewId: string) => {
-    if (votedHelpful[reviewId]) return;
-    setVotedHelpful((prev) => ({ ...prev, [reviewId]: true }));
-    setHelpfulMap((prev) => ({ ...prev, [reviewId]: (prev[reviewId] || 0) + 1 }));
-    toast.success("Marked review as helpful!");
-  };
-
-  const fetchBookData = async () => {
+  const fetchBookData = useCallback(async () => {
     setLoading(true);
     setError(false);
     try {
-      const [bookRes, relatedRes, reviewsRes] = await Promise.all([
+      const [bookResult, relatedResult, reviewsResult] = await Promise.allSettled([
         api.get(`/books/${params.slug}`, { cache: "no-store" }),
-        api.get(`/books/${params.slug}/related?limit=4`).catch(() => ({ data: { data: [] } })),
-        api.get(`/books/${params.slug}/reviews?page=1&limit=20`).catch(() => ({ data: { data: [] } })),
+        api.get(`/books/${params.slug}/related?limit=4`),
+        api.get(`/books/${params.slug}/reviews?page=1&limit=20`),
       ]);
-
+      if (bookResult.status === "rejected") throw bookResult.reason;
+      const bookRes = bookResult.value;
       const bookData = bookRes.data.data || bookRes.data;
       if (bookData) {
         setBook(bookData as Book);
@@ -173,28 +178,26 @@ export default function BookDetailPage() {
         setBook(null);
       }
 
-      const relatedData = relatedRes.data.data || relatedRes.data;
-      if (relatedData) {
-        setRelatedBooks(Array.isArray(relatedData) ? relatedData : []);
-      }
-
-      const reviewsData = reviewsRes.data.data || reviewsRes.data;
-      if (reviewsData) {
-        setReviews(Array.isArray(reviewsData) ? reviewsData : []);
-      }
-    } catch (err: any) {
+      const relatedData = relatedResult.status === "fulfilled" ? relatedResult.value.data.data ?? relatedResult.value.data : undefined;
+      setRelatedError(!Array.isArray(relatedData));
+      setRelatedBooks(Array.isArray(relatedData) ? relatedData : []);
+      const reviewsData = reviewsResult.status === "fulfilled" ? reviewsResult.value.data.data ?? reviewsResult.value.data : undefined;
+      setReviewsError(!Array.isArray(reviewsData));
+      setReviews(Array.isArray(reviewsData) ? reviewsData : []);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       console.error("Failed to fetch book data:", err?.message || err);
       setError(true);
       setBook(null);
     } finally {
       setLoading(false);
     }
-  };
+  }, [params.slug]);
 
   useEffect(() => {
     void fetchBookData();
     return onLiveChange("categories", () => void fetchBookData());
-  }, [params.slug]);
+  }, [fetchBookData]);
 
   useEffect(() => {
     if (!user?._id && !user?.id) {
@@ -226,7 +229,7 @@ export default function BookDetailPage() {
           }
         }
       } catch (err) {
-        console.error("Failed to check user order for book:", err);
+        console.error("Failed to check user order for book:", describeApiError(err));
       }
     }
 
@@ -284,12 +287,11 @@ export default function BookDetailPage() {
   const category = (book.category && typeof book.category === "object") ? book.category : null;
   const price = book.price || 0;
 
-  // 100% dynamic rating calculation derived from backend reviews with fallback to book document
-  const reviewCount = reviews.length > 0 ? reviews.length : (book.totalReviews || book.reviewCount || 0);
-  const computedRating = reviews.length > 0
-    ? reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / reviews.length
-    : Number(book.rating || book.ratings || 0);
-  const ratingAvg = computedRating.toFixed(1);
+  // The first review page cannot replace the backend's aggregate over all reviews.
+  const reviewCount = book.totalReviews ?? book.reviewCount;
+  const aggregateRating = book.rating ?? book.ratings;
+  const ratingAvg = typeof aggregateRating === "number" && aggregateRating >= 0 && aggregateRating <= 5
+    ? aggregateRating.toFixed(1) : "Unavailable";
 
   // Dynamic review star distribution breakdown based on actual reviews
   const starCounts = [5, 4, 3, 2, 1].map((star) => {
@@ -385,12 +387,10 @@ export default function BookDetailPage() {
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-              <Link href="/dashboard/orders">
-                <Button size="sm" className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white gap-1.5 text-xs font-bold shadow-xs">
+              <Button size="sm" className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white gap-1.5 text-xs font-bold shadow-xs" asChild><Link href="/dashboard/orders">
                   <Truck className="h-4 w-4" />
                   <span>View Order & Tracking</span>
-                </Button>
-              </Link>
+                </Link></Button>
             </div>
           </div>
         </div>
@@ -673,7 +673,7 @@ export default function BookDetailPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Truck className="h-4 w-4 text-[#0F3D3E] shrink-0" />
-                  <span><strong>Fast Dispatch</strong> (Free delivery on orders ₹499+)</span>
+                  <span><strong>Delivery details</strong> are confirmed with your order</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <RefreshCw className="h-4 w-4 text-[#D4AF37] shrink-0" />
@@ -811,12 +811,13 @@ export default function BookDetailPage() {
                       ))}
                     </div>
                     <p className="text-xs text-[#5C6E6E] font-sans">
-                      Based on {reviewCount} verified reader review{reviewCount === 1 ? "" : "s"}
+                      {reviewCount == null ? "Review total unavailable" : `Based on ${reviewCount} customer reviews`}
                     </p>
                   </div>
 
                   {/* Star Distribution Bars */}
                   <div className="md:col-span-5 space-y-2">
+                    <p className="text-xs text-[#5C6E6E]">Distribution of reviews shown (up to 20)</p>
                     {starCounts.map(({ star, pct }) => (
                       <div key={star} className="flex items-center gap-3 text-xs">
                         <span className="w-8 font-bold text-[#0F3D3E]">{star} ★</span>
@@ -881,6 +882,7 @@ export default function BookDetailPage() {
                         </div>
                       </div>
                       <textarea
+                        aria-label="Your review"
                         value={newComment}
                         onChange={(e) => setNewComment(e.target.value)}
                         placeholder="Share your detailed thoughts about the writing, story, and binding quality..."
@@ -904,7 +906,7 @@ export default function BookDetailPage() {
                           size="sm"
                           className="bg-[#0F3D3E] text-white hover:bg-[#174C4D]"
                         >
-                          {submittingReview ? "Submitting..." : editingReviewId ? "Update Review" : "Publish Review"}
+                          {submittingReview ? "Submitting..." : editingReviewId ? "Update Review" : "Submit Review"}
                         </Button>
                       </div>
                     </Card>
@@ -915,11 +917,12 @@ export default function BookDetailPage() {
               {/* Reviews List Toolbar */}
               <div className="flex items-center justify-between border-b border-[#E2E6DF] pb-3">
                 <h3 className="font-serif font-bold text-base text-[#0F3D3E]">
-                  Customer Reviews ({reviews.length})
+                  Reviews shown ({reviews.length}, up to 20)
                 </h3>
                 <div className="flex items-center gap-2 text-xs">
                   <span className="text-[#5C6E6E]">Sort by:</span>
                   <select
+                    aria-label="Sort reviews shown"
                     value={sortReviewsBy}
                     onChange={(e) => setSortReviewsBy(e.target.value as any)}
                     className="bg-white border border-[#E2E6DF] rounded-lg px-2.5 py-1 text-xs font-semibold text-[#0F3D3E]"
@@ -931,20 +934,19 @@ export default function BookDetailPage() {
               </div>
 
               {/* Reviews Cards List */}
-              {sortedReviews.length === 0 ? (
+              {reviewsError ? <ErrorState title="Reviews could not load" message="Please retry to retrieve the published reviews." onRetry={fetchReviews} /> : sortedReviews.length === 0 ? (
                 <div className="text-center py-10 space-y-3 bg-white border border-dashed border-[#E2E6DF] rounded-2xl">
                   <Star className="h-8 w-8 text-[#5C6E6E]/30 mx-auto" />
-                  <p className="text-sm font-medium text-[#0F3D3E]">No customer reviews written yet</p>
-                  <p className="text-xs text-[#5C6E6E]">Be the first reader to share feedback for this book.</p>
+                  <p className="text-sm font-medium text-[#0F3D3E]">No public reviews available</p>
+                  <p className="text-xs text-[#5C6E6E]">You can submit feedback for moderation.</p>
                 </div>
               ) : (
                 <div className="space-y-4">
                   {sortedReviews.map((review: any) => {
                     const reviewUser = review.user || {};
-                    const reviewUserId = reviewUser._id || reviewUser.id || review.userId;
+                    const reviewUserId = typeof reviewUser === "string" ? reviewUser : reviewUser._id || reviewUser.id || review.userId;
                     const isMyReview = user && (user._id === reviewUserId || user.id === reviewUserId);
                     const reviewId = review._id || review.id;
-                    const helpfulCount = helpfulMap[reviewId] || 0;
 
                     return (
                       <Card
@@ -959,9 +961,9 @@ export default function BookDetailPage() {
                             <div>
                               <div className="flex items-center gap-2">
                                 <span className="font-serif font-bold text-sm text-[#0F3D3E]">
-                                  {reviewUser.name || review.userName || "Verified Reader"}
+                                  {reviewUser.name || review.userName || "Reader"}
                                 </span>
-                                {(review.isVerified || review.verifiedPurchase || review.isBuyer || review.purchased) && (
+                                {review.verifiedPurchase === true && (
                                   <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-500/20 text-[10px] font-semibold">
                                     Verified Purchase
                                   </Badge>
@@ -973,7 +975,7 @@ export default function BookDetailPage() {
                                     key={i}
                                     className={cn(
                                       "h-3.5 w-3.5",
-                                      i < (review.rating || 5) ? "fill-[#D4AF37] text-[#D4AF37]" : "text-gray-200"
+                                      Number.isInteger(review.rating) && review.rating >= 1 && review.rating <= 5 && i < review.rating ? "fill-[#D4AF37] text-[#D4AF37]" : "text-gray-200"
                                     )}
                                   />
                                 ))}
@@ -989,7 +991,7 @@ export default function BookDetailPage() {
                                     month: "short",
                                     year: "numeric",
                                   })
-                                : "Recent"}
+                                : "Date unavailable"}
                             </span>
 
                             {isMyReview && (
@@ -1017,20 +1019,6 @@ export default function BookDetailPage() {
                           {review.comment}
                         </p>
 
-                        <div className="mt-4 pt-3 border-t border-[#E2E6DF]/60 flex items-center justify-between text-xs">
-                          <button
-                            onClick={() => handleToggleHelpful(reviewId)}
-                            className={cn(
-                              "inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border text-xs font-semibold transition-all",
-                              votedHelpful[reviewId]
-                                ? "bg-emerald-50 text-emerald-700 border-emerald-300"
-                                : "bg-[#F8F9F7] text-[#5C6E6E] border-[#E2E6DF] hover:text-[#0F3D3E]"
-                            )}
-                          >
-                            <ThumbsUp className="h-3.5 w-3.5" />
-                            <span>Helpful {helpfulCount > 0 ? `(${helpfulCount})` : ""}</span>
-                          </button>
-                        </div>
                       </Card>
                     );
                   })}
@@ -1041,6 +1029,7 @@ export default function BookDetailPage() {
         </div>
 
         {/* --- 4. YOU MAY ALSO LIKE (Related Books Section) --- */}
+        {relatedError && <ErrorState title="Related books could not load" message="The main book details are available. Retry to load recommendations." onRetry={fetchBookData} />}
         {relatedBooks.length > 0 && (
           <section className="mt-16 border-t border-[#E2E6DF] pt-12">
             <div className="flex items-center justify-between mb-6">

@@ -1,8 +1,11 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useState, useEffect, useRef, useCallback } from "react";
 import Image from "next/image";
-import { useSiteContent, SiteContent, defaultSiteContent, invalidJsonField } from "@/context/site-content-context";
+import { useSiteContent, SiteContent, defaultSiteContent, invalidJsonField, fromBackendContent } from "@/context/site-content-context";
+import { ErrorState } from '@/components/ui/error-state';
 import { PAGE_SECTION_FIELDS, pageSectionDefaults } from "@/lib/page-content";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +33,7 @@ import {
 import toast from "react-hot-toast";
 import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
+import { fetchOwnProfile, updateOwnProfile } from "@/lib/user-profile";
 
 type SaveStatus = "saved" | "pending" | "saving" | "invalid" | "error";
 
@@ -37,7 +41,7 @@ const sameContent = (a: SiteContent, b: SiteContent) => JSON.stringify(a) === JS
 
 export default function AdminContentPage() {
   const { content: globalContent, updateContent, loading } = useSiteContent();
-  const { user, setUser } = useAuthStore();
+  const { user } = useAuthStore();
   const [formData, setFormData] = useState<SiteContent>(globalContent);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [activeTab, setActiveTab] = useState<"home" | "contact" | "publish" | "about" | "sections" | "admin-profile">("home");
@@ -61,26 +65,32 @@ export default function AdminContentPage() {
   const [statusDetail, setStatusDetail] = useState("");
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
 
-  // Public GET /content leaves out admin-only fields, so the admin photo is read from
-  // GET /admin/content; without it every save would send an empty photo and clear it.
+  // Profile data belongs to the signed-in user, separate from public CMS content.
   const [adminProfileImage, setAdminProfileImage] = useState("");
+  const [adminContent, setAdminContent] = useState<Partial<SiteContent> | null>(null);
+  const [adminLoadFailed, setAdminLoadFailed] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   useEffect(() => {
-    api
-      .get("/admin/content", { cache: "no-store" } as any)
-      .then(({ data }) => setAdminProfileImage((data?.data ?? data)?.adminProfileImage || ""))
-      .catch(() => {});
-  }, []);
+    Promise.all([api.get("/admin/content", { cache: "no-store" }), fetchOwnProfile()])
+      .then(([{ data }, profile]) => {
+        const document = data?.data ?? data;
+        setAdminProfileImage(profile.profilePicture ?? '');
+        setAdminContent(fromBackendContent(document));
+        setAdminLoadFailed(false);
+      })
+      .catch(() => setAdminLoadFailed(true));
+  }, [loadAttempt]);
 
   // Server content (first load, a save, or another admin's save) replaces the form only while it
   // has no unsaved edits, so nothing being typed is ever overwritten.
   useEffect(() => {
     if (!globalContent) return;
-    const next = { ...globalContent, adminProfileImage };
+    const next = { ...globalContent, ...adminContent, adminProfileImage };
     if (sameContent(formRef.current, baselineRef.current)) {
       commitBaseline(next);
       setFormData(next);
     }
-  }, [globalContent, adminProfileImage]);
+  }, [globalContent, adminContent, adminProfileImage]);
 
   const saveNow = useCallback(
     async (data: SiteContent) => {
@@ -89,28 +99,45 @@ export default function AdminContentPage() {
       failedRef.current = null;
       setSaveStatus("saving");
       try {
-        if (data.adminProfileImage !== baselineRef.current.adminProfileImage && user) {
-          setUser({ ...user, profileImage: data.adminProfileImage, profilePicture: data.adminProfileImage });
-        }
+        const profile = data.adminProfileImage !== baselineRef.current.adminProfileImage
+          ? await updateOwnProfile({ profilePicture: data.adminProfileImage ?? '' })
+          : await fetchOwnProfile();
+        const confirmedPhoto = profile.profilePicture ?? '';
+        setAdminProfileImage(confirmedPhoto);
+        commitBaseline({ ...baselineRef.current, adminProfileImage: confirmedPhoto });
+        setFormData((current) => current.adminProfileImage === data.adminProfileImage ? { ...current, adminProfileImage: confirmedPhoto } : current);
         const { stored, notSaved, verified } = await updateContent(data);
-        const confirmed = { ...stored, adminProfileImage: data.adminProfileImage };
+        if (!verified) {
+          failedRef.current = data;
+          setSaveStatus('error');
+          setStatusDetail('Changes were sent but could not be verified. Your edits are kept; retry verification before publishing.');
+          toast.error('The saved content could not be verified.');
+          return;
+        }
+        const confirmed = { ...stored, adminProfileImage: confirmedPhoto };
+        setAdminContent(stored);
         commitBaseline(confirmed);
-        setAdminProfileImage(data.adminProfileImage || "");
+        setAdminProfileImage(confirmedPhoto);
         // Still what was sent: show exactly what the server stored (dropped fields revert visibly).
-        if (sameContent(formRef.current, data)) setFormData(confirmed);
+        const currentForm = formRef.current;
+        const sameSubmittedFields = sameContent({ ...currentForm, adminProfileImage: data.adminProfileImage }, data)
+          && (currentForm.adminProfileImage === data.adminProfileImage || currentForm.adminProfileImage === confirmedPhoto);
+        if (notSaved.length === 0 && sameSubmittedFields) setFormData(confirmed);
         setLastSavedAt(new Date());
 
         if (notSaved.length > 0) {
+          failedRef.current = data;
           console.warn("Site content fields not stored by the backend:", notSaved);
           setSaveStatus("error");
           setStatusDetail(`Server did not keep: ${notSaved.join(", ")}`);
         } else {
           setSaveStatus("saved");
-          setStatusDetail(verified ? "" : "Saved; could not re-read it to verify");
+          setStatusDetail('');
           toast.success("Saved. The website now shows your changes.");
         }
-      } catch (err: any) {
-        console.error("Failed to update site content:", err);
+      } catch (caughtError) {
+        const err = describeApiError(caughtError);
+        console.error("Failed to update site content:", describeApiError(err));
         failedRef.current = data;
         setSaveStatus("error");
         setStatusDetail(err?.response?.data?.message || "Could not reach the server. Your edits are kept here.");
@@ -121,7 +148,7 @@ export default function AdminContentPage() {
         if (!sameContent(formRef.current, baselineRef.current) && !failedRef.current) setSaveStatus("pending");
       }
     },
-    [updateContent, user, setUser]
+    [updateContent]
   );
 
   // Nothing is saved until the admin presses Save Changes; this only shows whether there are
@@ -150,7 +177,7 @@ export default function AdminContentPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.type.startsWith("image/")) {
+    if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type)) {
       toast.error("Please select a valid image file (PNG, JPG, WEBP, GIF).");
       return;
     }
@@ -174,38 +201,20 @@ export default function AdminContentPage() {
       const uploadedUrl = res?.data?.data?.url || res?.data?.url || "";
       if (!uploadedUrl) throw new Error("The upload finished but no image URL was returned.");
 
-      // Persist to the admin's own profile (PATCH /users/me) before showing it as saved.
-      await api.patch("/users/me", { profilePicture: uploadedUrl });
-
-      // Update local state, SiteContent, and Auth Store user profile
-      setFormData((prev) => ({ ...prev, adminProfileImage: uploadedUrl }));
-      if (user) {
-        setUser({
-          ...user,
-          profileImage: uploadedUrl,
-          profilePicture: uploadedUrl,
-        });
-      }
+      const confirmed = await updateOwnProfile({ profilePicture: uploadedUrl });
+      const photo = confirmed.profilePicture ?? '';
+      setFormData((prev) => ({ ...prev, adminProfileImage: photo }));
+      setAdminProfileImage(photo);
+      commitBaseline({ ...baselineRef.current, adminProfileImage: photo });
 
       toast.success("Admin profile photo uploaded and saved.");
-    } catch (err: any) {
-      console.error("Failed to upload profile photo:", err);
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
+      console.error("Failed to upload profile photo:", describeApiError(err));
       toast.error(err?.response?.data?.message || err?.message || "Failed to upload photo. Please try again.");
     } finally {
       setIsUploadingPhoto(false);
     }
-  };
-
-  const handleRemovePhoto = () => {
-    setFormData((prev) => ({ ...prev, adminProfileImage: "" }));
-    if (user) {
-      setUser({
-        ...user,
-        profileImage: "",
-        profilePicture: "",
-      });
-    }
-    toast.success("Profile picture removed. Press Save Changes to keep it removed.");
   };
 
   /** The only way content reaches the website: validate, save, then read it back. */
@@ -223,7 +232,7 @@ export default function AdminContentPage() {
 
   /** Puts the built-in text into the form; the website changes only after Save Changes. */
   const handleReset = () => {
-    if (window.confirm("Fill every field with the built-in default text? Nothing changes on the website until you press Save Changes.")) {
+    if (window.confirm("Clear the content fields in this form? Nothing changes on the website until you save.")) {
       setFormData({ ...defaultSiteContent, adminProfileImage: formData.adminProfileImage });
     }
   };
@@ -249,7 +258,8 @@ export default function AdminContentPage() {
     error: { text: "Not saved", className: "text-rose-700 bg-rose-50 border-rose-200" },
   };
 
-  if (loading) {
+  if (adminLoadFailed) return <ErrorState title="Content editor could not load" message="Administrator content must load successfully before editing or saving." onRetry={() => { setAdminLoadFailed(false); setLoadAttempt((attempt) => attempt + 1); }} />;
+  if (loading || !adminContent) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary"></div>
@@ -287,7 +297,7 @@ export default function AdminContentPage() {
           <div className="flex items-center gap-3">
             <Button variant="outline" onClick={handleReset} size="sm" className="gap-1.5 text-xs">
               <RotateCcw className="h-4 w-4" />
-              Reset Defaults
+              Clear Fields
             </Button>
             {hasUnsaved && saveStatus !== "saving" && (
               <Button variant="outline" onClick={handleDiscard} size="sm" className="text-xs">
@@ -396,6 +406,14 @@ export default function AdminContentPage() {
       {/* ---------------- TAB 1: HOME & ANNOUNCEMENT ---------------- */}
       {activeTab === "home" && (
         <div className="space-y-6">
+          <Card>
+            <CardHeader><CardTitle>SEO Metadata</CardTitle><CardDescription>Published search and social preview information.</CardDescription></CardHeader>
+            <CardContent className="space-y-4">
+              {([{ key: 'seoTitle', label: 'SEO title' }, { key: 'seoDescription', label: 'SEO description' }, { key: 'seoKeywords', label: 'Keywords (comma separated)' }, { key: 'seoImage', label: 'Social preview image URL' }] as const).map(({ key, label }) => (
+                <div key={key} className="space-y-2"><Label htmlFor={key}>{label}</Label><Input id={key} type={key === 'seoImage' ? 'url' : 'text'} value={formData[key]} onChange={(event) => setFormData({ ...formData, [key]: event.target.value })} /></div>
+              ))}
+            </CardContent>
+          </Card>
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
@@ -840,7 +858,7 @@ export default function AdminContentPage() {
                     onClick={() => setFormData({ ...formData, [field.key]: pageSectionDefaults[field.key] })}
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
-                    Restore default
+                    Clear section
                   </Button>
                 </CardHeader>
                 <CardContent className="space-y-2">
@@ -892,6 +910,7 @@ export default function AdminContentPage() {
                         alt="Admin Profile"
                         fill
                         sizes="112px"
+                        unoptimized
                         className="object-cover"
                       />
                     ) : (
@@ -947,7 +966,8 @@ export default function AdminContentPage() {
                       <Button
                         type="button"
                         variant="outline"
-                        onClick={handleRemovePhoto}
+                        disabled
+                        title="Photo removal is currently unavailable"
                         className="gap-1.5 text-xs text-destructive hover:bg-destructive/10"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -969,18 +989,16 @@ export default function AdminContentPage() {
                     type="url"
                     placeholder="https://example.com/admin-photo.jpg"
                     value={formData.adminProfileImage || ""}
+                    disabled={isUploadingPhoto}
                     onChange={(e) => {
                       const newUrl = e.target.value;
                       setFormData({ ...formData, adminProfileImage: newUrl });
-                      if (user) {
-                        setUser({ ...user, profileImage: newUrl, profilePicture: newUrl });
-                      }
                     }}
                     className="text-xs font-mono"
                   />
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  Supports PNG, JPG, WEBP, and GIF images. Max recommended resolution: 800x800 px.
+                  Supports PNG, JPG, WEBP, and GIF images. Max recommended resolution: 800x800 px. Photo removal is currently unavailable.
                 </p>
               </div>
             </CardContent>

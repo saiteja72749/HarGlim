@@ -1,16 +1,18 @@
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
 import { useAuthStore } from "./auth-store";
+import type { Role, UserContextData } from '@/types';
 
-const context = (role: string, profilePicture: string | null = null) =>
+const context = (role: Role, profilePicture: string | null = null): UserContextData =>
   ({
     user: { id: "U1", _id: "U1", name: "A", email: "a@b.c", role, isActive: true, profilePicture, createdAt: "" },
-    capabilities: {},
-    states: {},
-  }) as any;
+    capabilities: { canPublish: role === 'author', canAccessAuthorDashboard: role === 'author', canAdminister: role === 'admin' },
+    states: { authorApplicationStatus: '', dashboardAccessStatus: '', publishingStatus: '' },
+  });
 
 describe("setUserContext", () => {
   beforeEach(() => {
-    useAuthStore.setState({ user: { _id: "U1", name: "A", email: "a@b.c", role: "author" } as any, userContext: null });
+    useAuthStore.setState({ user: { _id: "U1", name: "A", email: "a@b.c", role: "author", isActive: true }, userContext: null, contextVerified: false });
   });
 
   it("keeps the same user object when nothing changed, so pages do not refetch in a loop", () => {
@@ -38,5 +40,13 @@ describe("setUserContext", () => {
     useAuthStore.setState({ user: null });
     useAuthStore.getState().setUserContext(context("author"));
     expect(useAuthStore.getState().user).toBeNull();
+  });
+
+  it('does not persist backend verification or capability data', () => {
+    useAuthStore.getState().setUserContext(context('author'));
+    expect(useAuthStore.getState().contextVerified).toBe(true);
+    const saved = JSON.parse(localStorage.getItem('auth-storage') || '{}').state;
+    expect(saved).not.toHaveProperty('contextVerified');
+    expect(saved).not.toHaveProperty('userContext');
   });
 });

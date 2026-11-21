@@ -1,5 +1,7 @@
 "use client";
 
+import { describeApiError } from "@/lib/api-error";
+
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import api from "@/lib/api";
@@ -72,7 +74,7 @@ export default function AdminAuthorAccessPage() {
       const items = res?.data?.data?.entitlements || res?.data?.data?.items || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];
       setEntitlements(Array.isArray(items) ? items : []);
     } catch (err) {
-      console.warn("Failed to fetch author entitlements:", err);
+      console.warn("Failed to fetch author entitlements:", describeApiError(err));
     } finally {
       setLoadingEntitlements(false);
     }
@@ -86,7 +88,7 @@ export default function AdminAuthorAccessPage() {
       const items = res?.data?.data?.plans || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];
       setPlans(Array.isArray(items) ? items : []);
     } catch (err) {
-      console.warn("Failed to fetch author access plans:", err);
+      console.warn("Failed to fetch author access plans:", describeApiError(err));
     } finally {
       setLoadingPlans(false);
     }
@@ -100,7 +102,7 @@ export default function AdminAuthorAccessPage() {
       const items = res?.data?.data?.purchases || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];
       setPurchases(Array.isArray(items) ? items : []);
     } catch (err) {
-      console.warn("Failed to fetch author access purchases:", err);
+      console.warn("Failed to fetch author access purchases:", describeApiError(err));
     } finally {
       setLoadingPurchases(false);
     }
@@ -129,7 +131,8 @@ export default function AdminAuthorAccessPage() {
       setIsGrantModalOpen(false);
       setGrantUserId("");
       fetchEntitlements();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to grant access.");
     } finally {
       setSubmittingGrant(false);
@@ -144,7 +147,8 @@ export default function AdminAuthorAccessPage() {
       await api.post(`/admin/author-access/entitlements/${userId}/revoke`, { reason });
       toast.success("Author access revoked.");
       fetchEntitlements();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to revoke access.");
     }
   };
@@ -157,7 +161,8 @@ export default function AdminAuthorAccessPage() {
       });
       toast.success("Author access restored! ✅");
       fetchEntitlements();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to restore access.");
     }
   };
@@ -171,7 +176,8 @@ export default function AdminAuthorAccessPage() {
       toast.success("Author access plan created! 🏷️");
       setIsCreatePlanOpen(false);
       fetchPlans();
-    } catch (err: any) {
+    } catch (caughtError) {
+      const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to create plan.");
     } finally {
       setSubmittingPlan(false);
