@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-21T18:05:28.606Z",
+  "generatedAt": "2026-11-21T18:18:11.552Z",
   "backendBaseURL": "https://harglimpublish-backend.onrender.com/api",
   "scope": "Frontend source/contract inventory with real read-only integration evidence. No fabricated response examples, customer data, credentials or financial values are included. Endpoint schemas are supplied documentation, not claims of live support. Transitive shared-service calls are potential dependencies, not proof that every screen invokes every mutation.",
   "architecture": "Next.js App Router / React → shared Axios API services and session-scoped memory resources → deployed Express/MongoDB backend. Public CMS also passes through Next server rendering/cache; revalidation is a local Next route. No backend source checkout is available.",
@@ -9,7 +9,7 @@
     "Role/capability checks are freshly validated with the real backend, but all sensitive endpoints must independently enforce authorization and ownership on the server. Backend implementation is unavailable for audit."
   ],
   "performanceObservations": [
-    "Actual rapid-typing browser verification sent only the final debounced search query to the genuine backend, and passed.",
+    "Local rapid-typing verification sent only the final query. The first live replay paused long enough between some driver keystrokes to correctly emit partial queries; its one-request assertion was too strict. The revised browser check records actual input intervals and permits partial requests only after a measured typing pause, while requiring the final real response and correct results.",
     "Actual offline catalog search showed an error and successfully retried the backend after reconnection.",
     "Several local Next image-optimizer requests to Cloudinary timed out during the browser run. Direct HEAD checks of two affected PNG URLs returned HTTP 200 in approximately 1867 and 625 ms. This does not establish download/transform performance under sustained load; no image URL or production content was changed.",
     "No Lighthouse score, speed percentage, concurrency/load ceiling or production latency improvement is claimed."
@@ -363,6 +363,16 @@
     "2 skipped",
     "59 passed (15.3m)"
   ],
+  "deploymentEvidence": {
+    "checkedAt": "2026-11-21T18:09:46.017Z",
+    "httpStatus": 200,
+    "netlify": true,
+    "newApplicationMarkerFound": true,
+    "assetsChanged": true,
+    "publicBrowserSmoke": "passed",
+    "failedSmokeTests": 0,
+    "scope": "Three read-only live checks: mobile catalog, measured typing-pause debouncing, offline/reconnection. No live business writes."
+  },
   "lint": {
     "runStartedAt": "2026-11-21T17:32:19.481Z",
     "errors": 0,

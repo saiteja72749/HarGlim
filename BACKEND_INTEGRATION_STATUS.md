@@ -12,6 +12,8 @@ Current validation: 150 unit tests in 23 files passed; lint has zero errors and 
 
 Image delivery observation: several Cloudinary fetches timed out in the local image optimizer during browser checks. Direct read-only HEAD checks of two affected PNG URLs subsequently returned HTTP 200 in about 1.9 and 0.6 seconds. The source URLs were not rewritten and production content was not changed. Sustained image/CDN load performance remains unverified.
 
+Deployment verification: GitHub main was advanced to application commit `5d33070`, and the live Netlify site subsequently served a changed asset set containing the new review-page marker. Three final public live-site checks passed: mobile catalog controls, debouncing against measured browser input intervals, and real offline/reconnection recovery. The first live typing replay had valid intermediate requests after slow driver pauses; its initial one-request assertion was corrected to measure real input timing. This test/report follow-up changes no application behavior.
+
 Open issues include unpublished CMS section fields, unverified admin workflows, unspecified profile-photo clearing, missing review-list response documentation, and catalog filters/sorts that the backend does not apply globally. Remaining lint warnings and current test timestamps are included in the generated report. These changes do not certify the entire platform for production. The dated sections below preserve earlier verification history and are superseded by the latest report where findings differ.
 
 Verified against the configured live backend on 18 November 2026. No backend source checkout or admin credentials are available in this workspace.

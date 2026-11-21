@@ -38,10 +38,20 @@ test('published home content loads on a slow connection', async ({ page, context
   await session.detach();
 });
 
-test('rapid catalog typing sends only the final debounced search to the real API', async ({ page }) => {
+test('catalog waits for a typing pause before searching the real API', async ({ page }) => {
   await page.goto('/books', { waitUntil: 'domcontentloaded' });
   const input = page.getByRole('textbox', { name: 'Search catalog' });
   await expect(input).toHaveAttribute('aria-busy', 'false');
+  // A slow test machine can pause longer than the debounce between protocol
+  // keystrokes. Measure real browser input intervals instead of assuming that
+  // the requested driver delay is the time that actually elapsed in the UI.
+  await input.evaluate((element) => {
+    const events: { query: string; at: number }[] = [];
+    element.addEventListener('input', () => {
+      events.push({ query: (element as HTMLInputElement).value, at: performance.now() });
+      (element as HTMLInputElement).dataset.typingEvents = JSON.stringify(events);
+    });
+  });
   const queries: string[] = [];
   page.on('request', (request) => {
     const url = new URL(request.url());
@@ -55,7 +65,14 @@ test('rapid catalog typing sends only the final debounced search to the real API
   expect((await response).status()).toBe(200);
   await expect(input).toHaveAttribute('aria-busy', 'false');
   await expect(page.getByText('No books found matching your criteria')).toBeVisible();
-  expect(queries).toEqual(['releasecheckabsent']);
+  const events: { query: string; at: number }[] = JSON.parse(await input.getAttribute('data-typing-events') || '[]');
+  expect(events.length).toBeGreaterThan(1);
+  expect(queries.at(-1)).toBe('releasecheckabsent');
+  // Allow timing jitter while rejecting searches emitted between fast inputs.
+  const pausedQueries = events.slice(0, -1).filter((event, index) => events[index + 1].at - event.at >= 280).map((event) => event.query);
+  expect(pausedQueries.length, 'The replay must include fast inputs to exercise debouncing').toBeLessThan(events.length - 1);
+  for (const query of queries.slice(0, -1)) expect(pausedQueries, `A partial query must follow an actual typing pause: ${query}`).toContain(query);
+  expect(queries.length).toBeLessThanOrEqual(pausedQueries.length + 1);
 });
 
 test('catalog shows an error offline and retries the real backend after reconnection', async ({ page, context }) => {
