@@ -2,7 +2,7 @@
 
 import { describeApiError } from "@/lib/api-error";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Mail, Phone, MapPin, Clock, Send, CheckCircle2, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,6 +61,8 @@ const inquiryCategories = [
 
 export default function ContactPage() {
   const { content } = useSiteContent();
+  const officeAddress = [content.contactAddressLine1, content.contactAddressLine2].filter(Boolean).join(", ");
+  const pending = useRef(false);
   const [formState, setFormState] = useState({
     name: "",
     email: "",
@@ -73,31 +75,41 @@ export default function ContactPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formState.name.trim() || !formState.email.trim() || !formState.message.trim()) {
+    if (pending.current) return;
+    if (!formState.name.trim() || !formState.email.trim() || !formState.message.trim() || !inquiryCategories.includes(formState.inquiryType)) {
       toast.error("Please fill in all required fields.");
       return;
     }
 
+    const phone = formState.phone.trim();
+    if (phone && !/^\+?\d{7,15}$/.test(phone.replace(/[\s()-]/g, ""))) {
+      toast.error("Enter a valid phone number with its country code if applicable.");
+      return;
+    }
+    pending.current = true;
     setIsSubmitting(true);
     try {
-      await api.post("/contact", {
+      const { data } = await api.post("/contact", {
         name: formState.name.trim(),
         email: formState.email.trim(),
-        phone: formState.phone.trim(),
-        subject: formState.inquiryType || "Website contact enquiry",
+        phone,
+        subject: formState.inquiryType,
         message: formState.message.trim(),
         page: "/contact",
       });
+      if (data?.success === false || data?.status === "error" || data?.status === "failed") {
+        throw new Error("The server did not accept the message.");
+      }
       setIsSubmitted(true);
       toast.success("Thank you! Your message has been sent.");
     } catch (caughtError) {
       const err = describeApiError(caughtError);
-      console.error("Failed to submit contact form:", describeApiError(err));
       toast.error(
         err?.response?.data?.message ||
           "Failed to submit message. Please try again or use the email address listed on this page."
       );
     } finally {
+      pending.current = false;
       setIsSubmitting(false);
     }
   };
@@ -150,8 +162,10 @@ export default function ContactPage() {
                     <div>
                       <h3 className="font-serif font-bold text-sm text-[#0F3D3E] mb-1">{card.title}</h3>
                       {card.lines.map((line, lIdx) => (
-                        <p key={lIdx} className="text-xs text-[#5C6E6E] font-medium leading-relaxed">
-                          {line}
+                        <p key={lIdx} className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
+                          {card.icon === Mail || card.icon === Phone ? (
+                            <a className="inline-flex min-h-11 items-center underline" href={card.icon === Mail ? `mailto:${line}` : `tel:${line.replace(/[^+\d]/g, "")}`}>{line}</a>
+                          ) : line}
                         </p>
                       ))}
                     </div>
@@ -160,18 +174,6 @@ export default function ContactPage() {
               ))}
             </div>
 
-            {/* Embedded Google Map */}
-            <div className="rounded-2xl overflow-hidden border border-[#E2E6DF] aspect-video shadow-xs">
-              <iframe
-                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3769.9895377316645!2d72.85225371490257!3d19.11695918706089!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3be7c9c676018b43%3A0x75f29a4205098f99!2sAndheri%20East%2C%20Mumbai%2C%20Maharashtra!5e0!3m2!1sen!2sin!4v1642588765410!5m2!1sen!2sin"
-                width="100%"
-                height="100%"
-                style={{ border: 0 }}
-                allowFullScreen
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-              />
-            </div>
           </div>
 
           {/* Right Column: Contact Form */}
@@ -181,13 +183,10 @@ export default function ContactPage() {
                 <h2 className="text-2xl font-serif font-bold text-[#0F3D3E]">
                   Send Us a Message
                 </h2>
-                <p className="text-xs text-[#5C6E6E]">
-                  We typically respond within 24 business hours.
-                </p>
               </div>
 
               {isSubmitted ? (
-                <div className="text-center py-12 space-y-4">
+                <div role="status" className="text-center py-12 space-y-4">
                   <div className="h-16 w-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto text-emerald-700">
                     <CheckCircle2 className="h-8 w-8" />
                   </div>
@@ -214,6 +213,7 @@ export default function ContactPage() {
                       <Label htmlFor="name" className="text-xs font-bold text-[#0F3D3E]">Full Name *</Label>
                       <Input
                         id="name"
+                        autoComplete="name"
                         placeholder="Your full name"
                         required
                         value={formState.name}
@@ -225,6 +225,7 @@ export default function ContactPage() {
                       <Label htmlFor="email" className="text-xs font-bold text-[#0F3D3E]">Email Address *</Label>
                       <Input
                         id="email"
+                        autoComplete="email"
                         type="email"
                         placeholder="you@example.com"
                         required
@@ -240,6 +241,7 @@ export default function ContactPage() {
                       <Label htmlFor="phone" className="text-xs font-bold text-[#0F3D3E]">Phone Number</Label>
                       <Input
                         id="phone"
+                        autoComplete="tel"
                         type="tel"
                         placeholder="+91 98765 43210"
                         value={formState.phone}
@@ -250,10 +252,11 @@ export default function ContactPage() {
                     <div className="space-y-1.5">
                       <Label htmlFor="inquiryType" className="text-xs font-bold text-[#0F3D3E]">Inquiry Category *</Label>
                       <Select
+                        required
                         value={formState.inquiryType}
                         onValueChange={(val) => setFormState({ ...formState, inquiryType: val })}
                       >
-                        <SelectTrigger className="bg-[#F8F9F7] border-[#E2E6DF] h-11 rounded-xl text-xs">
+                        <SelectTrigger id="inquiryType" className="bg-[#F8F9F7] border-[#E2E6DF] min-h-11 w-full rounded-xl text-sm">
                           <SelectValue placeholder="Select category" />
                         </SelectTrigger>
                         <SelectContent className="bg-white border-[#E2E6DF]">
@@ -302,6 +305,19 @@ export default function ContactPage() {
             </Card>
           </div>
         </div>
+        {officeAddress && (
+          <section className="mt-10 space-y-3" aria-labelledby="office-map">
+            <h2 id="office-map" className="font-serif text-2xl font-semibold">Find our office</h2>
+            <a className="inline-flex min-h-11 items-center underline" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(officeAddress)}`}>{officeAddress}</a>
+            <iframe
+              title="Harglim Publishers office map"
+              src={`https://www.google.com/maps?q=${encodeURIComponent(officeAddress)}&output=embed`}
+              className="h-72 w-full rounded-2xl border"
+              loading="lazy"
+              referrerPolicy="no-referrer"
+            />
+          </section>
+        )}
       </div>
     </div>
   );

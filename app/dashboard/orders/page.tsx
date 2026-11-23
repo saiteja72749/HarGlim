@@ -2,9 +2,11 @@
 
 import { describeApiError } from "@/lib/api-error";
 
-import { useState, useEffect, useCallback } from "react";
-import Image from "next/image";
+import { Suspense, useRef, useState, useEffect, useCallback } from "react";
+import Image from '@/components/ui/backend-image';
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { getPayableAmount, getPaymentQr, getUpiDestination, normalizeUtr } from "@/lib/checkout-payment";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Package,
@@ -156,6 +158,13 @@ const ORDER_FILTERS: { value: string; label: string; match: (order: any, payment
 ];
 
 export default function OrdersPage() {
+  return <Suspense fallback={<p role="status">Loading orders?</p>}><OrdersContent /></Suspense>;
+}
+
+function OrdersContent() {
+  const focusedOrder = useSearchParams().get("orderId");
+  const inFlightUtr = useRef(new Set<string>());
+
   const { user } = useAuthStore();
   const [orders, setOrders] = useState<any[]>([]);
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
@@ -265,13 +274,14 @@ export default function OrdersPage() {
 
   // Submit UTR Number API Handler
   const handleSubmitUtr = async (orderId: string, orderMongoId: string) => {
-    const utr = (utrInputMap[orderId] || "").trim().toUpperCase();
-    // Backend pattern: ^[A-Z0-9-]{6,64}$
-    if (!/^[A-Z0-9-]{6,64}$/.test(utr)) {
+    if (!orderMongoId || inFlightUtr.current.has(orderMongoId)) return;
+    const utr = normalizeUtr(utrInputMap[orderId] || "");
+    if (!utr) {
       toast.error("Enter the UTR exactly as shown in your UPI app (6–64 letters, digits or hyphens).");
       return;
     }
 
+    inFlightUtr.current.add(orderMongoId);
     setSubmittingUtrMap((prev) => ({ ...prev, [orderId]: true }));
 
     try {
@@ -279,11 +289,12 @@ export default function OrdersPage() {
 
       toast.success("UTR submitted successfully! Waiting for admin verification.");
       setUtrInputMap((prev) => ({ ...prev, [orderId]: "" }));
-      fetchOrders();
+      await fetchOrders();
     } catch (caughtError) {
       const err = describeApiError(caughtError);
-      toast.error(err.response?.data?.message || "Failed to submit UTR number.");
+      toast.error(err.response?.data?.message || "Could not confirm submission. Refresh My Orders before retrying.");
     } finally {
+      inFlightUtr.current.delete(orderMongoId);
       setSubmittingUtrMap((prev) => ({ ...prev, [orderId]: false }));
     }
   };
@@ -330,6 +341,7 @@ export default function OrdersPage() {
   };
 
   const filteredOrders = orders.filter((order) => {
+    if (focusedOrder && String(order._id || order.id) !== focusedOrder) return false;
     const orderNum = (order.orderNumber || order._id || order.id || "").toLowerCase();
     const utrNum = (order.utr || "").toLowerCase();
     const query = searchQuery.toLowerCase().trim();
@@ -345,12 +357,14 @@ export default function OrdersPage() {
       {/* Header */}
       <div>
         <h1 className="text-3xl font-serif font-bold text-[#0F3D3E]">
-          My Orders & Payment Status
+          My Orders
         </h1>
         <p className="text-sm text-[#5C6E6E] mt-1 font-sans">
-          Track shipments, submit UPI UTR verification, and download official invoices.
+          Track shipments, manage payments, and download invoices.
         </p>
       </div>
+
+      {focusedOrder && <Button variant="outline" asChild><Link href="/dashboard/orders">View all orders</Link></Button>}
 
       {/* Filter & Search Bar */}
       <Card className="bg-white border border-[#E2E6DF] shadow-xs rounded-2xl">
@@ -359,14 +373,15 @@ export default function OrdersPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#5C6E6E]" />
               <Input
-                placeholder="Search by Order ID or UTR Reference..."
+                aria-label="Search orders"
+                placeholder="Search by order number or UTR"
                 className="pl-9 bg-white border-[#E2E6DF]"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full sm:w-52 bg-white border-[#E2E6DF]">
+              <SelectTrigger aria-label="Filter orders by status" className="w-full sm:w-52 bg-white border-[#E2E6DF]">
                 <Filter className="mr-2 h-4 w-4 text-[#5C6E6E]" />
                 <SelectValue placeholder="Filter by status" />
               </SelectTrigger>
@@ -401,10 +416,10 @@ export default function OrdersPage() {
               <Package className="h-8 w-8" />
             </div>
             <h3 className="font-serif font-bold text-xl text-[#0F3D3E]">
-              {searchQuery || statusFilter !== "all" ? "No Matching Orders" : "No orders placed yet"}
+              {focusedOrder || searchQuery || statusFilter !== "all" ? "No matching orders" : "No orders placed yet"}
             </h3>
             <p className="text-[#5C6E6E] text-sm max-w-sm mt-1.5 mb-6 leading-relaxed">
-              {searchQuery || statusFilter !== "all"
+              {focusedOrder ? "This order could not be found in your recent orders. View all orders or try again." : searchQuery || statusFilter !== "all"
                 ? "No orders match your filter criteria. Try clearing search filters."
                 : "Explore our curated book collection and place your first order."}
             </p>
@@ -427,6 +442,7 @@ export default function OrdersPage() {
             const isOrderCancelled = getFulfilmentStage(order) === "cancelled";
 
             const totalPrice = getOrderTotal(order);
+            const payableAmount = getPayableAmount(order, paymentRecord);
             const shippingPrice = Number(order.shippingPrice ?? order.shippingFee ?? 0) || 0;
             const subtotal = Number(order.subtotal ?? order.itemsPrice ?? totalPrice - shippingPrice) || 0;
             const { trackingNumber, courierName, trackingUrl } = extractTrackingInfo(order);
@@ -565,14 +581,17 @@ export default function OrdersPage() {
                       )}
 
                       {/* STATE 1: awaiting payment (no UTR yet) */}
-                      {!isOrderCancelled && paymentState === "awaiting_payment" && (
+                      {!isOrderCancelled && paymentState === "awaiting_payment" && payableAmount === null && (
+                        <p className="rounded-lg border p-4 text-sm">Payment amount unavailable. Refresh your orders or contact support before paying.</p>
+                      )}
+                      {!isOrderCancelled && paymentState === "awaiting_payment" && payableAmount !== null && (
                         <div className="space-y-4 pt-1">
                           <div className="p-4 rounded-xl border-2 border-[#D4AF37] bg-[#D4AF37]/5 flex flex-col md:flex-row items-center gap-6">
                             <OrderPaymentQr userId={String(user?._id || user?.id || "")} order={order} payment={paymentRecord} />
                             <div className="flex-1 text-center md:text-left space-y-2">
                               <div className="flex items-center justify-between md:justify-start gap-3">
                                 <Badge className="bg-[#D4AF37] text-[#0F3D3E] font-bold text-xs">
-                                  Awaiting payment
+                                  Complete Payment
                                 </Badge>
                                 <span className="text-lg font-serif font-bold text-[#0F3D3E]">
                                   Amount: ₹{totalPrice.toLocaleString("en-IN")}
@@ -580,14 +599,16 @@ export default function OrdersPage() {
                               </div>
                               <p className="text-xs text-[#5C6E6E] leading-relaxed">
                                 Scan the QR with Google Pay, PhonePe or Paytm and pay exactly{" "}
-                                <strong className="text-[#0F3D3E]">₹{totalPrice.toLocaleString("en-IN")}</strong>. Then enter the UTR / transaction reference from your UPI app below.
+                                <strong className="text-[#0F3D3E]">₹{payableAmount.toLocaleString("en-IN")}</strong>. Then enter the UTR / transaction reference from your UPI app below.
                               </p>
 
                               {/* UTR Input Form */}
                               <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
                                 <div className="flex-1">
                                   <Input
-                                    placeholder="Enter 12-digit UTR Number (e.g. 423819001234)"
+                                    aria-label="UPI transaction reference"
+                                    placeholder="Enter UPI transaction reference"
+                                    maxLength={64}
                                     className="bg-white border-[#E2E6DF] text-sm h-10 font-mono"
                                     value={utrInputMap[id] || ""}
                                     onChange={(e) =>
@@ -608,7 +629,7 @@ export default function OrdersPage() {
                                   ) : (
                                     <span className="flex items-center gap-1.5">
                                       <Send className="h-3.5 w-3.5" />
-                                      Submit Payment
+                                      Submit UTR for verification
                                     </span>
                                   )}
                                 </Button>
@@ -632,14 +653,14 @@ export default function OrdersPage() {
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <Clock className="h-5 w-5 text-amber-600 animate-pulse" />
-                              <h5 className="font-bold text-sm font-serif">VERIFICATION_PENDING</h5>
+                              <h5 className="font-bold text-sm font-serif">Verification Pending</h5>
                             </div>
                             <span className="font-mono text-xs font-semibold bg-white/80 px-2 py-0.5 rounded text-amber-900 border border-amber-300">
                               UTR: {order.utr || paymentRecord?.utr || "submitted"}
                             </span>
                           </div>
                           <p className="text-xs text-amber-800 font-medium">
-                            We received your payment reference and our team is verifying it. This page updates once it is confirmed.
+                            We received your payment reference and our team is verifying it. Refresh My Orders to see the latest status.
                           </p>
                         </div>
                       )}
@@ -664,7 +685,7 @@ export default function OrdersPage() {
                               <CheckCircle2 className="h-5 w-5" />
                             </div>
                             <div>
-                              <h5 className="font-bold text-sm font-serif text-emerald-950">Payment Confirmed</h5>
+                              <h5 className="font-bold text-sm font-serif text-emerald-950">Payment Verified</h5>
                               <p className="text-xs text-emerald-800">
                                 Your payment has been verified and confirmed. Order is moving through printing & fulfillment.
                               </p>
@@ -698,7 +719,9 @@ export default function OrdersPage() {
 
                           <div className="flex flex-col sm:flex-row gap-2 pt-1">
                             <Input
-                              placeholder="Re-enter correct UTR Number"
+                              aria-label="Corrected UPI transaction reference"
+                              maxLength={64}
+                              placeholder="Enter corrected UTR"
                               className="bg-white border-rose-300 text-xs font-mono"
                               value={utrInputMap[id] || ""}
                               onChange={(e) =>
@@ -1066,9 +1089,9 @@ function OrderPaymentQr({ userId, order, payment }: { userId: string; order: any
   const paymentId = String(
     payment?._id || (typeof order.payment === "object" ? order.payment?._id : order.payment) || ""
   );
-  const initialQr = payment?.qrCodeDataUrl || order.qrCodeDataUrl || "";
+  const initialQr = getPaymentQr(payment?.qrCodeDataUrl || order.qrCodeDataUrl);
   const [qr, setQr] = useState<string>(initialQr);
-  const [upiUrl, setUpiUrl] = useState<string>(payment?.upiUrl || "");
+  const [upi, setUpi] = useState(() => getUpiDestination(payment?.upiUrl));
   const [state, setState] = useState<"loading" | "ready" | "missing">(initialQr ? "ready" : "loading");
 
   useEffect(() => {
@@ -1082,10 +1105,9 @@ function OrderPaymentQr({ userId, order, payment }: { userId: string; order: any
       .then(({ data }) => {
         if (cancelled) return;
         const detail = data?.data?.payment || data?.data || data;
-        let raw = detail?.qrCodeDataUrl || detail?.qr?.dataUrl || detail?.qrCode || "";
-        if (raw && !raw.startsWith("data:") && !raw.startsWith("http")) raw = `data:image/png;base64,${raw}`;
+        const raw = getPaymentQr(detail?.qrCodeDataUrl || detail?.qr?.dataUrl || detail?.qrCode);
         setQr(raw);
-        setUpiUrl(detail?.upiUrl || detail?.qr?.upiUrl || "");
+        setUpi(getUpiDestination(detail?.upiUrl || detail?.qr?.upiUrl));
         setState(raw ? "ready" : "missing");
       })
       .catch(() => !cancelled && setState("missing"));
@@ -1104,6 +1126,7 @@ function OrderPaymentQr({ userId, order, payment }: { userId: string; order: any
           width={128}
           height={128}
           className="h-32 w-32 object-contain"
+          onError={() => setState("missing")}
         />
       ) : state === "loading" ? (
         <div className="h-32 w-32 flex items-center justify-center">
@@ -1115,13 +1138,14 @@ function OrderPaymentQr({ userId, order, payment }: { userId: string; order: any
           <span className="text-[10px] text-[#5C6E6E]">QR unavailable. Contact support to pay this order.</span>
         </div>
       )}
-      {upiUrl ? (
-        <a href={upiUrl} className="text-[10px] font-bold text-[#0F3D3E] mt-1 uppercase tracking-wider underline md:hidden">
+      {upi?.name && <p className="text-center text-xs [overflow-wrap:anywhere]">{upi.name}</p>}
+      {upi ? (
+        <a href={upi.url} className="text-[10px] font-bold text-[#0F3D3E] mt-1 uppercase tracking-wider underline md:hidden">
           Open in UPI app
         </a>
-      ) : (
+      ) : state === "ready" ? (
         <span className="text-[10px] font-bold text-[#0F3D3E] mt-1 uppercase tracking-wider">Scan & Pay UPI</span>
-      )}
+      ) : null}
     </div>
   );
 }

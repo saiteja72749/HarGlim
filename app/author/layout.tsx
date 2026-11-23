@@ -1,239 +1,87 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  LayoutDashboard,
-  FileText,
-  DollarSign,
-  LogOut,
-  Menu,
-  X,
-  BookOpen,
-  PenTool,
-  Store,
-  ChevronRight,
-  ShieldCheck,
-  Truck,
-  FilePlus2,
-  BarChart3,
-  TrendingUp,
-  Landmark,
-  Wallet,
-  UserCircle,
-} from "lucide-react";
+import { BarChart3, BookOpen, CircleDollarSign, FileText, LayoutDashboard, Menu, UserCircle } from "lucide-react";
+import { AuthGuard } from "@/components/auth/auth-guard";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth-store";
-import { AuthGuard } from "@/components/auth/auth-guard";
+import { useState } from "react";
 
-// Navigation for an approved author (backend handoff "Navigation Rules").
-// Dashboard access is free once approved, so there is no purchase/paywall entry.
-const authorSidebarLinks = [
-  { href: "/author", label: "Author Dashboard", icon: LayoutDashboard },
+const links = [
+  { href: "/author", label: "Overview", icon: LayoutDashboard },
   { href: "/author/books", label: "My Books", icon: BookOpen },
-  { href: "/author/manuscripts/new", label: "Add Book", icon: FilePlus2 },
   { href: "/author/manuscripts", label: "Manuscripts", icon: FileText },
-  { href: "/author/analytics#performance", label: "Book Performance", icon: TrendingUp },
-  { href: "/author/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/author/royalties", label: "Royalties", icon: DollarSign },
-  { href: "/author/royalties#settlements", label: "Royalty Settlements", icon: Landmark },
-  { href: "/author/settings#profile", label: "Author Profile", icon: UserCircle },
-  { href: "/author/settings#payout", label: "Payment/Payout Details", icon: Wallet },
-  // Authors also buy books; orders & courier tracking live in the shared reader dashboard.
-  { href: "/dashboard/orders", label: "My Orders & Tracking", icon: Truck },
+  { href: "/author/analytics", label: "Performance & Analytics", icon: BarChart3 },
+  { href: "/author/royalties", label: "Royalties", icon: CircleDollarSign },
+  { href: "/author/settings", label: "Author Profile", icon: UserCircle },
 ];
 
-const isLinkActive = (href: string, pathname: string, hash: string) => {
-  const [path, linkHash = ""] = href.split("#");
-  if (pathname !== path && !(path !== "/author" && pathname.startsWith(path + "/"))) return false;
-  // "/author/manuscripts" must not light up on "/author/manuscripts/new" (its own "Add Book" entry).
-  if (path === "/author/manuscripts" && pathname === "/author/manuscripts/new") return false;
-  return linkHash === hash.replace("#", "");
-};
-
-export default function AuthorLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { user, logout } = useAuthStore();
+function StudioNavigation({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
-  const [hash, setHash] = useState("");
-
-  useEffect(() => {
-    const sync = () => setHash(window.location.hash);
-    sync();
-    window.addEventListener("hashchange", sync);
-    return () => window.removeEventListener("hashchange", sync);
-  }, [pathname]);
+  const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
 
   return (
-    <AuthGuard requiredRole="author">
-      <div className="min-h-screen bg-[#F8F9F7] flex text-[#0F3D3E]">
-        {/* Mobile Sidebar Overlay */}
-        <AnimatePresence>
-          {sidebarOpen && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
-              onClick={() => setSidebarOpen(false)}
-            />
-          )}
-        </AnimatePresence>
-
-        {/* Sidebar (Seamless Uniform Deep Green #0C3233) */}
-        <aside
-          className={cn(
-            "fixed left-0 top-0 z-50 h-full w-64 transform bg-[#0C3233] text-white border-r border-[#174C4D] transition-transform duration-300 lg:translate-x-0 shadow-2xl flex flex-col",
-            sidebarOpen ? "translate-x-0" : "-translate-x-full",
-          )}
-        >
-          {/* Header Brand */}
-          <div className="flex h-16 items-center justify-between border-b border-[#174C4D] px-5 bg-[#0C3233]">
-            <Link href="/author" className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#D4AF37] text-[#0F3D3E] font-serif font-bold text-lg shadow-sm">
-                ✍️
-              </div>
-              <div>
-                <span className="font-serif font-bold text-base text-white block leading-none">Author Studio</span>
-                <span className="text-[10px] text-[#D4AF37] tracking-wider uppercase font-sans">Harglim Publishers</span>
-              </div>
-            </Link>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-white/80 hover:text-white lg:hidden"
-              onClick={() => setSidebarOpen(false)}
-              aria-label="Close sidebar"
-            >
-              <X className="h-5 w-5" />
-            </Button>
-          </div>
-
-          {/* Author User Info */}
-          <div className="border-b border-[#174C4D] p-4 bg-[#0C3233]">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#D4AF37] text-[#0F3D3E] font-serif font-bold text-base shadow-sm">
-                {user?.name?.charAt(0).toUpperCase() || "A"}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-serif font-bold text-xs text-white truncate">{user?.name || "Author"}</p>
-                <p className="text-[10px] text-white/60 truncate">{user?.email || "author@harglim.com"}</p>
-                <div className="mt-1">
-                  <span className="inline-block px-2 py-0.5 text-[9px] uppercase font-bold tracking-wider rounded bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40">
-                    Verified Author
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Navigation Links */}
-          <nav className="flex-1 overflow-y-auto p-4 space-y-1.5 bg-[#0C3233]">
-            <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-white/40 mb-2 font-sans">
-              Author Navigation
-            </p>
-            {authorSidebarLinks.map((link) => {
-              const isActive = isLinkActive(link.href, pathname, hash);
-
-              return (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className={cn(
-                    "flex items-center justify-between rounded-xl px-3 py-2.5 text-xs font-medium transition-all duration-200 group relative",
-                    isActive
-                      ? "bg-[#174C4D] text-[#D4AF37] font-bold border-l-4 border-[#D4AF37] pl-2.5 shadow-xs"
-                      : "text-white/70 hover:bg-[#174C4D]/60 hover:text-white",
-                  )}
-                  onClick={() => {
-                    setSidebarOpen(false);
-                    // Same-page hash links don't always fire "hashchange" under the App Router.
-                    setHash(link.href.includes("#") ? "#" + link.href.split("#")[1] : "");
-                  }}
-                >
-                  <div className="flex items-center gap-3">
-                    <link.icon
-                      className={cn(
-                        "h-4 w-4 transition-transform group-hover:scale-110",
-                        isActive ? "text-[#D4AF37]" : "text-white/60 group-hover:text-white"
-                      )}
-                    />
-                    <span>{link.label}</span>
-                  </div>
-                  {isActive && <ChevronRight className="h-3.5 w-3.5 text-[#D4AF37]" />}
-                </Link>
-              );
-            })}
-          </nav>
-
-          {/* Quick Submit Manuscript Action */}
-          <div className="p-4 border-t border-[#174C4D] bg-[#0C3233] space-y-2">
-            <Button className="w-full bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold text-xs h-10 rounded-xl shadow-xs gap-2" asChild><Link href="/author/manuscripts/new" passHref>
-                <PenTool className="h-4 w-4" />
-                <span>Submit New Manuscript</span>
-              </Link></Button>
-
-            <Button
-                variant="ghost"
-                className="w-full justify-start gap-3 text-white/70 hover:text-white hover:bg-[#174C4D] h-9 text-xs"
-               asChild><Link href="/" passHref>
-                <Store className="h-4 w-4" />
-                <span>Main Website</span>
-              </Link></Button>
-
-            <Button
-              variant="ghost"
-              className="w-full justify-start gap-3 text-red-300 hover:text-red-200 hover:bg-red-950/40 h-9 text-xs"
-              onClick={() => {
-                logout({ redirectToHome: true });
-              }}
-            >
-              <LogOut className="h-4 w-4" />
-              <span>Sign Out</span>
-            </Button>
-          </div>
-        </aside>
-
-        {/* Main Content Area */}
-        <div className="lg:pl-64 flex-1 flex flex-col min-h-screen min-w-0">
-          {/* Top Author Studio Header Bar */}
-          <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-[#E2E6DF] bg-white px-4 sm:px-8 shadow-xs">
-            <div className="flex items-center gap-3 min-w-0">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setSidebarOpen(true)}
-                aria-label="Open author navigation"
-                className="text-[#0F3D3E] lg:hidden"
-              >
-                <Menu className="h-5 w-5" />
-              </Button>
-              <span className="min-w-0 truncate font-serif font-bold text-sm sm:text-lg text-[#0F3D3E]">
-                Author Workspace & Publication Management
-              </span>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#D4AF37]/20 border border-[#D4AF37]/40 text-xs">
-                <ShieldCheck className="h-4 w-4 text-[#0F3D3E]" />
-                <span className="font-bold text-[#0F3D3E]">Author Portal: {user?.name || "Author"}</span>
-              </div>
-            </div>
-          </header>
-
-          {/* Main Workspace View */}
-          <main className="p-4 sm:p-6 lg:p-8 flex-1 max-w-7xl w-full mx-auto">
-            {children}
-          </main>
-        </div>
+    <div className="flex min-w-0 flex-col gap-4 p-4">
+      {user && <div className="border-b border-white/15 px-2 pb-4 [overflow-wrap:anywhere]">
+        <p className="font-semibold">{user.name}</p>
+        <p className="text-sm text-white/80">{user.email}</p>
+      </div>}
+      <nav aria-label="Author Studio" className="space-y-1">
+        {links.map(({ href, label, icon: Icon }) => {
+          const selected = pathname === href || (href !== "/author" && pathname.startsWith(href + "/"));
+          return <Link key={href} href={href} aria-current={selected ? "page" : undefined} onNavigate={onNavigate}
+            className={cn("flex min-h-11 items-center gap-3 rounded-lg border-l-4 px-3 text-sm font-medium focus-visible:outline-white",
+              selected ? "border-secondary bg-white/10 text-secondary" : "border-transparent text-white hover:bg-white/10")}>
+            <Icon className="size-4 shrink-0" aria-hidden="true" />{label}
+          </Link>;
+        })}
+      </nav>
+      <div className="grid gap-1 border-t border-white/15 pt-3">
+        <Link href="/" onNavigate={onNavigate} className="flex min-h-11 items-center rounded-lg px-4 text-sm hover:bg-white/10">Main Website</Link>
+        <Button variant="ghost" className="min-h-11 justify-start px-4 text-white hover:bg-white/10 hover:text-white"
+          onClick={() => { onNavigate?.(); void logout({ redirectToHome: true }); }}>Sign Out</Button>
       </div>
-    </AuthGuard>
+    </div>
   );
+}
+
+function StudioLayout({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const close = () => setOpen(false);
+
+  return (
+    <div className="mx-auto grid w-full max-w-[90rem] flex-1 items-start gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-6 lg:px-8">
+      <aside className="sticky top-4 hidden max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl bg-sidebar text-sidebar-foreground lg:block">
+        <Link href="/author" className="block border-b border-white/15 px-6 py-4 font-serif text-lg font-semibold">Author Studio</Link>
+        <StudioNavigation />
+      </aside>
+      <div className="min-w-0 space-y-4">
+        <div className="lg:hidden">
+          <Sheet open={open} onOpenChange={setOpen}>
+            <SheetTrigger asChild>
+              <Button variant="outline" aria-label="Open author navigation" className="min-h-11">
+                <Menu aria-hidden="true" />Author Studio
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-[min(21rem,calc(100vw-2rem))] gap-0 overflow-y-auto bg-sidebar text-sidebar-foreground">
+              <SheetHeader className="pr-16">
+                <SheetTitle className="text-white">Author Studio</SheetTitle>
+                <SheetDescription className="sr-only">Navigation for your publishing workspace</SheetDescription>
+              </SheetHeader>
+              <StudioNavigation onNavigate={close} />
+            </SheetContent>
+          </Sheet>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export default function Layout({ children }: { children: React.ReactNode }) {
+  return <AuthGuard requiredRole="author"><StudioLayout>{children}</StudioLayout></AuthGuard>;
 }

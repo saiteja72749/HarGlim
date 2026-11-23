@@ -3,7 +3,7 @@
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import Image from "next/image";
+import Image from '@/components/ui/backend-image';
 import { useSiteContent, SiteContent, defaultSiteContent, invalidJsonField, fromBackendContent } from "@/context/site-content-context";
 import { ErrorState } from '@/components/ui/error-state';
 import { PAGE_SECTION_FIELDS, pageSectionDefaults } from "@/lib/page-content";

@@ -3,7 +3,7 @@ import { describeApiError } from "@/lib/api-error";
 
 
 import { useState, useEffect, useCallback } from "react";
-import Image from "next/image";
+import Image from '@/components/ui/backend-image';
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { BookOpen, Search, Filter, Compass } from "lucide-react";
@@ -62,13 +62,15 @@ export default function LibraryPage() {
   }, [fetchLibrary]);
 
   const filteredBooks = libraryBooks.filter((book) => {
+    const format = String(book.format || "").toLowerCase().replace(/[\s-]/g, "");
+    if (format !== "ebook" && format !== "audiobook") return false;
     const title = (book.title || "").toLowerCase();
     const author = ((book.author && typeof book.author === "object") ? book.author?.name : (typeof book.author === "string" ? book.author : ""))?.toLowerCase() || "";
-    const query = searchQuery.toLowerCase();
+    const query = searchQuery.trim().toLowerCase();
 
     const matchesSearch = title.includes(query) || author.includes(query);
     // Backend formats are lowercase enums (paperback / hardcover / ebook / audiobook).
-    const matchesFormat = formatFilter === "all" || String(book.format || "").toLowerCase() === formatFilter.toLowerCase();
+    const matchesFormat = formatFilter === "all" || format === formatFilter;
     return matchesSearch && matchesFormat;
   });
 
@@ -76,10 +78,10 @@ export default function LibraryPage() {
     <div className="space-y-8 max-w-6xl mx-auto">
       <div>
         <h1 className="text-3xl font-serif font-bold text-[#0F3D3E]">
-          My Personal Library
+          My Library
         </h1>
         <p className="text-sm text-[#5C6E6E] mt-1 font-sans">
-          Access your purchased digital editions and track your reading journey.
+          View digital editions available in your account.
         </p>
       </div>
 
@@ -90,22 +92,22 @@ export default function LibraryPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#5C6E6E]" />
               <Input
-                placeholder="Search your library books by title or author..."
+                aria-label="Search library"
+                placeholder="Search by title or author"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9 bg-white border-[#E2E6DF]"
               />
             </div>
             <Select value={formatFilter} onValueChange={setFormatFilter}>
-              <SelectTrigger className="w-full sm:w-44 bg-white border-[#E2E6DF]">
+              <SelectTrigger aria-label="Filter library by format" className="w-full sm:w-44 bg-white border-[#E2E6DF]">
                 <Filter className="mr-2 h-4 w-4 text-[#5C6E6E]" />
                 <SelectValue placeholder="Format" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Formats</SelectItem>
-                <SelectItem value="eBook">eBook</SelectItem>
-                <SelectItem value="Paperback">Paperback</SelectItem>
-                <SelectItem value="Hardcover">Hardcover</SelectItem>
+                <SelectItem value="ebook">E-books</SelectItem>
+                <SelectItem value="audiobook">Audiobooks</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -146,11 +148,11 @@ export default function LibraryPage() {
                   </Badge>
                 </div>
                 <CardContent className="p-5">
-                  <h3 className="font-serif font-bold text-base text-[#0F3D3E] line-clamp-1">
+                  <h3 className="font-serif font-bold text-base text-[#0F3D3E] [overflow-wrap:anywhere]">
                     {book.title}
                   </h3>
                   <p className="text-xs text-[#5C6E6E] mt-0.5">
-                    {(book.author && typeof book.author === "object") ? book.author?.name : (typeof book.author === "string" ? book.author : "Harglim Press")}
+                    {typeof book.author === "object" ? book.author?.name : book.author}
                   </p>
                   <Button asChild size="sm" className="w-full mt-4 bg-[#0F3D3E] text-white hover:bg-[#174C4D] gap-1.5 text-xs font-medium">
                     <Link href={`/books/${book.slug || book._id || book.id}`}>View Book Details</Link>
@@ -168,10 +170,10 @@ export default function LibraryPage() {
               <BookOpen className="h-8 w-8" />
             </div>
             <h3 className="font-serif font-bold text-xl text-[#0F3D3E]">
-              No books yet
+              {searchQuery || formatFilter !== "all" ? "No matching editions" : "No digital editions yet"}
             </h3>
             <p className="text-[#5C6E6E] text-sm max-w-sm mt-1.5 mb-6 leading-relaxed">
-              Start exploring and build your library
+              {searchQuery || formatFilter !== "all" ? "Clear your filters to see more editions." : "Browse the catalog for available digital formats."}
             </p>
             <Button asChild className="bg-[#0F3D3E] text-white hover:bg-[#174C4D] font-medium px-6 shadow-sm gap-2">
               <Link href="/books">

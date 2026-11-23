@@ -1,312 +1,179 @@
-"use client";
-import { describeApiError } from "@/lib/api-error";
+﻿"use client";
 
-
-import type { AuthorBook, BookPerformance } from "@/types/author-api";
-import { useState, useEffect, useCallback } from "react";
-import type { ReactNode } from "react";
-import Image from "next/image";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
-import { BookOpen, Eye, Star, TrendingUp, Search, Loader2, DollarSign, Upload } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import Image from "@/components/ui/backend-image";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import api from "@/lib/api";
-import { extractList } from "@/lib/tracking";
-import { useAuthStore } from "@/store/auth-store";
-import toast from "react-hot-toast";
-import { bookRoyaltyPerCopy } from "@/lib/royalty";
-import { getCategoryDisplayName } from "@/lib/categories";
-import { authorPanelProblem } from "@/lib/author-panel";
-import { onLiveChange } from "@/lib/live-sync";
 import { AuthorDataNotice } from "@/components/authors/author-data-notice";
 import { getAuthorBookStage } from "@/lib/author-book-status";
-import { fetchAuthorBooks } from "@/lib/author-books";
+import { authorPanelProblem } from "@/lib/author-panel";
+import { publishedNumber } from "@/lib/book-presentation";
+import { parseCollectionPage } from "@/lib/catalog-data";
+import { onLiveChange } from "@/lib/live-sync";
+import api from "@/lib/api";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import type { AuthorBook, BookPerformance } from "@/types/author-api";
+
+const currency = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" });
+
+function rupees(value: unknown) {
+  const amount = publishedNumber(value);
+  return amount === null ? "Unavailable" : currency.format(amount);
+}
+
+function Listing({ book }: { book: AuthorBook }) {
+  if (!book.slug || !["published", "active"].includes(String(book.status || "").toLowerCase())) return null;
+  return <Button asChild variant="outline" size="sm" className="min-h-11">
+    <Link href={`/books/${encodeURIComponent(book.slug)}`}>View Listing<span className="sr-only"> for {book.title}</span></Link>
+  </Button>;
+}
+
+function BookIdentity({ book }: { book: AuthorBook }) {
+  return <div className="flex min-w-0 items-center gap-3">
+    <Image src={book.coverImage || "/placeholder-book.svg"} alt="" width={48} height={72} className="h-18 w-12 shrink-0 rounded bg-muted object-contain" />
+    <p className="font-semibold [overflow-wrap:anywhere]">{book.title}</p>
+  </div>;
+}
+
+function bookFields(book: AuthorBook, performance?: BookPerformance) {
+  const category = book.category && typeof book.category === "object" ? book.category.name : null;
+  const stage = getAuthorBookStage(book);
+  return [
+    ["Category", category || "Unavailable"],
+    ["Status", stage.replaceAll("_", " ")],
+    ["MRP", rupees(book.mrp)],
+    ["Copies sold", publishedNumber(performance?.unitsSold ?? book.unitsSold)?.toLocaleString("en-IN") ?? "Unavailable"],
+    ["Royalty per unit", rupees(performance?.royaltyPerCopy ?? book.royaltyPerCopy)],
+  ];
+}
 
 export default function AuthorBooksPage() {
-  const [searchQuery, setSearchQuery] = useState("");
   const [books, setBooks] = useState<AuthorBook[]>([]);
-  const { user } = useAuthStore();
-  const [isLoading, setIsLoading] = useState(true);
+  const [performance, setPerformance] = useState(new Map<string, BookPerformance>());
+  const [query, setQuery] = useState("");
+  const search = useDebouncedValue(query.trim());
+  const [status, setStatus] = useState("");
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [revision, setRevision] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [bookProblem, setBookProblem] = useState<string | null>(null);
+  const [salesProblem, setSalesProblem] = useState<string | null>(null);
+  const retry = useCallback(() => setRevision((n) => n + 1), []);
 
-  const [problem, setProblem] = useState<string | null>(null);
-  const [booksLoaded, setBooksLoaded] = useState(false);
-  const [salesLoaded, setSalesLoaded] = useState(false);
-
-  const fetchBooks = useCallback(async () => {
-    if (!user) return;
-    setIsLoading(true);
-    try {
-      const noStore = { cache: "no-store" as const };
-      const [meResult, performanceResult, dashboardResult] = await Promise.allSettled([
-        fetchAuthorBooks(),
-        api.get("/authors/me/books/performance", noStore),
-        // GET /authors/me/books carries no sales fields; the dashboard's topBooks[] does
-        // (unitsSold, grossBookRevenue, knownAccruedRoyalty), so it backs up /performance.
-        api.get("/authors/me/dashboard", noStore),
-      ]);
-      setBooksLoaded(meResult.status === "fulfilled");
-      setSalesLoaded(performanceResult.status === "fulfilled" || dashboardResult.status === "fulfilled");
-      setProblem(
-        authorPanelProblem([
-          { label: "your book list", result: meResult },
-          { label: "book sales", result: performanceResult },
-          { label: "your dashboard", result: dashboardResult },
-        ])
-      );
-      const resPerformance = performanceResult.status === "fulfilled" ? performanceResult.value : null;
-      const resDashboard = dashboardResult.status === "fulfilled" ? dashboardResult.value : null;
-
-      // Sales/revenue/royalty live on the performance endpoint, keyed by book id.
-      const performanceById = new Map<string, BookPerformance>();
-      const dashboardTopBooks = resDashboard?.data?.data?.topBooks ?? resDashboard?.data?.topBooks;
-      const performanceRows = extractList<BookPerformance>(resPerformance?.data, "books");
-      const topBookRows = Array.isArray(dashboardTopBooks) ? dashboardTopBooks : [];
-      const addPerformanceRows = (rows: BookPerformance[]) =>
-        rows.forEach((row) => {
-          const id = String(row.bookId || row.book?._id || row.book || row._id || "");
-          if (id) performanceById.set(id, { ...(performanceById.get(id) || {}), ...row });
-        });
-      addPerformanceRows(performanceRows);
-      // Applied last: the dashboard figures are the ones the royalty ledger is built from.
-      addPerformanceRows(topBookRows);
-
-      // Every book assigned to the author, whoever created it, including zero-sale books.
-      const fetchedBooks: AuthorBook[] = meResult.status === "fulfilled" ? meResult.value : [];
-
-      setBooks(
-        fetchedBooks.map((book) => ({
-          ...book,
-          performance: performanceById.get(String(book._id || book.id)) || {},
-        }))
-      );
-    } catch (error) {
-      console.error("Failed to fetch author books:", describeApiError(error));
-      toast.error("Could not load author books list.");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [user]);
+  useEffect(() => onLiveChange(["author-data", "categories"], retry), [retry]);
 
   useEffect(() => {
-    fetchBooks();
-    // Coming back to the tab reloads, so changes made by the admin show without a refresh.
-    return onLiveChange(["author-data", "categories"], fetchBooks);
-  }, [fetchBooks]);
+    const controller = new AbortController();
+    const load = async () => {
+      setLoading(true);
+      setBookProblem(null);
+      try {
+        const { data } = await api.get("/authors/me/books", {
+          params: { page, limit: 12, search: search || undefined, status: status || undefined },
+          cache: "no-store", signal: controller.signal,
+        });
+        const result = parseCollectionPage<AuthorBook>(data, "books");
+        if (controller.signal.aborted) return;
+        setBooks(result.items);
+        setPages(result.pages ?? 1);
+        if (result.pages && page > result.pages) setPage(result.pages);
+      } catch (reason) {
+        if (controller.signal.aborted) return;
+        setBooks([]);
+        setBookProblem(authorPanelProblem([{ label: "your books", result: { status: "rejected", reason } }]));
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    };
+    void load();
+    return () => controller.abort();
+  }, [page, revision, search, status]);
 
-  const filteredBooks = books.filter((book) =>
-    book.title?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-  const publishedCount = books.filter((book) => isPublished(book)).length;
-  const totalSales = books.reduce((sum, book) => sum + getUnitsSold(book), 0);
-  const totalRevenue = books.reduce((sum, book) => sum + getGrossRevenue(book), 0);
-  const ratedBooks = books.filter((book) => getRating(book) > 0);
-  const avgRating = ratedBooks.length > 0 ? ratedBooks.reduce((sum, book) => sum + getRating(book), 0) / ratedBooks.length : 0;
+  useEffect(() => {
+    const controller = new AbortController();
+    api.get("/authors/me/books/performance", { cache: "no-store", signal: controller.signal })
+      .then(({ data }) => {
+        if (controller.signal.aborted) return;
+        const { items } = parseCollectionPage<BookPerformance>(data, "books");
+        setPerformance(new Map(items.flatMap((row) => row.bookId ? [[row.bookId, row]] as const : [])));
+        setSalesProblem(null);
+      })
+      .catch((reason) => {
+        if (controller.signal.aborted) return;
+        setPerformance(new Map());
+        setSalesProblem(authorPanelProblem([{ label: "lifetime book sales", result: { status: "rejected", reason } }]));
+      });
+    return () => controller.abort();
+  }, [revision]);
 
+  const pending = loading || query.trim() !== search;
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-5" aria-busy={pending}>
+      <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-serif font-bold lg:text-3xl text-[#0F3D3E] flex items-center gap-2.5">
-            <BookOpen className="h-7 w-7 text-[#8A6D1E]" />
-            <span>My Author Books</span>
-          </h1>
-          <p className="text-xs sm:text-sm text-[#5C6E6E] mt-1">
-            View your published catalog. Book edits are handled by the Harglim publishing team.
-          </p>
+          <h1 className="font-serif text-3xl font-semibold">My Books</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Your author-owned titles and lifetime sales. The publishing team manages catalog edits.</p>
         </div>
-        <Button asChild className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white rounded-xl text-xs font-bold gap-2">
-          <Link href="/author/manuscripts/new">
-            <Upload className="h-4 w-4" />
-            <span>Upload Manuscript</span>
-          </Link>
-        </Button>
+        <Button asChild><Link href="/author/manuscripts/new">Submit New Manuscript</Link></Button>
+      </header>
+      <AuthorDataNotice message={bookProblem || salesProblem} onRetry={retry} />
+      <div className="grid gap-3 rounded-xl border bg-card p-4 sm:grid-cols-[1fr_12rem]">
+        <div className="space-y-2">
+          <Label htmlFor="owned-book-search">Search your books</Label>
+          <Input id="owned-book-search" type="search" value={query} className="min-h-11"
+            onChange={(event) => { setPage(1); setQuery(event.target.value); }} />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="owned-book-status">Publication status</Label>
+          <select id="owned-book-status" className="min-h-11 w-full rounded-md border bg-card px-2 text-sm" value={status}
+            onChange={(event) => { setPage(1); setStatus(event.target.value); }}>
+            <option value="">All statuses</option>
+            <option value="published">Published</option>
+            <option value="draft">Draft and editorial review</option>
+            <option value="archived">Archived</option>
+          </select>
+        </div>
       </div>
-
-      <AuthorDataNotice message={problem} onRetry={fetchBooks} />
-
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={<BookOpen className="h-5 w-5 text-[#0F3D3E]" />} value={booksLoaded ? `${publishedCount} / ${books.length}` : "Unavailable"} label="Published / Total" />
-        <StatCard icon={<TrendingUp className="h-5 w-5 text-emerald-600" />} value={salesLoaded && booksLoaded ? totalSales : "Unavailable"} label="Copies Sold" />
-        <StatCard icon={<DollarSign className="h-5 w-5 text-amber-700" />} value={salesLoaded && booksLoaded ? `₹${totalRevenue.toLocaleString("en-IN")}` : "Unavailable"} label="Gross Book Revenue" />
-        <StatCard icon={<Star className="h-5 w-5 text-purple-700 fill-purple-700/20" />} value={ratedBooks.length ? avgRating.toFixed(1) : "—"} label="Reader Rating" />
-      </div>
-
-      <Card className="bg-white border-[#E2E6DF] rounded-2xl shadow-2xs">
-        <CardContent className="p-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#5C6E6E]" />
-            <Input
-              placeholder="Search your published books by title..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 bg-[#F8F9F7] text-xs h-10 border-[#E2E6DF] rounded-xl"
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="bg-white border-[#E2E6DF] rounded-2xl shadow-2xs overflow-hidden">
-        <CardHeader className="p-5 pb-3 border-b border-[#E2E6DF] bg-[#F8F9F7]/50">
-          <CardTitle className="text-lg font-serif font-bold text-[#0F3D3E]">
-            Catalog Books ({filteredBooks.length})
-          </CardTitle>
-          <CardDescription className="text-xs text-[#5C6E6E]">
-            Use View Listing to inspect the live store page. Upload new manuscripts from the Manuscripts area.
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
+      {pending ? <p role="status">Loading author books…</p> : !books.length
+        ? !bookProblem && <p className="rounded-xl border bg-card p-5">No books match your filters.</p>
+        : <>
+          <ul className="grid gap-3 sm:grid-cols-2 xl:hidden">
+            {books.map((book) => (
+              <li key={book._id} className="min-w-0 space-y-3 rounded-xl border bg-card p-4">
+                <BookIdentity book={book} />
+                <dl className="grid grid-cols-2 gap-2 text-sm">
+                  {bookFields(book, performance.get(book._id)).map(([label, value]) => <div key={label} className="min-w-0">
+                    <dt className="text-muted-foreground">{label}</dt><dd className="capitalize [overflow-wrap:anywhere]">{value}</dd>
+                  </div>)}
+                </dl>
+                <Listing book={book} />
+              </li>
+            ))}
+          </ul>
+          <div className="hidden rounded-xl border bg-card xl:block">
             <Table>
-              <TableHeader className="bg-[#F8F9F7]">
-                <TableRow className="border-[#E2E6DF]">
-                  <TableHead className="font-bold text-xs uppercase text-[#0F3D3E]">Book Details</TableHead>
-                  <TableHead className="font-bold text-xs uppercase text-[#0F3D3E]">Genre / Category</TableHead>
-                  <TableHead className="font-bold text-xs uppercase text-[#0F3D3E]">Current MRP</TableHead>
-                  <TableHead className="font-bold text-xs uppercase text-[#0F3D3E]">Royalty / Unit</TableHead>
-                  <TableHead className="font-bold text-xs uppercase text-[#0F3D3E]">Status</TableHead>
-                  <TableHead className="font-bold text-xs uppercase text-[#0F3D3E]">Sales</TableHead>
-                  <TableHead className="font-bold text-xs uppercase text-[#0F3D3E]">Rating</TableHead>
-                  <TableHead className="text-right font-bold text-xs uppercase text-[#0F3D3E]">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
+              <TableHeader><TableRow>
+                {["Book", "Category", "Status", "MRP", "Copies sold", "Royalty per unit", "Listing"].map((title) => <TableHead key={title}>{title}</TableHead>)}
+              </TableRow></TableHeader>
               <TableBody>
-                {isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="h-36 text-center">
-                      <Loader2 className="h-6 w-6 animate-spin mx-auto text-[#0F3D3E]" />
-                      <p className="text-xs text-[#5C6E6E] mt-2">Loading author books...</p>
-                    </TableCell>
-                  </TableRow>
-                ) : filteredBooks.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="h-44 text-center">
-                      <BookOpen className="h-10 w-10 mx-auto text-[#5C6E6E]/40 mb-2" />
-                      <h3 className="font-serif font-bold text-[#0F3D3E] text-base">{booksLoaded ? "No books found" : "Book list unavailable"}</h3>
-                      <p className="text-xs text-[#5C6E6E] mt-1 max-w-sm mx-auto">
-                        Published titles will appear here after editorial approval.
-                      </p>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredBooks.map((book, index) => <BookRow key={book._id || book.id} book={book} index={index} />)
-                )}
+                {books.map((book) => <TableRow key={book._id}>
+                  <TableCell className="max-w-[17rem] whitespace-normal"><BookIdentity book={book} /></TableCell>
+                  {bookFields(book, performance.get(book._id)).map(([label, value]) => <TableCell key={label} className="capitalize">{value}</TableCell>)}
+                  <TableCell><Listing book={book} /></TableCell>
+                </TableRow>)}
               </TableBody>
             </Table>
           </div>
-        </CardContent>
-      </Card>
+        </>}
+      {pages > 1 && <nav aria-label="Author book pages" className="flex flex-wrap items-center justify-center gap-3">
+        <Button variant="outline" disabled={page <= 1 || pending} onClick={() => setPage((n) => n - 1)}>Previous</Button>
+        <span className="text-sm">Page {page} of {pages}</span>
+        <Button variant="outline" disabled={page >= pages || pending} onClick={() => setPage((n) => n + 1)}>Next</Button>
+      </nav>}
     </div>
-  );
-}
-
-function StatCard({ icon, value, label }: { icon: ReactNode; value: ReactNode; label: string }) {
-  return (
-    <Card className="bg-white border-[#E2E6DF] rounded-2xl shadow-2xs">
-      <CardContent className="p-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#0F3D3E]/10">{icon}</div>
-          <div>
-            <p className="text-2xl font-serif font-bold text-[#0F3D3E]">{value}</p>
-            <p className="text-xs text-[#5C6E6E]">{label}</p>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-const getUnitsSold = (book: AuthorBook) =>
-  Number(book.performance?.unitsSold ?? book.performance?.totalSales ?? book.unitsSold ?? book.totalSales ?? 0) || 0;
-const getGrossRevenue = (book: AuthorBook) =>
-  Number(book.performance?.grossRevenue ?? book.performance?.grossBookRevenue ?? book.performance?.revenue ?? 0) || 0;
-const getRating = (book: AuthorBook) => Number(book.ratings ?? book.rating ?? 0) || 0;
-const getStatus = getAuthorBookStage;
-const isPublished = (book: AuthorBook) => String(book.status || "").toLowerCase() === "published";
-
-function BookRow({ book, index }: { book: AuthorBook; index: number }) {
-  const priceVal = book.mrp || book.price || 0;
-  // MRP − printing − platform − delivery, set by the publisher; never invented when missing.
-  const unitRoyalty = bookRoyaltyPerCopy(book);
-  const knownRoyalty =
-    book.performance?.knownRoyalty ??
-    book.performance?.knownAccruedRoyalty ??
-    book.performance?.royalty ??
-    book.performance?.royaltyEarned;
-
-  return (
-    <motion.tr
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.03 }}
-      className="border-b border-[#E2E6DF]/70 hover:bg-[#F8F9F7]/60 text-xs"
-    >
-      <TableCell>
-        <div className="flex items-center gap-3">
-          <Image
-            src={book.coverImage && (book.coverImage.startsWith("http") || book.coverImage.startsWith("/")) ? book.coverImage : "/logo.png"}
-            alt={book.title}
-            width={40}
-            height={56}
-            className="h-14 w-10 rounded-lg object-cover border border-[#E2E6DF] shadow-2xs shrink-0"
-          />
-          <div className="space-y-0.5">
-            <p className="font-serif font-bold text-sm text-[#0F3D3E] line-clamp-1">{book.title}</p>
-            <p className="text-[11px] text-[#5C6E6E]">
-              Format: <strong className="capitalize">{book.format || "—"}</strong>
-              {book.pages ? ` - ${book.pages} pages` : ""}
-            </p>
-            {book.isbn && <p className="text-[10px] font-mono text-[#5C6E6E]/80">ISBN: {book.isbn}</p>}
-          </div>
-        </div>
-      </TableCell>
-      <TableCell>
-        <Badge variant="outline" className="bg-[#F8F9F7] text-[#0F3D3E] border-[#E2E6DF] text-[11px] font-medium">
-          {getCategoryDisplayName(book.category)}
-        </Badge>
-      </TableCell>
-      <TableCell>
-        <span className="font-mono font-bold text-sm text-[#0F3D3E]">₹{priceVal}</span>
-      </TableCell>
-      <TableCell>
-        {unitRoyalty !== null ? (
-          <span className="font-mono font-bold text-emerald-700">₹{unitRoyalty.toLocaleString("en-IN")}</span>
-        ) : (
-          <span className="text-[11px] text-[#5C6E6E] italic">Set on approval</span>
-        )}
-      </TableCell>
-      <TableCell>
-        <Badge variant="outline" className="text-[10px] capitalize">{getStatus(book).replace(/_/g, " ")}</Badge>
-      </TableCell>
-      <TableCell>
-        <span className="font-bold text-[#0F3D3E]">{getUnitsSold(book)}</span>
-        <span className="text-[10px] text-[#5C6E6E] block">
-          copies{knownRoyalty !== undefined ? ` · ₹${Number(knownRoyalty).toLocaleString("en-IN")} royalty` : ""}
-        </span>
-      </TableCell>
-      <TableCell>
-        <div className="flex items-center gap-1">
-          <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-          <span className="font-bold text-[#0F3D3E]">{getRating(book).toFixed(1)}</span>
-          <span className="text-[10px] text-[#5C6E6E]">({book.reviewCount ?? book.totalReviews ?? 0})</span>
-        </div>
-      </TableCell>
-      <TableCell className="text-right">
-        {!isPublished(book) ? (
-          <span className="text-[11px] text-[#5C6E6E] italic">Not live yet</span>
-        ) : (
-        <Button size="sm" variant="outline" asChild className="h-8 text-xs font-bold text-[#0F3D3E] border-[#0F3D3E]/30 hover:bg-[#0F3D3E]/5 gap-1.5">
-          <Link href={`/books/${book.slug || book._id || book.id}`} target="_blank" rel="noopener noreferrer">
-            <Eye className="h-3.5 w-3.5 text-blue-600" />
-            <span>View Listing</span>
-          </Link>
-        </Button>
-        )}
-      </TableCell>
-    </motion.tr>
   );
 }

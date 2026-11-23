@@ -1,47 +1,30 @@
-"use client";
+﻿"use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion, useScroll, useSpring } from "framer-motion";
-import {
-  Menu,
-  ShoppingCart,
-  User,
-  ChevronDown,
-  Search,
-  LogOut,
-  LayoutDashboard,
-  PenTool,
-} from "lucide-react";
-import Image from "next/image";
+import { Menu, Search, ShoppingCart, User } from "lucide-react";
+import Image from "@/components/ui/backend-image";
 import logo from "@/public/logo.png";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-  SheetTrigger,
-} from "@/components/ui/sheet";
-import { useAuthStore } from "@/store/auth-store";
-import { useCartStore } from "@/store/cart-store";
-import { cn } from "@/lib/utils";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useSiteContent } from "@/context/site-content-context";
 import { useHydration } from "@/hooks/useHydration";
+import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/store/auth-store";
+import { useCartStore } from "@/store/cart-store";
 
 const navLinks = [
   { href: "/", label: "Home" },
   { href: "/books", label: "Books" },
-  { href: "/categories", label: "Categories" },
   { href: "/authors", label: "Authors" },
   { href: "/publish", label: "Publish with Us" },
   { href: "/about", label: "About" },
@@ -49,326 +32,142 @@ const navLinks = [
 ];
 
 export function Navbar() {
+  const headerRef = useRef<HTMLElement>(null);
   const { content } = useSiteContent();
-  const [openPath, setOpenPath] = useState<string | null>(null);
-  const [isScrolled, setIsScrolled] = useState(false);
   const pathname = usePathname();
-  const isOpen = openPath === pathname;
-  const setIsOpen = (open: boolean) => setOpenPath(open ? pathname : null);
+  const [openPath, setOpenPath] = useState<string | null>(null);
+  const closeMenu = () => setOpenPath(null);
   const { user, isAuthenticated, logout } = useAuthStore();
-  const rawItemCount = useCartStore((state) => state.items.reduce((total, item) => total + item.quantity, 0));
-  const itemCount = (isAuthenticated && user) ? rawItemCount : 0;
-  const isHydrated = useHydration();
-
-  // Hide Navbar on admin, private author dashboard, and auth routes
-  const isHiddenRoute = 
-    pathname?.startsWith('/admin') || 
-    pathname === '/author' || 
-    pathname?.startsWith('/author/') || 
-    pathname?.startsWith('/login') ||
-    pathname?.startsWith('/register');
+  const itemCount = useCartStore((state) => state.items.reduce((count, item) => count + item.quantity, 0));
+  const hydrated = useHydration();
+  const account = hydrated && isAuthenticated ? user : null;
+  const isHiddenRoute = /^\/(admin|author|login|register)(\/|$)/.test(pathname ?? "");
 
   useEffect(() => {
-    const handleScroll = () => {
-      setIsScrolled(window.scrollY > 10);
+    const header = headerRef.current;
+    if (!header) return;
+    const update = () => document.documentElement.style.setProperty("--site-header-height", `${header.offsetHeight}px`);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(header);
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty("--site-header-height");
     };
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
-
-  const { scrollYProgress } = useScroll();
-  const scaleX = useSpring(scrollYProgress, {
-    stiffness: 100,
-    damping: 30,
-    restDelta: 0.001
-  });
-
-
-  const getDashboardLink = () => {
-    if (!user) return "/dashboard";
-    switch (user.role) {
-      case "admin":
-        return "/admin";
-      case "author":
-        return "/author";
-      default:
-        return "/dashboard";
-    }
-  };
-
-  const handleLogout = () => {
-    useCartStore.getState().clearCart();
-    logout({ redirectToHome: true });
-  };
+  }, [isHiddenRoute]);
 
   if (isHiddenRoute) return null;
 
+  const role = account?.role;
+  const dashboard = role === "admin" ? { href: "/admin", label: "Admin Dashboard" }
+    : role === "author" ? { href: "/author", label: "Author Studio" }
+    : { href: "/dashboard", label: "Reader Dashboard" };
+  const profile = role === "admin" ? "/admin/users" : role === "author" ? "/author/settings" : "/dashboard/profile";
+  const redirect = pathname && pathname !== "/" ? `?redirect=${encodeURIComponent(pathname)}` : "";
+  const accountLinks = account ? [
+    dashboard,
+    ...(role === "admin" ? [] : [{ href: "/dashboard/orders", label: "My Orders" }]),
+    { href: profile, label: role === "author" ? "Profile Settings" : "Profile" },
+  ] : [
+    { href: `/login${redirect}`, label: "Login" },
+    { href: `/register${redirect}`, label: "Register" },
+  ];
+
+  const signOut = () => {
+    closeMenu();
+    useCartStore.getState().clearCart();
+    void logout({ redirectToHome: true });
+  };
+
+  const navigationLinks = (mobile: boolean) => navLinks.map(({ href, label }) => {
+    const current = pathname === href;
+    const active = current || (href !== "/" && pathname?.startsWith(`${href}/`));
+    return (
+      <Link key={href} href={href} aria-current={current ? "page" : undefined} onClick={mobile ? closeMenu : undefined}
+        className={cn("flex min-h-11 items-center rounded-md px-3 text-sm font-medium transition-colors",
+          active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
+        {label}
+      </Link>
+    );
+  });
+
   return (
-    <header
-      className={cn(
-        "fixed top-0 left-0 right-0 z-50 transition-all duration-300",
-        isScrolled
-          ? "bg-background/80 backdrop-blur-2xl shadow-sm border-b border-primary/10"
-          : "bg-background/40 backdrop-blur-sm border-b border-transparent",
+    <header ref={headerRef} className="sticky top-0 z-40 border-b border-border bg-background">
+      {hydrated && content?.announcementActive && content.announcementText && (
+        <p className="bg-primary px-4 py-2 text-center text-sm font-medium text-primary-foreground [overflow-wrap:anywhere]">
+          {content.announcementText}
+        </p>
       )}
-    >
-      {/* Scroll Progress Bar */}
-      <motion.div
-        className="absolute top-0 left-0 right-0 h-[2px] origin-left bg-gold-gradient z-50"
-        style={{ scaleX }}
-      />
-
-      {/* Dynamic Announcement Banner (Post-Hydration Only to Prevent Mismatch) */}
-      {isHydrated && content?.announcementActive && content?.announcementText && (
-        <div className="bg-gradient-to-r from-[#0F3D3E] via-[#174C4D] to-[#0F3D3E] text-[#D4AF37] text-xs font-semibold py-1.5 px-4 text-center border-b border-[#D4AF37]/30 flex items-center justify-center gap-2 shadow-xs">
-          <span>{content.announcementText}</span>
+      <div className="mx-auto grid h-16 max-w-7xl grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 sm:px-6 lg:grid-cols-[1fr_auto_1fr] lg:px-8">
+        <Link href="/" className="inline-flex min-h-11 w-fit max-w-full items-center rounded-md">
+          <Image src={logo} alt="Harglim Publishers" className="h-10 w-auto max-w-full object-contain sm:h-12" priority />
+        </Link>
+        <nav aria-label="Primary" className="hidden items-center gap-1 lg:flex">{navigationLinks(false)}</nav>
+        <div className="flex items-center justify-end gap-0.5 sm:gap-1">
+          <Button variant="ghost" size="icon" className="size-11" asChild>
+            <Link href="/search" aria-label="Search"><Search aria-hidden="true" /></Link>
+          </Button>
+          <Button variant="ghost" size="icon" className="relative size-11" asChild>
+            <Link href="/cart" aria-label={hydrated && itemCount ? `Cart (${itemCount} items)` : "Cart"}>
+              <ShoppingCart aria-hidden="true" />
+              {hydrated && itemCount > 0 && (
+                <span aria-hidden="true" className="absolute right-0 top-0 rounded-full bg-primary px-1.5 text-xs text-primary-foreground">
+                  {itemCount > 99 ? "99+" : itemCount}
+                </span>
+              )}
+            </Link>
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="size-11" aria-label={account ? `Account for ${account.name}` : "Account"}>
+                <User aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" sideOffset={8} collisionPadding={12} className="z-50 w-56 max-w-[calc(100vw-1.5rem)]">
+              {account && (
+                <>
+                  <DropdownMenuLabel className="[overflow-wrap:anywhere]">
+                    {account.name}
+                    <span className="block text-xs font-normal text-muted-foreground">{account.email}</span>
+                    <span className="block font-normal capitalize text-muted-foreground">{role}</span>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              {accountLinks.map(({ href, label }) => (
+                <DropdownMenuItem key={href} asChild className="min-h-11">
+                  <Link href={href}>{label}</Link>
+                </DropdownMenuItem>
+              ))}
+              {account && <DropdownMenuItem className="min-h-11" onSelect={signOut}>Sign Out</DropdownMenuItem>}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Sheet open={openPath === pathname && openPath !== null} onOpenChange={(open) => setOpenPath(open ? pathname : null)}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon" className="size-11 lg:hidden" aria-label="Toggle menu">
+                <Menu aria-hidden="true" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-[min(21rem,calc(100vw-2rem))] overflow-y-auto">
+              <SheetHeader className="pr-14">
+                <SheetTitle className="font-serif text-xl">Harglim Publishers</SheetTitle>
+                <SheetDescription className="sr-only">Site navigation and account links</SheetDescription>
+              </SheetHeader>
+              <nav aria-label="Mobile primary" className="space-y-1 px-4">{navigationLinks(true)}</nav>
+              <nav aria-label="Account" className="mx-4 space-y-1 border-t py-4">
+                {account && <div className="px-3 text-sm [overflow-wrap:anywhere]">
+                  <p className="font-medium">{account.name} <span className="capitalize text-muted-foreground">· {role}</span></p>
+                  <p className="text-xs text-muted-foreground">{account.email}</p>
+                </div>}
+                {accountLinks.map(({ href, label }) => (
+                  <Link key={href} href={href} onClick={closeMenu} className="flex min-h-11 items-center rounded-md px-3 text-sm hover:bg-muted">{label}</Link>
+                ))}
+                {account && <Button variant="ghost" className="min-h-11" onClick={signOut}>Sign Out</Button>}
+              </nav>
+            </SheetContent>
+          </Sheet>
         </div>
-      )}
-      
-      <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Logo */}
-          <Link href="/" className="flex items-center group py-1">
-            <Image
-              src={logo}
-              alt="Harglim Publishers"
-              className="h-11 sm:h-12 w-auto object-contain transition-transform group-hover:scale-105"
-              priority
-            />
-          </Link>
-
-          {/* Desktop Navigation */}
-          <div className="hidden lg:flex items-center gap-1">
-            {navLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={cn(
-                  "px-3 py-2 text-sm font-medium rounded-md transition-colors",
-                  pathname === link.href
-                    ? "text-primary bg-primary/10"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted",
-                )}
-              >
-                {link.label}
-              </Link>
-            ))}
-          </div>
-
-          {/* Right Side Actions */}
-          <div className="flex items-center gap-2">
-            {/* Search Button */}
-            <Button variant="ghost" size="icon" className="hidden sm:flex" asChild><Link href="/search">
-                <Search className="h-5 w-5" />
-                <span className="sr-only">Search</span>
-              </Link></Button>
-
-            {/* Cart */}
-            <Button variant="ghost" size="icon" className="relative" asChild><Link href={isAuthenticated ? "/checkout/cart" : "/login"}>
-                <ShoppingCart className="h-5 w-5" />
-                {isAuthenticated && user && isHydrated && itemCount > 0 && (
-                  <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-medium">
-                    {itemCount > 9 ? "9+" : itemCount}
-                  </span>
-                )}
-                <span className="sr-only">Cart</span>
-              </Link></Button>
-
-            {/* User Menu (Desktop) */}
-            {isAuthenticated && user ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="gap-2">
-                    <User className="h-5 w-5" />
-                    <span className="hidden sm:inline">
-                      {user.name.split(" ")[0]}
-                    </span>
-                    <ChevronDown className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56 p-2 rounded-2xl border border-[#E2E6DF] shadow-md bg-white">
-                  <div className="px-3 py-2 bg-[#F8F9F7] rounded-xl mb-1 border border-[#E2E6DF]">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-serif font-bold text-[#0F3D3E] truncate">{user.name}</p>
-                      <span className={cn(
-                        "text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border",
-                        user.role === "admin" ? "bg-rose-50 text-rose-700 border-rose-200" :
-                        user.role === "author" ? "bg-[#D4AF37]/20 text-[#0F3D3E] border-[#D4AF37]/40" :
-                        "bg-[#0F3D3E]/10 text-[#0F3D3E] border-[#0F3D3E]/20"
-                      )}>
-                        {user.role === "admin" ? "Admin" : user.role === "author" ? "Author" : "Reader"}
-                      </span>
-                    </div>
-                    <p className="text-xs text-[#5C6E6E] truncate">
-                      {user.email}
-                    </p>
-                  </div>
-                  <DropdownMenuSeparator className="my-1 bg-[#E2E6DF]" />
-                  <DropdownMenuItem asChild className="rounded-lg px-3 py-2 cursor-pointer focus:bg-[#F0F2ED] text-xs font-medium text-[#0F3D3E]">
-                    <Link
-                      href={getDashboardLink()}
-                      className="flex items-center gap-2.5"
-                    >
-                      <LayoutDashboard className="h-4 w-4 text-[#0F3D3E]" />
-                      <span>
-                        {user.role === "admin" ? "Admin Ops Control Panel" : user.role === "author" ? "Author Studio Workspace" : "Reader Dashboard"}
-                      </span>
-                    </Link>
-                  </DropdownMenuItem>
-                  {user.role === "author" && (
-                    <DropdownMenuItem asChild className="rounded-lg px-3 py-2 cursor-pointer focus:bg-[#F0F2ED] text-xs font-medium text-[#0F3D3E]">
-                      <Link
-                        href="/author/manuscripts/new"
-                        className="flex items-center gap-2.5"
-                      >
-                        <PenTool className="h-4 w-4 text-[#D4AF37]" />
-                        Submit Manuscript
-                      </Link>
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem asChild className="rounded-lg px-3 py-2 cursor-pointer focus:bg-[#F0F2ED] text-xs font-medium text-[#0F3D3E]">
-                    <Link
-                      href="/dashboard/orders"
-                      className="flex items-center gap-2.5"
-                    >
-                      <ShoppingCart className="h-4 w-4 text-[#0F3D3E]" />
-                      <span>My Orders & Tracking</span>
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild className="rounded-lg px-3 py-2 cursor-pointer focus:bg-[#F0F2ED] text-xs font-medium text-[#0F3D3E]">
-                    <Link
-                      href={user.role === "admin" ? "/admin/users" : user.role === "author" ? "/author/settings" : "/dashboard/profile"}
-                      className="flex items-center gap-2.5"
-                    >
-                      <User className="h-4 w-4 text-[#0F3D3E]" />
-                      Profile Settings
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator className="my-1 bg-[#E2E6DF]" />
-                  <DropdownMenuItem
-                    onClick={handleLogout}
-                    className="rounded-lg px-3 py-2 cursor-pointer text-rose-600 focus:text-rose-700 focus:bg-rose-50 text-xs font-medium gap-2"
-                  >
-                    <LogOut className="h-4 w-4 text-rose-500" />
-                    <span>Log out</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : (
-              <div className="hidden sm:flex items-center gap-2">
-                <Button variant="ghost" size="sm" asChild><Link href={pathname && pathname !== "/login" && pathname !== "/register" ? `/login?redirect=${encodeURIComponent(pathname)}` : "/login"}>
-                    Login
-                  </Link></Button>
-                <Button size="sm" asChild><Link href={pathname && pathname !== "/login" && pathname !== "/register" ? `/register?redirect=${encodeURIComponent(pathname)}` : "/register"}>Register</Link></Button>
-              </div>
-            )}
-
-            {/* Mobile Menu Button */}
-            <Sheet open={isOpen} onOpenChange={setIsOpen}>
-              <SheetTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="lg:hidden"
-                >
-                  <Menu className="h-6 w-6" />
-                  <span className="sr-only">Toggle menu</span>
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="left" className="w-[300px] sm:w-[400px] flex flex-col border-r shadow-2xl">
-                <SheetHeader className="text-left border-b pb-4 mb-2">
-                  <SheetTitle className="font-serif text-2xl font-bold text-gold-gradient">
-                    Harglim Publishers
-                  </SheetTitle>
-                  <SheetDescription className="sr-only">Mobile Navigation Menu</SheetDescription>
-                </SheetHeader>
-                <div className="flex-1 overflow-y-auto space-y-1 py-4">
-                  {navLinks.map((link) => (
-                    <Link
-                      key={link.href}
-                      href={link.href}
-                      onClick={() => setIsOpen(false)}
-                      className={cn(
-                        "block px-3 py-3 text-base font-medium rounded-md transition-all",
-                        pathname === link.href
-                          ? "text-primary bg-primary/10 border-l-4 border-primary pl-2"
-                          : "text-muted-foreground hover:text-foreground hover:bg-muted hover:pl-4",
-                      )}
-                    >
-                      {link.label}
-                    </Link>
-                  ))}
-                </div>
-
-                {/* Mobile Drawer Footer: Authenticated User & Guest controls */}
-                {isAuthenticated && user ? (
-                  <div className="pt-4 border-t border-border mt-auto space-y-2 pb-4">
-                    <div className="px-3 py-2.5 bg-[#F8F9F7] rounded-xl border border-[#E2E6DF]">
-                      <div className="flex items-center justify-between mb-0.5">
-                        <p className="text-sm font-serif font-bold text-[#0F3D3E] truncate">{user.name}</p>
-                        <span className={cn(
-                          "text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border",
-                          user.role === "admin" ? "bg-rose-50 text-rose-700 border-rose-200" :
-                          user.role === "author" ? "bg-[#D4AF37]/20 text-[#0F3D3E] border-[#D4AF37]/40" :
-                          "bg-[#0F3D3E]/10 text-[#0F3D3E] border-[#0F3D3E]/20"
-                        )}>
-                          {user.role === "admin" ? "Admin" : user.role === "author" ? "Author" : "Reader"}
-                        </span>
-                      </div>
-                      <p className="text-xs text-[#5C6E6E] truncate">{user.email}</p>
-                    </div>
-
-                    <Link
-                      href={getDashboardLink()}
-                      onClick={() => setIsOpen(false)}
-                      className="flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-[#0F3D3E] rounded-lg hover:bg-muted"
-                    >
-                      <LayoutDashboard className="h-4 w-4" />
-                      <span>{user.role === "admin" ? "Admin Ops Control Panel" : user.role === "author" ? "Author Studio Workspace" : "Reader Dashboard"}</span>
-                    </Link>
-
-                    <Link
-                      href="/dashboard/orders"
-                      onClick={() => setIsOpen(false)}
-                      className="flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-[#0F3D3E] rounded-lg hover:bg-muted"
-                    >
-                      <ShoppingCart className="h-4 w-4" />
-                      <span>My Orders & Tracking</span>
-                    </Link>
-
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        setIsOpen(false);
-                        handleLogout();
-                      }}
-                      className="w-full justify-start text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 gap-2 h-9 px-3"
-                    >
-                      <LogOut className="h-4 w-4 text-rose-500" />
-                      <span>Log out</span>
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="pt-4 border-t border-border mt-auto space-y-3 pb-6">
-                    <Button variant="outline" className="w-full" asChild><Link
-                      href={pathname && pathname !== "/login" && pathname !== "/register" ? `/login?redirect=${encodeURIComponent(pathname)}` : "/login"}
-                      className="block"
-                      onClick={() => setIsOpen(false)}
-                    >
-                        Login
-                      </Link></Button>
-                    <Button className="w-full" asChild><Link
-                      href={pathname && pathname !== "/login" && pathname !== "/register" ? `/register?redirect=${encodeURIComponent(pathname)}` : "/register"}
-                      className="block"
-                      onClick={() => setIsOpen(false)}
-                    >Register</Link></Button>
-                  </div>
-                )}
-              </SheetContent>
-            </Sheet>
-          </div>
-        </div>
-      </nav>
+      </div>
     </header>
   );
 }

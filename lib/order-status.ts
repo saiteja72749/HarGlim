@@ -20,8 +20,8 @@ export type PaymentState =
 export const PAYMENT_STATE_META: Record<PaymentState, { label: string; tone: string }> = {
   awaiting_payment: { label: "Awaiting Payment", tone: "bg-amber-500/10 text-amber-700 border-amber-500/30" },
   verification_pending: { label: "Verification Pending", tone: "bg-amber-500/10 text-amber-700 border-amber-500/30" },
-  paid: { label: "Payment Confirmed", tone: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30" },
-  failed: { label: "Payment Rejected", tone: "bg-rose-500/10 text-rose-700 border-rose-500/30" },
+  paid: { label: "Payment Verified", tone: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30" },
+  failed: { label: "Payment Could Not Be Verified", tone: "bg-rose-500/10 text-rose-700 border-rose-500/30" },
   expired: { label: "Payment Expired", tone: "bg-gray-500/10 text-gray-600 border-gray-500/30" },
   cancelled: { label: "Payment Cancelled", tone: "bg-gray-500/10 text-gray-600 border-gray-500/30" },
 };

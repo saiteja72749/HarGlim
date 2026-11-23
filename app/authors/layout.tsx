@@ -1,15 +1,5 @@
-import type { Metadata } from 'next';
+import { pageMetadata } from '@/lib/page-metadata';
 
-export const metadata: Metadata = {
-  // Template repeated here: a plain title would stop the root template reaching child pages.
-  title: { default: 'Authors', template: '%s | Harglim Publishers' },
-  description:
-    'Meet Harglim Publishers authors and explore books from writers across a range of genres.',
-  alternates: { canonical: '/authors' },
-};
+export function generateMetadata() { return pageMetadata("/authors", "Authors", false); }
 
-export default function AuthorsLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
-  return children;
-}
+export default function Layout({ children }: { children: React.ReactNode }) { return children; }

@@ -3,7 +3,7 @@
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback } from "react";
-import Image from "next/image";
+import Image from '@/components/ui/backend-image';
 import Link from "next/link";
 import api from "@/lib/api";
 import { getBookAuthorInfo } from "@/lib/utils";

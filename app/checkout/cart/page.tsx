@@ -1,6 +1,6 @@
 "use client";
 
-import Image from "next/image";
+import Image from '@/components/ui/backend-image';
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -14,16 +14,20 @@ import { Button } from "@/components/ui/button";
 import { useCartStore } from "@/store/cart-store";
 import { useAuthStore } from "@/store/auth-store";
 import type { CartItem } from "@/types";
+import { getCartUnitPrice, publishedNumber } from "@/lib/book-presentation";
+import { useHydration } from "@/hooks/useHydration";
 
 import { RecentOrdersSection } from "@/components/orders/recent-orders-section";
 
 function CartItemRow({ item }: { item: CartItem }) {
   const removeItem = useCartStore((state) => state.removeItem);
   const updateQuantity = useCartStore((state) => state.updateQuantity);
-  const price = item.book.price || 0;
+  const price = getCartUnitPrice(item.book);
+  const stock = publishedNumber(item.book.stock);
+  const available = stock === null ? Infinity : Math.max(0, stock - (publishedNumber(item.book.reservedStock) ?? 0));
 
   return (
-    <div className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+    <div className="rounded-2xl border border-border bg-card p-4 sm:p-6">
       <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex gap-4">
           <Image
@@ -31,11 +35,11 @@ function CartItemRow({ item }: { item: CartItem }) {
             alt={item.book.title}
             width={80}
             height={112}
-            className="h-28 w-20 rounded-2xl object-cover"
+            className="h-28 w-20 shrink-0 rounded-md object-contain"
           />
-          <div>
+          <div className="min-w-0 [overflow-wrap:anywhere]">
             <Link
-              href={`/books/${item.book.slug}`}
+              href={`/books/${item.book.slug || item.book._id}`}
               className="text-lg font-semibold hover:text-primary"
             >
               {item.book.title}
@@ -43,13 +47,13 @@ function CartItemRow({ item }: { item: CartItem }) {
             <p className="text-sm text-muted-foreground mt-1">
               {item.book.author && typeof item.book.author === "object"
                 ? item.book.author.name
-                : "Unknown Author"}
+                : item.book.author}
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
-              <span className="rounded-full bg-secondary/10 px-3 py-1 text-secondary">
+              {item.book.format && <span className="rounded-full bg-muted px-3 py-1 text-foreground">
                 {item.book.format}
-              </span>
-              <span className="font-semibold">₹{price.toLocaleString()}</span>
+              </span>}
+              <span className="font-semibold">{price === null ? "Price unavailable" : `₹${price.toLocaleString("en-IN")} each`}</span>
             </div>
           </div>
         </div>
@@ -59,24 +63,30 @@ function CartItemRow({ item }: { item: CartItem }) {
             <Button
               variant="ghost"
               size="icon"
+              aria-label={`Decrease quantity of ${item.book.title}`}
+              disabled={item.quantity <= 1}
               onClick={() => updateQuantity(item.book._id, item.quantity - 1)}
             >
               <Minus className="h-4 w-4" />
             </Button>
-            <span className="min-w-[2rem] text-center font-semibold">
+            <span aria-live="polite" className="min-w-[2rem] text-center font-semibold">
               {item.quantity}
             </span>
             <Button
               variant="ghost"
               size="icon"
+              aria-label={`Increase quantity of ${item.book.title}`}
+              disabled={item.quantity >= available}
               onClick={() => updateQuantity(item.book._id, item.quantity + 1)}
             >
               <Plus className="h-4 w-4" />
             </Button>
           </div>
+          {price !== null && <p className="text-sm font-medium">Line subtotal ₹{(price * item.quantity).toLocaleString("en-IN")}</p>}
           <Button
             variant="outline"
             size="sm"
+            aria-label={`Remove ${item.book.title} from cart`}
             onClick={() => removeItem(item.book._id)}
           >
             Remove
@@ -89,22 +99,21 @@ function CartItemRow({ item }: { item: CartItem }) {
 
 export default function CartPage() {
   const router = useRouter();
+  const hydrated = useHydration();
   const items = useCartStore((state) => state.items);
   const subtotal = useCartStore((state) => state.getSubtotal());
-  useCartStore((state) => state.getTax());
-  useCartStore((state) => state.getShipping());
-  const total = useCartStore((state) => state.getTotal());
   const { user } = useAuthStore();
 
   const handleCheckout = () => {
     router.push("/checkout/checkout");
   };
 
+  if (!hydrated) return <p className="p-8 text-center" role="status">Loading cart…</p>;
   if (!items.length) {
     return (
       <div className="bg-background min-h-screen py-24">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <div className="rounded-3xl border border-dashed border-muted bg-card p-16">
+          <div className="rounded-2xl border border-dashed bg-card p-6 sm:p-12">
             <ShoppingCart className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
             <h1 className="text-3xl font-bold">Your cart is empty</h1>
             
@@ -113,10 +122,11 @@ export default function CartPage() {
                 <p className="text-muted-foreground mt-3 text-lg">
                   Create an account to start building your personal library.
                 </p>
-                <div className="mt-8 flex justify-center gap-4">
+                <div className="mt-8 flex flex-wrap justify-center gap-4">
                   <Button size="lg" asChild><Link href="/login">Log In</Link></Button>
                   <Button size="lg" variant="outline" asChild><Link href="/register">Sign Up</Link></Button>
                 </div>
+                <Button className="mt-4" variant="ghost" asChild><Link href="/books">Browse Books</Link></Button>
               </>
             ) : (
               <>
@@ -163,7 +173,7 @@ export default function CartPage() {
             ))}
           </section>
 
-          <aside className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+          <aside className="self-start rounded-2xl border border-border bg-card p-5">
             <div className="flex items-center gap-3 rounded-2xl bg-emerald-500/10 p-4 border border-emerald-500/20">
               <Truck className="h-5 w-5 text-emerald-600" />
               <div>
@@ -176,7 +186,7 @@ export default function CartPage() {
 
             <div className="mt-6 space-y-3">
               <div className="flex items-center justify-between text-sm text-muted-foreground">
-                <span>Subtotal</span>
+                <span>Estimated book subtotal</span>
                 <span>₹{subtotal.toLocaleString()}</span>
               </div>
               <div className="flex items-center justify-between text-sm font-medium text-emerald-600">
@@ -185,12 +195,6 @@ export default function CartPage() {
               </div>
             </div>
 
-            <div className="mt-6 border-t border-border pt-6">
-              <div className="flex items-center justify-between text-lg font-semibold">
-                <span>Estimated book subtotal</span>
-                <span>₹{total.toFixed(2)}</span>
-              </div>
-            </div>
 
             <div className="mt-6 space-y-3">
               <Button className="w-full" onClick={handleCheckout}>

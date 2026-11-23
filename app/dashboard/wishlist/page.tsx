@@ -2,11 +2,11 @@
 import { describeApiError } from "@/lib/api-error";
 
 
-import { useState, useCallback } from "react";
-import Image from "next/image";
+import { useState, useCallback, useRef } from "react";
+import Image from '@/components/ui/backend-image';
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Heart, ShoppingCart, Trash2, Star, Grid, List } from "lucide-react";
+import { Heart, ShoppingCart, Trash2, Grid, List } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,8 @@ export default function WishlistPage() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const pendingRemovals = useRef(new Set<string>());
+  const [removing, setRemoving] = useState<string[]>([]);
   const { addItem } = useCartStore();
 
   const fetchWishlist = useCallback(async () => {
@@ -53,14 +55,20 @@ export default function WishlistPage() {
   }, [fetchWishlist]);
 
   const removeFromWishlist = async (id: string) => {
-    if (!user?._id && !user?.id) return;
+    if ((!user?._id && !user?.id) || pendingRemovals.current.has(id)) return;
+    pendingRemovals.current.add(id);
+    setRemoving((current) => [...current, id]);
     const userId = user._id || user.id;
     try {
-      await api.delete(`/users/${userId}/wishlist/${id}`);
-      setItems(items.filter((item) => (item._id || item.id) !== id));
+      const { data } = await api.delete(`/users/${userId}/wishlist/${id}`);
+      if (data?.success === false) throw new Error("Wishlist change was not accepted.");
+      setItems((current) => current.filter((item) => (item._id || item.id) !== id));
       toast.success("Removed from wishlist");
     } catch {
       toast.error("Failed to remove from wishlist");
+    } finally {
+      pendingRemovals.current.delete(id);
+      setRemoving((current) => current.filter((entry) => entry !== id));
     }
   };
 
@@ -95,6 +103,8 @@ export default function WishlistPage() {
           <Button
             variant={viewMode === "grid" ? "default" : "outline"}
             size="icon"
+            aria-label="Grid view"
+            aria-pressed={viewMode === "grid"}
             onClick={() => setViewMode("grid")}
           >
             <Grid className="h-4 w-4" />
@@ -102,6 +112,8 @@ export default function WishlistPage() {
           <Button
             variant={viewMode === "list" ? "default" : "outline"}
             size="icon"
+            aria-label="List view"
+            aria-pressed={viewMode === "list"}
             onClick={() => setViewMode("list")}
           >
             <List className="h-4 w-4" />
@@ -129,7 +141,7 @@ export default function WishlistPage() {
         >
           {items.map((item, index) => (
             <motion.div
-              key={item.id}
+              key={item._id || item.id}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.1 }}
@@ -154,6 +166,8 @@ export default function WishlistPage() {
                       variant="ghost"
                       size="icon"
                       className="absolute top-2 right-2 bg-background/80 hover:bg-background text-destructive"
+                      aria-label={`Remove ${item.title} from wishlist`}
+                      disabled={removing.includes(item._id || item.id)}
                       onClick={() => removeFromWishlist(item._id || item.id)}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -169,13 +183,6 @@ export default function WishlistPage() {
                       </h3>
                     </Link>
                     <p className="text-sm text-muted-foreground">{typeof item.author === 'object' ? item.author?.name : item.author}</p>
-                    <div className="flex items-center gap-1 mt-2">
-                      <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
-                      <span className="text-sm font-medium">{item.rating || 0}</span>
-                      <span className="text-sm text-muted-foreground">
-                        ({item.totalReviews ?? item.reviews ?? 0})
-                      </span>
-                    </div>
                     <div className="flex items-center gap-2 mt-3">
                       <span className="text-lg font-bold">₹{item.price || 0}</span>
                     </div>
@@ -223,17 +230,12 @@ export default function WishlistPage() {
                           variant="ghost"
                           size="icon"
                           className="text-destructive"
-                          onClick={() => removeFromWishlist(item._id || item.id)}
+                          aria-label={`Remove ${item.title} from wishlist`}
+                      disabled={removing.includes(item._id || item.id)}
+                      onClick={() => removeFromWishlist(item._id || item.id)}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
-                      </div>
-                      <div className="flex items-center gap-1 mt-2">
-                        <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
-                        <span className="text-sm font-medium">{item.rating || 0}</span>
-                        <span className="text-sm text-muted-foreground">
-                          ({item.totalReviews ?? item.reviews ?? 0} reviews)
-                        </span>
                       </div>
                       <div className="flex items-center justify-between mt-3">
                         <div className="flex items-center gap-2">

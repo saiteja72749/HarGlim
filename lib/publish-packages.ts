@@ -1,5 +1,5 @@
 import { record } from "@/lib/api-error";
-import api from "@/lib/api";
+import { getPublic, invalidateApiCache } from "@/lib/api";
 import { notifyLiveChange, onLiveChange } from "@/lib/live-sync";
 
 /**
@@ -62,12 +62,15 @@ export const sortPackages = <T extends PackageCard>(list: T[]) => [...list].sort
 
 /** Active packages in display order. Throws when the request fails, so pages can show a retry. */
 export async function fetchPublicPackages(): Promise<PackageCard[]> {
-  const { data } = await api.get("/publish-packages", { cache: "no-store" });
+  const { data } = await getPublic("/publish-packages");
   return sortPackages(normalizePackages(data?.data ?? data));
 }
 
 /** Reload packages when an admin saves them in another tab, or when this tab regains focus. */
-export const onPackagesChanged = (reload: () => void) => onLiveChange("publish-packages", reload);
+export const onPackagesChanged = (reload: () => void) => onLiveChange("publish-packages", (reason) => {
+  if (reason === "change") invalidateApiCache("/publish-packages");
+  reload();
+}, 30_000);
 
 /** Called by the admin page after every successful create, edit, archive or restore. */
 export const notifyPackagesChanged = () => notifyLiveChange("publish-packages");

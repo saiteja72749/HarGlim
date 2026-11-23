@@ -1,31 +1,29 @@
 "use client";
-import { record } from "@/lib/api-error";
+import { publishedNumber } from "@/lib/book-presentation";
+import { publicApiMessage, publicRetryAt, record } from "@/lib/api-error";
 
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import Image from "next/image";
+import Image from '@/components/ui/backend-image';
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BookOpen,
   Users,
   Truck,
-  Star,
   ArrowRight,
   Sparkles,
   ShieldCheck,
-  ChevronDown,
-  ChevronUp,
   Search,
-  TrendingUp,
   Feather,
   Layers,
   Award,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { BookCard } from "@/components/books/book-card";
+import { HomeBookShelf } from "@/components/books/home-book-shelf";
 import { Input } from "@/components/ui/input";
-import api from "@/lib/api";
+import { getPublic } from "@/lib/api";
+import { uniqueBooks } from "@/lib/catalog";
 import { ErrorState } from "@/components/ui/error-state";
 import type { Book, Category, Author } from "@/types";
 import { fetchBackendCategories } from "@/lib/categories";
@@ -35,6 +33,7 @@ import { getBookAuthorInfo } from "@/lib/utils";
 import { useSiteContent } from "@/context/site-content-context";
 import { flattenFaqs, readSection } from "@/lib/page-content";
 import { fetchPublicStats } from "@/lib/public-stats";
+import { cn } from "@/lib/utils";
 
 const WHY_CHOOSE_ICONS = [Feather, Layers, Truck, ShieldCheck];
 
@@ -61,22 +60,20 @@ const getOptimizedCoverImage = (src?: string) => {
 export default function Home() {
   const { content } = useSiteContent();
   const [featuredBooks, setFeaturedBooks] = useState<Book[]>([]);
-  const [bestsellers, setBestsellers] = useState<Book[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [authors, setAuthors] = useState<Author[]>([]);
   // null until the backend answers, so the counters never flash "0+" on refresh.
   const [liveStats, setLiveStats] = useState<{ booksCount: number; authorsCount: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [featuredError, setFeaturedError] = useState(false);
+  const [featuredError, setFeaturedError] = useState<unknown>(null);
+  const [categoryError, setCategoryError] = useState<unknown>(null);
 
   // Hero featured-book rotation
   const [heroIndex, setHeroIndex] = useState(0);
-  const [heroPaused, setHeroPaused] = useState(false);
 
   // FAQ Accordion & Search State
   const [faqSearch, setFaqSearch] = useState("");
-  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
 
   // Copy from Admin → Site Content: FAQs (categorised or flat) and the "why choose us" cards.
   const parseFaqs = (raw?: string) => {
@@ -93,61 +90,58 @@ export default function Home() {
     "homeWhyChooseJson"
   ).map((block, idx) => ({ ...block, icon: WHY_CHOOSE_ICONS[idx % WHY_CHOOSE_ICONS.length] }));
 
-  const fetchHomeData = useCallback(async () => {
+  const fetchFeaturedBooks = useCallback(async () => {
     setLoading(true);
+    setFeaturedError(null);
+    try {
+      const { data } = await getPublic("/books", { params: { featured: true, limit: 8 } });
+      setFeaturedBooks(uniqueBooks(extractBooks(data).filter((book) => book.isFeatured === true || book.featured === true)));
+    } catch (error) {
+      setFeaturedError(error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchHomeCategories = useCallback(async (fresh = false) => {
+    setCategoryError(null);
+    try {
+      const items = await fetchBackendCategories(fresh);
+      setCategories(items.filter((category) => category.featured).slice(0, 6) as Category[]);
+    } catch (error) {
+      setCategoryError(error);
+    }
+  }, []);
+
+  const fetchHomeData = useCallback(async () => {
     setError(false);
-    setFeaturedError(false);
-    // These collections are independent. Start them together rather than making
-    // every secondary section wait for the featured-books round trip.
-    const featured = api.get("/books?featured=true&limit=8").then((response) => {
-      setFeaturedBooks(extractBooks(response.data).filter((book) => book.isFeatured === true || book.featured === true));
-      setLoading(false);
-      return response;
-    }).catch((error: unknown) => {
-      setFeaturedBooks([]);
-      setFeaturedError(true);
-      setLoading(false);
-      throw error;
-    });
-    const [featuredResult, bestsellersRes, categoriesRes, authorsRes, statsRes] = await Promise.allSettled([
-      featured,
-      api.get("/books?bestseller=true&limit=4"),
-      fetchBackendCategories(),
-      api.get("/authors?limit=6"),
+    const [authorsRes, statsRes] = await Promise.allSettled([
+      getPublic("/authors", { params: { limit: 6 } }),
       fetchPublicStats(),
     ]);
-    if (bestsellersRes.status === "fulfilled") {
-      try { setBestsellers(extractBooks(bestsellersRes.value.data)); }
-      catch { setError(true); }
-    }
-    if (categoriesRes.status === "fulfilled") setCategories(categoriesRes.value.filter((category) => category.featured).slice(0, 6) as Category[]);
     if (authorsRes.status === "fulfilled") {
       const data = authorsRes.value.data;
       const items = data?.data?.authors || data?.data || data;
       if (Array.isArray(items)) setAuthors(items);
       else setError(true);
     }
-    setLiveStats(statsRes.status === "fulfilled" ? statsRes.value : null);
-    if ([featuredResult, bestsellersRes, categoriesRes, authorsRes, statsRes].some((result) => result.status === "rejected")) setError(true);
+    if (statsRes.status === "fulfilled") setLiveStats(statsRes.value);
+    if (authorsRes.status === "rejected" || statsRes.status === "rejected") setError(true);
   }, []);
 
-  useEffect(() => {
-    void fetchHomeData();
-  }, [fetchHomeData]);
-
-  useEffect(() => onLiveChange("categories", () => {
-    fetchBackendCategories(true)
-      .then((items) => setCategories(items.filter((category) => category.featured).slice(0, 6) as Category[]))
-      .catch(() => setError(true));
-  }), []);
+  useEffect(() => { void fetchHomeData(); }, [fetchHomeData]);
 
   useEffect(() => {
-    if (heroPaused || featuredBooks.length < 2) return;
-    const timer = setInterval(() => {
-      setHeroIndex((i) => (i + 1) % featuredBooks.length);
-    }, 4500);
-    return () => clearInterval(timer);
-  }, [heroPaused, featuredBooks.length]);
+    void fetchHomeCategories();
+    return onLiveChange("categories", (reason) => void fetchHomeCategories(reason === "change"), 60_000);
+  }, [fetchHomeCategories]);
+
+  useEffect(() => {
+    void fetchFeaturedBooks();
+    return onLiveChange("books", () => {
+      void fetchFeaturedBooks();
+    }, 20_000);
+  }, [fetchFeaturedBooks]);
 
   const filteredFaqs = activeFaqs.filter(
     (faq) =>
@@ -184,8 +178,8 @@ export default function Home() {
               </div>
 
               {/* Main Headline */}
-              <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-serif font-bold tracking-tight text-white leading-[1.1] whitespace-pre-line">
-                {content.homeTitle || "Harglim Publishers"}
+              <h1 className="text-[clamp(2rem,5.5vw,4.5rem)] font-serif font-bold tracking-tight text-white leading-[1.1] whitespace-pre-line">
+                {content.homeTitle || "You write, we print. You dream, we publish."}
               </h1>
 
               {/* Subtitle */}
@@ -197,7 +191,7 @@ export default function Home() {
               <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start pt-2">
                 <Button
                     size="lg"
-                    className="w-full sm:w-auto bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold h-14 px-8 rounded-full shadow-[0_0_25px_rgba(212,175,55,0.4)] hover:shadow-[0_0_35px_rgba(212,175,55,0.6)] transition-all gap-2 text-base"
+                    className="w-full sm:w-auto bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold h-14 px-8 rounded-full transition-colors gap-2 text-base"
                    asChild><Link href="/publish">
                     <span>{content.homeCtaButtonText || "Publish"}</span>
                     <ArrowRight className="h-4 w-4" />
@@ -212,22 +206,22 @@ export default function Home() {
               </div>
 
               {/* Trust Badges */}
-              <div className="pt-8 border-t border-white/10 grid grid-cols-2 gap-4 text-left">
+              {liveStats && <div className="pt-5 border-t border-white/10 grid grid-cols-2 gap-4 text-left">
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-1.5">
                     <BookOpen className="h-4 w-4 text-[#D4AF37]" />
                     <span className="font-serif font-bold text-sm text-white">{liveStats ? `${liveStats.booksCount}+` : "—"}</span>
                   </div>
-                  <p className="text-[11px] text-white/60 hidden sm:block font-sans">Books Published</p>
+                  <p className="text-sm text-white/75">Books Published</p>
                 </div>
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-1.5">
                     <Users className="h-4 w-4 text-emerald-400" />
                     <span className="font-serif font-bold text-sm text-white">{liveStats ? `${liveStats.authorsCount}+` : "—"}</span>
                   </div>
-                  <p className="text-[11px] text-white/60 hidden sm:block font-sans">Happy Authors</p>
+                  <p className="text-sm text-white/75">Authors</p>
                 </div>
-              </div>
+              </div>}
             </motion.div>
 
             {/* Right Column: 3D Floating Book Mockup (5 Cols) */}
@@ -237,9 +231,7 @@ export default function Home() {
               transition={{ duration: 0.8, delay: 0.2 }}
               className="lg:col-span-5 flex justify-center"
             >
-              <div className="relative w-full max-w-[340px] aspect-[2/3] group">
-                {/* Aura Glow */}
-                <div className="absolute -inset-4 bg-gradient-to-r from-[#D4AF37]/30 to-emerald-500/30 rounded-3xl blur-2xl opacity-60 group-hover:opacity-100 transition-opacity" />
+              <div className={cn("relative w-full max-w-[280px] lg:max-w-[310px]", (loading || featuredBooks.length > 0) && "aspect-[2/3]")}>
 
                 {/* 3D Floating Book Cover Card */}
                 {loading ? (
@@ -251,12 +243,10 @@ export default function Home() {
                       </div>
                     </div>
                   ) : (() => {
-                  // Only feature books on the homepage hero if "Feature on Home" is explicitly enabled;
-                  // rotate through all of them on a timer.
                   const heroBooks = featuredBooks;
                   const activeIndex = heroBooks.length > 0 ? heroIndex % heroBooks.length : 0;
                   const heroBook = heroBooks[activeIndex] || null;
-                  if (!heroBook) return <div className="relative rounded-2xl border border-white/20 p-8 text-center text-white/70" role="status">{featuredError ? "Featured books could not load. Please retry above." : "No featured books are currently published."}</div>;
+                  if (!heroBook) return <div className="relative rounded-2xl border border-white/20 p-8 text-center text-white/70" role="status">{featuredError ? "Featured books could not load." : "No featured books are currently published."}</div>;
                   const heroAuthor = heroBook ? getBookAuthorInfo(heroBook).name : "Harglim Publishers Catalog";
                   const heroCover = getOptimizedCoverImage(heroBook?.coverImage);
                   const heroTitle = heroBook?.title || "Discover Inspiring Books";
@@ -268,8 +258,6 @@ export default function Home() {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1, y: [0, -10, 0] }}
                       transition={{ opacity: { duration: 0.5 }, y: { repeat: Infinity, duration: 4, ease: "easeInOut" } }}
-                      onMouseEnter={() => setHeroPaused(true)}
-                      onMouseLeave={() => setHeroPaused(false)}
                       className="relative w-full h-full rounded-2xl overflow-hidden shadow-2xl border-2 border-[#D4AF37]/40 bg-[#0C3233]"
                     >
                       <AnimatePresence initial={false}>
@@ -344,114 +332,55 @@ export default function Home() {
       <section className="bg-white border-b border-[#E2E6DF] py-6 shadow-2xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
-            <div className="flex items-center gap-3.5 p-2 rounded-xl hover:bg-[#F8F9F7] transition-colors">
+            <Link href="/track-order" className="flex min-w-0 items-center gap-3.5 p-2 rounded-xl hover:bg-[#F8F9F7] focus-visible:ring-2 focus-visible:ring-[#D4AF37] transition-colors">
               <div className="h-11 w-11 rounded-xl bg-[#0F3D3E]/10 text-[#0F3D3E] flex items-center justify-center shrink-0">
                 <Truck className="h-5 w-5 text-[#8A6D1E]" />
               </div>
               <div>
-                <p className="font-serif font-bold text-xs sm:text-sm text-[#0F3D3E]">Nationwide Dispatch</p>
-                <p className="text-[11px] text-[#5C6E6E] font-sans">Tracked India Post & Express</p>
+                <p className="font-serif font-bold text-xs sm:text-sm text-[#0F3D3E]">Track an order</p>
+                <p className="text-[11px] text-[#5C6E6E] font-sans">View shipment updates</p>
               </div>
-            </div>
+            </Link>
 
-            <div className="flex items-center gap-3.5 p-2 rounded-xl hover:bg-[#F8F9F7] transition-colors">
+            <Link href="/dashboard/payments" className="flex min-w-0 items-center gap-3.5 p-2 rounded-xl hover:bg-[#F8F9F7] focus-visible:ring-2 focus-visible:ring-[#D4AF37] transition-colors">
               <div className="h-11 w-11 rounded-xl bg-[#0F3D3E]/10 text-[#0F3D3E] flex items-center justify-center shrink-0">
                 <ShieldCheck className="h-5 w-5 text-[#8A6D1E]" />
               </div>
               <div>
-                <p className="font-serif font-bold text-xs sm:text-sm text-[#0F3D3E]">100% Verified UPI</p>
-                <p className="text-[11px] text-[#5C6E6E] font-sans">Instant UTR confirmation</p>
+                <p className="font-serif font-bold text-xs sm:text-sm text-[#0F3D3E]">Your payments</p>
+                <p className="text-[11px] text-[#5C6E6E] font-sans">View verification status</p>
               </div>
-            </div>
+            </Link>
 
-            <div className="flex items-center gap-3.5 p-2 rounded-xl hover:bg-[#F8F9F7] transition-colors">
+            <Link href="/books" className="flex min-w-0 items-center gap-3.5 p-2 rounded-xl hover:bg-[#F8F9F7] focus-visible:ring-2 focus-visible:ring-[#D4AF37] transition-colors">
               <div className="h-11 w-11 rounded-xl bg-[#0F3D3E]/10 text-[#0F3D3E] flex items-center justify-center shrink-0">
                 <Sparkles className="h-5 w-5 text-[#8A6D1E]" />
               </div>
               <div>
-                <p className="font-serif font-bold text-xs sm:text-sm text-[#0F3D3E]">Fine Print Quality</p>
-                <p className="text-[11px] text-[#5C6E6E] font-sans">Premium paper & binding</p>
+                <p className="font-serif font-bold text-xs sm:text-sm text-[#0F3D3E]">Explore books</p>
+                <p className="text-[11px] text-[#5C6E6E] font-sans">Browse the catalog</p>
               </div>
-            </div>
+            </Link>
 
-            <div className="flex items-center gap-3.5 p-2 rounded-xl hover:bg-[#F8F9F7] transition-colors">
+            <Link href="/author" className="flex min-w-0 items-center gap-3.5 p-2 rounded-xl hover:bg-[#F8F9F7] focus-visible:ring-2 focus-visible:ring-[#D4AF37] transition-colors">
               <div className="h-11 w-11 rounded-xl bg-[#0F3D3E]/10 text-[#0F3D3E] flex items-center justify-center shrink-0">
                 <Award className="h-5 w-5 text-[#8A6D1E]" />
               </div>
               <div>
-                <p className="font-serif font-bold text-xs sm:text-sm text-[#0F3D3E]">Direct Royalties</p>
-                <p className="text-[11px] text-[#5C6E6E] font-sans">Transparent author payouts</p>
+                <p className="font-serif font-bold text-xs sm:text-sm text-[#0F3D3E]">Author dashboard</p>
+                <p className="text-[11px] text-[#5C6E6E] font-sans">Books, sales and royalties</p>
               </div>
-            </div>
+            </Link>
           </div>
         </div>
       </section>
 
       {/* ------------------------------------------------------------------ */}
-      {/* 2. FEATURED BOOKS CAROUSEL (Smooth Landing with Zero Layout Jumps) */}
-      {/* ------------------------------------------------------------------ */}
-      {(loading || featuredBooks.length > 0) && (
-        <section className="py-16 sm:py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-end justify-between mb-8">
-            <div>
-              <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#8A6D1E] mb-1">
-                <TrendingUp className="h-4 w-4" />
-                <span>Curated Selection</span>
-              </div>
-              <h2 className="text-3xl sm:text-4xl font-serif font-bold text-[#0F3D3E]">
-                {content.homeFeaturedTitle}
-              </h2>
-            </div>
-            <Link href="/books" className="hidden sm:flex items-center gap-1 text-sm font-serif font-bold text-[#0F3D3E] hover:text-[#D4AF37] transition-colors">
-              <span>View All Books</span>
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          </div>
-
-          {loading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {[1, 2, 3, 4].map((n) => (
-                <div key={n} className="bg-white/80 rounded-2xl border border-[#E2E6DF] p-3 sm:p-4 space-y-3 shadow-xs animate-pulse">
-                  <div className="aspect-[2/3] w-full bg-[#F0F2EE] rounded-xl relative overflow-hidden" />
-                  <div className="space-y-2 pt-1">
-                    <div className="h-4 bg-[#E2E6DF] rounded-md w-4/5" />
-                    <div className="h-3 bg-[#E2E6DF]/60 rounded-md w-1/2" />
-                  </div>
-                  <div className="flex items-center justify-between pt-2">
-                    <div className="h-4 bg-[#E2E6DF] rounded-md w-1/3" />
-                    <div className="h-8 w-8 bg-[#E2E6DF] rounded-lg" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <motion.div
-              initial="hidden"
-              animate="visible"
-              variants={{
-                hidden: { opacity: 0 },
-                visible: {
-                  opacity: 1,
-                  transition: { staggerChildren: 0.08 }
-                }
-              }}
-              className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-6"
-            >
-              {featuredBooks.slice(0, 4).map((book) => (
-                <motion.div
-                  key={book._id || book.id}
-                  variants={{
-                    hidden: { opacity: 0, y: 14 },
-                    visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: "easeOut" } }
-                  }}
-                >
-                  <BookCard book={book} />
-                </motion.div>
-              ))}
-            </motion.div>
-          )}
-        </section>
-      )}
+      {Boolean(featuredError) && <div className="mx-auto max-w-7xl px-4 py-6">
+        <ErrorState title="Featured books could not load" message={publicApiMessage(featuredError, "Please retry to load featured books.")}
+          retryAt={publicRetryAt(featuredError)} onRetry={() => void fetchFeaturedBooks()} />
+      </div>}
+      <HomeBookShelf />
 
       {/* ------------------------------------------------------------------ */}
       {/* 3. WHY CHOOSE HARGILM (Glassmorphic Trust Blocks) */}
@@ -495,6 +424,10 @@ export default function Home() {
 
       {/* ------------------------------------------------------------------ */}
       {/* 4. CATEGORIES / GENRE SHOWCASE (/api/categories API) */}
+      {Boolean(categoryError) && <div className="mx-auto max-w-7xl px-4 py-6">
+        <ErrorState title="Categories could not load" message={publicApiMessage(categoryError, "Please retry to load book categories.")}
+          retryAt={publicRetryAt(categoryError)} onRetry={() => void fetchHomeCategories()} />
+      </div>}
       {/* ------------------------------------------------------------------ */}
       {categories.length > 0 && (
         <section className="py-16 sm:py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -508,7 +441,7 @@ export default function Home() {
                 Browse by Category
               </h2>
             </div>
-            <Link href="/categories" className="hidden sm:flex items-center gap-1 text-sm font-serif font-bold text-[#0F3D3E] hover:text-[#D4AF37]">
+            <Link href="/books#catalog" className="flex items-center gap-1 text-sm font-serif font-bold text-primary hover:underline">
               <span>All Categories</span>
               <ArrowRight className="h-4 w-4" />
             </Link>
@@ -518,7 +451,7 @@ export default function Home() {
             {categories.slice(0, 6).map((cat) => (
               <Link
                 key={cat._id || cat.id || cat.slug}
-                href={`/categories/${cat.slug || cat._id}`}
+                href={`/books?category=${encodeURIComponent(cat.slug || cat._id)}`}
                 className="group p-5 bg-white border border-[#E2E6DF] hover:border-[#D4AF37] rounded-2xl text-center shadow-xs hover:shadow-md transition-all space-y-2 block"
               >
                 <div className="w-12 h-12 rounded-xl bg-[#0F3D3E]/10 text-[#0F3D3E] group-hover:bg-[#0F3D3E] group-hover:text-[#D4AF37] flex items-center justify-center mx-auto transition-colors">
@@ -528,78 +461,10 @@ export default function Home() {
                   {cat.name}
                 </h3>
                 <p className="text-[11px] text-[#5C6E6E]">
-                  {cat.bookCount || cat.booksCount || 0} Books
+                  {publishedNumber(cat.bookCount ?? cat.booksCount) === null ? "Book count unavailable" : `${cat.bookCount ?? cat.booksCount} Books`}
                 </p>
               </Link>
             ))}
-          </div>
-        </section>
-      )}
-
-      {/* ------------------------------------------------------------------ */}
-      {/* 5. BESTSELLERS / TOP RATED THIS WEEK (/api/books API) */}
-      {/* ------------------------------------------------------------------ */}
-      {(loading || bestsellers.length > 0) && (
-        <section className="py-16 sm:py-20 bg-white border-y border-[#E2E6DF]">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-end justify-between mb-8">
-              <div>
-                <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#8A6D1E] mb-1">
-                  <Star className="h-4 w-4 fill-[#D4AF37]" />
-                  <span>Reader Favorites</span>
-                </div>
-                <h2 className="text-3xl sm:text-4xl font-serif font-bold text-[#0F3D3E]">
-                  {content.homeBestsellerTitle}
-                </h2>
-              </div>
-              <Link href="/books" className="hidden sm:flex items-center gap-1 text-sm font-serif font-bold text-[#0F3D3E] hover:text-[#D4AF37] transition-colors">
-                <span>Explore Catalog</span>
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </div>
-
-            {loading ? (
-              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                {[1, 2, 3, 4].map((n) => (
-                  <div key={n} className="bg-white rounded-2xl border border-[#E2E6DF] p-3 sm:p-4 space-y-3 shadow-xs animate-pulse">
-                    <div className="aspect-[2/3] w-full bg-[#F0F2EE] rounded-xl relative overflow-hidden" />
-                    <div className="space-y-2 pt-1">
-                      <div className="h-4 bg-[#E2E6DF] rounded-md w-4/5" />
-                      <div className="h-3 bg-[#E2E6DF]/60 rounded-md w-1/2" />
-                    </div>
-                    <div className="flex items-center justify-between pt-2">
-                      <div className="h-4 bg-[#E2E6DF] rounded-md w-1/3" />
-                      <div className="h-8 w-8 bg-[#E2E6DF] rounded-lg" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <motion.div
-                initial="hidden"
-                animate="visible"
-                variants={{
-                  hidden: { opacity: 0 },
-                  visible: {
-                    opacity: 1,
-                    transition: { staggerChildren: 0.08 }
-                  }
-                }}
-                className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-6"
-              >
-                {bestsellers.map((book) => (
-                  <motion.div
-                    key={book._id || book.id}
-                    variants={{
-                      hidden: { opacity: 0, y: 14 },
-                      visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: "easeOut" } }
-                    }}
-                  >
-                    <BookCard book={book} />
-                  </motion.div>
-                ))}
-              </motion.div>
-            )}
           </div>
         </section>
       )}
@@ -640,7 +505,7 @@ export default function Home() {
                     {author.name}
                   </h3>
                   <p className="text-[11px] text-[#5C6E6E] mt-0.5">
-                    {author.bookCount || author.booksCount || 1} Published
+                    {publishedNumber(author.bookCount ?? author.booksCount) === null ? "Book count unavailable" : `${author.bookCount ?? author.booksCount} Published`}
                   </p>
                 </div>
               </Link>
@@ -652,7 +517,7 @@ export default function Home() {
       {/* ------------------------------------------------------------------ */}
       {/* 5. FAQ SECTION (Filterable Accordion with Search) */}
       {/* ------------------------------------------------------------------ */}
-      <section className="py-16 sm:py-20 bg-white border-t border-[#E2E6DF]">
+      {activeFaqs.length > 0 && <section className="py-16 sm:py-20 bg-white border-t border-[#E2E6DF]">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
           <div className="text-center space-y-2">
             <span className="text-xs font-bold uppercase tracking-wider text-[#8A6D1E] block">
@@ -671,6 +536,7 @@ export default function Home() {
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#5C6E6E]" />
             <Input
               type="text"
+              aria-label="Search frequently asked questions"
               placeholder="Search questions (e.g. royalties, publishing, delivery)..."
               value={faqSearch}
               onChange={(e) => setFaqSearch(e.target.value)}
@@ -681,37 +547,12 @@ export default function Home() {
           {/* Accordion List */}
           <div className="space-y-4 pt-2">
             {filteredFaqs.length > 0 ? (
-              filteredFaqs.map((faq, idx) => {
-                const isOpen = openFaqIndex === idx;
-                return (
-                  <div
-                    key={idx}
-                    className="border border-[#E2E6DF] rounded-2xl bg-[#F8F9F7] overflow-hidden transition-all"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setOpenFaqIndex(isOpen ? null : idx)}
-                      className="w-full p-5 text-left flex items-center justify-between gap-4 font-serif font-bold text-base text-[#0F3D3E] hover:text-[#D4AF37]"
-                    >
-                      <span>{faq.question}</span>
-                      {isOpen ? <ChevronUp className="h-5 w-5 shrink-0 text-[#D4AF37]" /> : <ChevronDown className="h-5 w-5 shrink-0 text-[#5C6E6E]" />}
-                    </button>
-
-                    <AnimatePresence>
-                      {isOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="px-5 pb-5 pt-0 text-xs sm:text-sm text-[#5C6E6E] leading-relaxed border-t border-[#E2E6DF]/60 font-sans"
-                        >
-                          {faq.answer}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                );
-              })
+              filteredFaqs.map((faq, index) => (
+                <details key={`${faq.question}-${index}`} className="rounded-xl border border-border bg-background">
+                  <summary className="cursor-pointer px-5 py-4 font-serif font-semibold">{faq.question}</summary>
+                  <p className="border-t px-5 py-4 text-sm leading-relaxed text-muted-foreground whitespace-pre-line">{faq.answer}</p>
+                </details>
+              ))
             ) : (
               <p className="text-center text-xs text-[#5C6E6E] py-8">
                 No questions found matching &ldquo;{faqSearch}&rdquo;. Try another search term.
@@ -719,7 +560,7 @@ export default function Home() {
             )}
           </div>
         </div>
-      </section>
+      </section>}
 
       {/* ------------------------------------------------------------------ */}
       {/* BOTTOM CTA BANNER (Admin → Site Content → Home: Bottom Banner) */}

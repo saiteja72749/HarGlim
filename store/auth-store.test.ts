@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+// @vitest-environment node
 import { beforeEach, describe, expect, it } from "vitest";
 import { useAuthStore } from "./auth-store";
 import type { Role, UserContextData } from '@/types';
@@ -12,6 +12,7 @@ const context = (role: Role, profilePicture: string | null = null): UserContextD
 
 describe("setUserContext", () => {
   beforeEach(() => {
+    localStorage.clear();
     useAuthStore.setState({ user: { _id: "U1", name: "A", email: "a@b.c", role: "author", isActive: true }, userContext: null, contextVerified: false });
   });
 

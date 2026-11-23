@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
 import type { Book, CartItem } from '@/types';
+import { getCartUnitPrice } from '@/lib/book-presentation';
 export type { Book, CartItem } from '@/types';
 
 interface CartState {
@@ -60,8 +61,7 @@ export const useCartStore = create<CartState>()(
       getSubtotal: () => {
         const { items } = get();
         return items.reduce((total: number, item: CartItem) => {
-          const prices = [item.book.price, item.book.discountPrice, item.book.mrp];
-          const price = prices.find((value) => typeof value === 'number' && Number.isFinite(value)) ?? 0;
+          const price = getCartUnitPrice(item.book) ?? 0;
           return total + (price * item.quantity);
         }, 0);
       },

@@ -1,13 +1,5 @@
-import type { Metadata } from 'next';
+import { pageMetadata } from '@/lib/page-metadata';
 
-export const metadata: Metadata = {
-  title: 'Author Spotlight',
-  description: 'Photos and messages from authors who published their books with Harglim Publishers.',
-  alternates: { canonical: '/spotlight' },
-};
+export function generateMetadata() { return pageMetadata("/spotlight", "Author Spotlight", false); }
 
-export default function SpotlightLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
-  return children;
-}
+export default function Layout({ children }: { children: React.ReactNode }) { return children; }

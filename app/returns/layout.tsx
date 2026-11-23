@@ -1,14 +1,5 @@
-import type { Metadata } from 'next';
+import { pageMetadata } from '@/lib/page-metadata';
 
-export const metadata: Metadata = {
-  title: 'Returns and Refunds',
-  description:
-    "Review Harglim Publishers' book return, replacement, cancellation, and refund information.",
-  alternates: { canonical: '/returns' },
-};
+export function generateMetadata() { return pageMetadata("/returns", "Returns Policy", false); }
 
-export default function ReturnsLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
-  return children;
-}
+export default function Layout({ children }: { children: React.ReactNode }) { return children; }

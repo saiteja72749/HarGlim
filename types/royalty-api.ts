@@ -2,7 +2,7 @@ export type MoneyInput = number | string | null;
 export interface RoyaltyLine extends Partial<Record<
   'quantity' | 'copiesSold' | 'qty' | 'unitPrice' | 'price' | 'amountPerBook' | 'mrp' |
   'grossBookRevenue' | 'lineTotal' | 'grossAmount' | 'totalRevenue' | 'revenue' |
-  'royaltyAmount' | 'royalty' | 'amount' | 'royaltyPerCopy' | 'royaltyPerCopySnapshot' | 'royaltyPercentageSnapshot', MoneyInput>> {
+  'royaltyAmount' | 'royalty' | 'amount' | 'royaltyPerCopy' | 'royaltyPerCopySnapshot' | 'royaltyPercentageSnapshot' | 'totalCharges', MoneyInput>> {
   _id?: string;
   bookId?: string | null;
   bookTitle?: string;

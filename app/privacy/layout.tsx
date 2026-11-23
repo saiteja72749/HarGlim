@@ -1,14 +1,5 @@
-import type { Metadata } from 'next';
+import { pageMetadata } from '@/lib/page-metadata';
 
-export const metadata: Metadata = {
-  title: 'Privacy Policy',
-  description:
-    'Read how Harglim Publishers collects, uses, and protects personal information on its publishing and bookstore platform.',
-  alternates: { canonical: '/privacy' },
-};
+export function generateMetadata() { return pageMetadata("/privacy", "Privacy Policy", false); }
 
-export default function PrivacyLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
-  return children;
-}
+export default function Layout({ children }: { children: React.ReactNode }) { return children; }

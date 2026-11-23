@@ -5,7 +5,7 @@ import { describeApiError } from "@/lib/api-error";
 import type { RoyaltyLine, RoyaltySettlement } from "@/types/royalty-api";
 import { useState, useEffect } from "react";
 import api from "@/lib/api";
-import { DollarSign, FileText, Download, CheckCircle2, RefreshCw, Layers, Eye } from "lucide-react";
+import { Download, FileText, RefreshCw, Layers, Eye } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -13,7 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -24,7 +23,8 @@ import { listMyManualRoyalties, type ManualRoyaltyStatement } from "@/lib/manual
 import { ManualRoyaltyTable } from "@/components/royalties/manual-royalty-table";
 import { AuthorDataNotice } from "@/components/authors/author-data-notice";
 import { authorPanelProblem } from "@/lib/author-panel";
-import { fetchRoyaltyHistory, isRoyaltyUnavailable, type RoyaltyHistory } from "@/lib/author-royalties";
+import { fetchAuthorLedgerRows, fetchRoyaltyHistory, isRoyaltyUnavailable, type RoyaltyHistory } from "@/lib/author-royalties";
+import { record } from "@/lib/api-error";
 import { csvCell } from "@/lib/csv";
 import { onLiveChange } from "@/lib/live-sync";
 import { AuthorDashboardAccess } from "@/components/authors/author-dashboard-access";
@@ -46,6 +46,7 @@ function AuthorRoyaltiesContent() {
   useEffect(() => {
     setActiveTab(hash === "settlements" || hash === "statements" ? hash : "sales");
   }, [hash]);
+  const [payoutSummary, setPayoutSummary] = useState<Record<string, unknown>>({});
   const [summaryData, setSummaryData] = useState<RoyaltyHistory | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [loadedOnce, setLoadedOnce] = useState(false);
@@ -55,18 +56,21 @@ function AuthorRoyaltiesContent() {
     if (!user) return;
     setLoading(true);
     try {
-      const listConfig = { params: { page: 1, limit: 100 }, cache: "no-store" as const };
-      const [royaltiesRes, settlementsRes, manualRes] = await Promise.allSettled([
+      const [royaltiesRes, settlementsRes, manualRes, payoutRes] = await Promise.allSettled([
         fetchRoyaltyHistory(),
-        api.get("/authors/me/royalty-settlements", listConfig),
+        fetchAuthorLedgerRows<RoyaltySettlement>("royalty-settlements", "settlements"),
         listMyManualRoyalties(),
+        api.get("/authors/me/dashboard", { cache: "no-store" }),
       ]);
+      const dashboard = payoutRes.status === "fulfilled" ? record(payoutRes.value.data?.data ?? payoutRes.value.data) : {};
+      setPayoutSummary(record(dashboard.royalties));
       setManualStatements(manualRes.status === "fulfilled" ? manualRes.value.filter((m) => m.status !== "VOID") : []);
       setProblem(
         authorPanelProblem([
           { label: "royalty history", result: royaltiesRes },
           { label: "settlements", result: settlementsRes },
           { label: "publisher royalty statements", result: manualRes },
+          { label: "lifetime payout totals", result: payoutRes },
         ])
       );
 
@@ -78,11 +82,7 @@ function AuthorRoyaltiesContent() {
         setRoyaltyEntries([]);
       }
 
-      if (settlementsRes.status === "fulfilled") {
-        const sData = settlementsRes.value.data?.data || settlementsRes.value.data || [];
-        const sList = sData.settlements || sData.items || (Array.isArray(sData) ? sData : []);
-        setSettlements(Array.isArray(sList) ? sList : []);
-      }
+      setSettlements(settlementsRes.status === "fulfilled" ? settlementsRes.value : []);
     } catch (err) {
       console.error("Failed to fetch royalties:", describeApiError(err));
     } finally {
@@ -99,10 +99,10 @@ function AuthorRoyaltiesContent() {
   }, [user]);
 
   // The server's total (accruedKnown); never summed in the browser.
-  const totalEarnings = summaryData?.totalRoyalty ?? 0;
+  const totalEarnings = summaryData?.totalRoyalty;
 
   const handleExportCSV = () => {
-    if (!royaltyEntries || royaltyEntries.length === 0) {
+    if (loading || !summaryData || royaltyEntries.length === 0 || royaltyEntries.length !== summaryData.totalLines) {
       toast.error("No entries available to export.");
       return;
     }
@@ -112,11 +112,11 @@ function AuthorRoyaltiesContent() {
     const rows = royaltyEntries.map((e) => [
       getTitle(e),
       e.orderNumber || e.order?.orderNumber || "",
-      getQty(e),
-      getUnitPrice(e),
-      getLineRevenue(e),
-      isRoyaltyUnavailable(e) ? "Unavailable" : getDeductions(e),
-      isRoyaltyUnavailable(e) ? "Unavailable" : getRoyalty(e),
+      getQty(e) ?? "Unavailable",
+      getUnitPrice(e) ?? "Unavailable",
+      getLineRevenue(e) ?? "Unavailable",
+      isRoyaltyUnavailable(e) ? "Unavailable" : getDeductions(e) ?? "Unavailable",
+      isRoyaltyUnavailable(e) ? "Unavailable" : getRoyalty(e) ?? "Unavailable",
       getDate(e) ? new Date(getDate(e)).toLocaleDateString("en-IN") : "",
     ]);
 
@@ -169,6 +169,7 @@ function AuthorRoyaltiesContent() {
           </Button>
           <Button
             onClick={handleExportCSV}
+            disabled={loading || !summaryData || !royaltyEntries.length || royaltyEntries.length !== summaryData.totalLines}
             variant="outline"
             className="border-[#E2E6DF] text-[#0F3D3E] font-bold text-xs h-10 px-4 rounded-xl gap-2"
           >
@@ -178,64 +179,31 @@ function AuthorRoyaltiesContent() {
         </div>
       </div>
 
-      {/* 2. Earnings Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-        <Card className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xs flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#5C6E6E]">
-              Total Lifetime Royalties
-            </span>
-            <p className="text-3xl font-serif font-bold text-[#0F3D3E]">
-              {summaryData ? `₹${Number(totalEarnings).toLocaleString("en-IN")}` : "Unavailable"}
-            </p>
-            <p className="text-[11px] text-[#5C6E6E]">Calculated from published book sales</p>
+      <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        {[
+          ["Total Lifetime Royalties", money(totalEarnings)],
+          ["Eligible for payout", money(payoutSummary.eligibleUnsettled)],
+          ["Pending payout", money(payoutSummary.settledPendingPayment)],
+          ["Total paid", money(payoutSummary.paidLifetime)],
+          ["Recorded sales transactions", summaryData?.totalLines ?? "Unavailable"],
+        ].map(([label, value]) => (
+          <div key={label} className="min-w-0 rounded-xl border bg-card p-4">
+            <dt className="text-sm text-muted-foreground">{label}</dt>
+            <dd className="mt-1 break-words font-serif text-xl font-semibold tabular-nums">{value}</dd>
           </div>
-          <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 flex items-center justify-center">
-            <DollarSign className="h-6 w-6" />
-          </div>
-        </Card>
-
-        <Card className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xs flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#5C6E6E]">
-              Settlement Payouts
-            </span>
-            <p className="text-3xl font-serif font-bold text-emerald-700">
-              {settlements.filter((s) => s.status === "PAID").length} Paid
-            </p>
-            <p className="text-[11px] text-[#5C6E6E]">Direct external payouts completed</p>
-          </div>
-          <div className="h-12 w-12 rounded-2xl bg-[#0F3D3E] text-[#D4AF37] flex items-center justify-center">
-            <CheckCircle2 className="h-6 w-6" />
-          </div>
-        </Card>
-
-        <Card className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xs flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#5C6E6E]">
-              Recorded Sales Transactions
-            </span>
-            <p className="text-3xl font-serif font-bold text-[#0F3D3E]">
-              {summaryData?.totalLines ?? royaltyEntries.length}
-            </p>
-            <p className="text-[11px] text-[#5C6E6E]">Server verified entries</p>
-          </div>
-          <div className="h-12 w-12 rounded-2xl bg-[#D4AF37]/20 text-[#0F3D3E] border border-[#D4AF37]/40 flex items-center justify-center">
-            <FileText className="h-6 w-6" />
-          </div>
-        </Card>
-      </div>
+        ))}
+      </dl>
 
       {/* 3. Detailed Tabs: Per-Sale Royalties vs Payout Settlements */}
       <Tabs id="settlements" value={activeTab} onValueChange={setActiveTab} className="space-y-4 scroll-mt-20">
-        <TabsList className="bg-[#E2E6DF]/50 p-1 rounded-xl">
-          <TabsTrigger value="sales" className="rounded-lg text-xs font-semibold">
-            Sales & Royalties ({royaltyEntries.length})
+        <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-xl bg-muted p-1">
+          <TabsTrigger value="sales" className="min-h-11 flex-none whitespace-normal rounded-lg text-sm font-medium">
+            Sales & Earnings ({royaltyEntries.length})
           </TabsTrigger>
-          <TabsTrigger value="settlements" className="rounded-lg text-xs font-semibold">
-            Payout Settlements ({settlements.length})
+          <TabsTrigger value="settlements" className="min-h-11 flex-none whitespace-normal rounded-lg text-sm font-medium">
+            Payout History ({settlements.length})
           </TabsTrigger>
-          <TabsTrigger value="statements" className="rounded-lg text-xs font-semibold">
+          <TabsTrigger value="statements" className="min-h-11 flex-none whitespace-normal rounded-lg text-sm font-medium">
             Publisher Statements ({manualStatements.length})
           </TabsTrigger>
         </TabsList>
@@ -279,10 +247,10 @@ function AuthorRoyaltiesContent() {
                           )}
                         </td>
                         <td className="py-3 px-4 text-center font-bold">{getQty(e)}</td>
-                        <td className="py-3 px-4 text-right text-[#5C6E6E]">₹{getUnitPrice(e).toLocaleString("en-IN")}</td>
-                        <td className="py-3 px-4 text-right text-[#5C6E6E]">₹{getLineRevenue(e).toLocaleString("en-IN")}</td>
+                        <td className="py-3 px-4 text-right text-[#5C6E6E]">{money(getUnitPrice(e))}</td>
+                        <td className="py-3 px-4 text-right text-[#5C6E6E]">{money(getLineRevenue(e))}</td>
                         <td className="py-3 px-4 text-right text-[#5C6E6E]">
-                          {!isRoyaltyUnavailable(e) ? `₹${getDeductions(e).toLocaleString("en-IN")}` : (
+                          {!isRoyaltyUnavailable(e) ? money(getDeductions(e)) : (
                             <span className="text-amber-700" title="Historical sale recorded before royalty rates were snapshotted">Unavailable</span>
                           )}
                         </td>
@@ -290,10 +258,10 @@ function AuthorRoyaltiesContent() {
                           {isRoyaltyUnavailable(e) ? (
                             <span className="font-semibold text-amber-700" title="Historical sale recorded before royalty rates were snapshotted">Unavailable</span>
                           ) : (
-                            `₹${getRoyalty(e).toLocaleString("en-IN")}`
+                            money(getRoyalty(e))
                           )}
                           {getPerCopy(e) !== null && (
-                            <span className="block text-[10px] font-normal text-[#5C6E6E]">₹{getPerCopy(e)!.toLocaleString("en-IN")} per copy</span>
+                            <span className="block text-[10px] font-normal text-[#5C6E6E]">{money(getPerCopy(e))} per copy</span>
                           )}
                         </td>
                         <td className="py-3 px-4 text-right text-[11px] text-[#5C6E6E]">
@@ -345,7 +313,7 @@ function AuthorRoyaltiesContent() {
                           {s.periodEnd ? new Date(s.periodEnd).toLocaleDateString() : "—"}
                         </td>
                         <td className="py-3 px-4 font-bold text-emerald-700">
-                          ₹{getSettlementAmount(s).toLocaleString("en-IN")}
+                          {money(getSettlementAmount(s))}
                         </td>
                         <td className="py-3 px-4">
                           {(() => {
@@ -387,11 +355,7 @@ function AuthorRoyaltiesContent() {
                 <h2 className="text-sm font-bold text-[#0F3D3E] font-serif">Royalty Statements from the Publisher</h2>
                 <p className="text-[11px] text-[#5C6E6E]">For your information. Payouts are listed under Payout Settlements.</p>
               </div>
-              {manualStatements.length > 0 && (
-                <span className="text-sm font-bold text-emerald-700 tabular-nums">
-                  ₹{manualStatements.reduce((sum, m) => sum + m.totalRoyalty, 0).toLocaleString("en-IN")} total
-                </span>
-              )}
+
             </div>
             {manualStatements.length === 0 ? (
               <div className="py-16 text-center text-[#5C6E6E]">
@@ -431,12 +395,12 @@ const num = (...values: unknown[]) => {
     const n = Number(v);
     if (Number.isFinite(n)) return n;
   }
-  return 0;
+  return null;
 };
-const getTitle = (e: RoyaltyLine) => e.bookTitle || e.book?.title || e.title || "Book";
-const getQty = (e: RoyaltyLine) => num(e.quantity, e.copiesSold, e.qty, 1);
-const getUnitPrice = (e: RoyaltyLine) => num(e.unitPrice, e.price, e.amountPerBook, e.mrp);
-const getLineRevenue = (e: RoyaltyLine) => num(e.grossBookRevenue, e.lineTotal, e.grossAmount, e.totalRevenue, e.revenue, getUnitPrice(e) * getQty(e));
+const getTitle = (e: RoyaltyLine) => (e.bookId || e.bookTitle !== "Book" ? e.bookTitle : null) || e.book?.title || e.title || "Book title unavailable";
+const getQty = (e: RoyaltyLine) => num(e.quantity, e.copiesSold, e.qty);
+const getUnitPrice = (e: RoyaltyLine) => num(e.unitPrice, e.price, e.amountPerBook);
+const getLineRevenue = (e: RoyaltyLine) => num(e.grossBookRevenue, e.lineTotal, e.grossAmount, e.totalRevenue, e.revenue);
 const getRoyalty = (e: RoyaltyLine) => num(e.royaltyAmount, e.royalty, e.amount);
 // The per-copy royalty stored on the sale; the book's current value is never used for old sales.
 const getPerCopy = (e: RoyaltyLine): number | null => {
@@ -444,7 +408,12 @@ const getPerCopy = (e: RoyaltyLine): number | null => {
   return v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
 };
 // Printing + platform + delivery charges taken out of the line before the author's royalty.
-const getDeductions = (e: RoyaltyLine) => Math.max(0, Math.round((getLineRevenue(e) - getRoyalty(e)) * 100) / 100);
+const getDeductions = (e: RoyaltyLine) => num(e.totalCharges);
+const rupees = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" });
+const money = (value: unknown) => {
+  const amount = num(value);
+  return amount === null ? "Unavailable" : rupees.format(amount);
+};
 const getDate = (e: RoyaltyLine) => e.saleDate || e.date || e.soldAt || e.paidAt || e.createdAt || "";
 
 const getSettlementAmount = (s: RoyaltySettlement) => num(s.totalRoyalty, s.amount, s.totalAmount, s.payoutAmount);
@@ -455,7 +424,7 @@ const getSettlementStatus = (s: RoyaltySettlement) => {
   if (raw.includes("PENDING_PAYMENT") || raw.includes("APPROV")) return { label: "Approved · payment pending", tone: "bg-blue-500/10 text-blue-700 border-blue-500/20" };
   if (raw.includes("REJECT") || raw.includes("FAIL")) return { label: "Rejected", tone: "bg-rose-500/10 text-rose-700 border-rose-500/20" };
   if (raw === "DRAFT") return { label: "Draft", tone: "bg-muted text-muted-foreground" };
-  return { label: raw ? raw.replace(/_/g, " ").toLowerCase() : "Pending", tone: "bg-amber-500/10 text-amber-700 border-amber-500/20" };
+  return { label: raw ? raw.replace(/_/g, " ").toLowerCase() : "Status unavailable", tone: "bg-amber-500/10 text-amber-700 border-amber-500/20" };
 };
 
 /** GET /authors/me/royalty-settlements/{id}: books/orders included, total, payout transaction. */
@@ -501,7 +470,7 @@ function SettlementDetailDialog({ settlementId, onClose }: { settlementId: strin
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-lg border p-3">
                 <p className="text-xs text-[#5C6E6E]">Total royalty</p>
-                <p className="text-lg font-bold text-emerald-700">₹{getSettlementAmount(detail).toLocaleString("en-IN")}</p>
+                <p className="text-lg font-bold text-emerald-700">{money(getSettlementAmount(detail))}</p>
               </div>
               <div className="rounded-lg border p-3">
                 <p className="text-xs text-[#5C6E6E]">Status</p>
@@ -543,7 +512,7 @@ function SettlementDetailDialog({ settlementId, onClose }: { settlementId: strin
                           <td className="p-2">{getTitle(line)}</td>
                           <td className="p-2 font-mono">{line.orderNumber || line.order?.orderNumber || "—"}</td>
                           <td className="p-2 text-center">{getQty(line)}</td>
-                          <td className="p-2 text-right font-semibold">₹{getRoyalty(line).toLocaleString("en-IN")}</td>
+                          <td className="p-2 text-right font-semibold">{money(getRoyalty(line))}</td>
                         </tr>
                       ))}
                     </tbody>

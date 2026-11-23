@@ -32,7 +32,7 @@ export function AuthGuard({
 
     if (!isAuthenticated) {
       // Redirect to login and save the original destination
-      router.push(`/login?redirect=${encodeURIComponent(pathname)}`);
+      router.push(`/login?redirect=${encodeURIComponent(pathname + window.location.search)}`);
     } else if (roleMismatch) {
       // Redirect to their default dashboard or home if wrong role
       if (user?.role === "author") {

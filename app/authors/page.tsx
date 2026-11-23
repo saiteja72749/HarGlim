@@ -1,10 +1,12 @@
 "use client";
+import { publishedNumber } from "@/lib/book-presentation";
+import { onLiveChange } from '@/lib/live-sync';
 import { describeApiError } from "@/lib/api-error";
 
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-import Image from "next/image";
+import Image from '@/components/ui/backend-image';
 import { motion } from "framer-motion";
 import {
   BookOpen,
@@ -25,7 +27,7 @@ import {
 } from "@/components/ui/select";
 import { ErrorState } from "@/components/ui/error-state";
 import type { Author } from "@/types";
-import api from "@/lib/api";
+import { fetchPublicCollection } from "@/lib/public-collection";
 
 export default function AuthorsPage() {
   const [authors, setAuthors] = useState<Author[]>([]);
@@ -34,40 +36,36 @@ export default function AuthorsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("books");
 
+  const pending = useRef<AbortController | null>(null);
   const fetchAuthors = useCallback(async () => {
-    setLoading(true);
-    setError(false);
+    pending.current?.abort();
+    const controller = new AbortController(); pending.current = controller;
+    setLoading(true); setError(false);
     try {
-      const params: any = {};
-      if (searchQuery.trim()) {
-        params.search = searchQuery.trim();
-      }
-      const { data } = await api.get("/authors", { params });
-      const items = data.data?.authors || (Array.isArray(data.data) ? data.data : []) || (Array.isArray(data) ? data : []);
-      setAuthors(Array.isArray(items) ? items : []);
-    } catch (err) {
-      console.error("Failed to fetch authors:", describeApiError(err));
-      setError(true);
-      setAuthors([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [searchQuery]);
-
+      const items = await fetchPublicCollection<Author>('/authors', 'authors', controller.signal);
+      if (!controller.signal.aborted) setAuthors(items);
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      console.error('Failed to load authors:', describeApiError(error));
+      setError(true); setAuthors([]);
+    } finally { if (!controller.signal.aborted) setLoading(false); }
+  }, []);
   useEffect(() => {
-    fetchAuthors();
+    void fetchAuthors();
+    const unsubscribe = onLiveChange('author-data', () => void fetchAuthors());
+    return () => { unsubscribe(); pending.current?.abort(); };
   }, [fetchAuthors]);
 
   const filteredAuthors = authors
     .filter((author) => {
-      const q = searchQuery.toLowerCase();
+      const q = searchQuery.trim().toLowerCase();
       const name = (author.name || "").toLowerCase();
       const bio = (author.bio || "").toLowerCase();
       return name.includes(q) || bio.includes(q);
     })
     .sort((a, b) => {
       if (sortBy === "books") {
-        return (b.bookCount || 0) - (a.bookCount || 0);
+        return (publishedNumber(b.bookCount) ?? -1) - (publishedNumber(a.bookCount) ?? -1) || a.name.localeCompare(b.name);
       }
       if (sortBy === "name") {
         return (a.name || "").localeCompare(b.name || "");
@@ -94,7 +92,7 @@ export default function AuthorsPage() {
             <span>Voices Behind Our Stories</span>
           </div>
 
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-serif font-bold text-white tracking-tight">
+          <h1 className="text-[clamp(2rem,5vw,3.75rem)] font-serif font-bold text-white tracking-tight">
             Our Authors
           </h1>
 
@@ -135,15 +133,13 @@ export default function AuthorsPage() {
                   ⭐ Top Author Highlight
                 </Badge>
                 <span className="text-xs text-[#5C6E6E]">
-                  {featuredAuthor.bookCount || 1} Published Works
+                  {publishedNumber(featuredAuthor.bookCount) === null ? "Book count unavailable" : `${featuredAuthor.bookCount} Published Works`}
                 </span>
               </div>
               <h2 className="text-2xl sm:text-3xl font-serif font-bold text-[#0F3D3E]">
                 {featuredAuthor.name}
               </h2>
-              <p className="text-xs sm:text-sm text-[#5C6E6E] line-clamp-2 leading-relaxed">
-                {featuredAuthor.bio || "Prolific writer contributing exceptional literature to Harglim Publishers."}
-              </p>
+              {featuredAuthor.bio?.trim() && <p className="line-clamp-3 text-sm leading-relaxed text-muted-foreground">{featuredAuthor.bio}</p>}
             </div>
 
             {/* Action CTA */}
@@ -226,13 +222,11 @@ export default function AuthorsPage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {filteredAuthors.map((author) => {
-              const count = author.bookCount || 0;
+              const count = publishedNumber(author.bookCount);
 
               return (
                 <motion.div
                   key={author._id}
-                  whileHover={{ y: -6, scale: 1.02 }}
-                  transition={{ type: "spring", stiffness: 300, damping: 20 }}
                   className="group relative bg-white border border-[#E2E6DF] hover:border-[#D4AF37] rounded-2xl p-6 shadow-xs hover:shadow-xl transition-all duration-300 flex flex-col text-center justify-between cursor-pointer"
                 >
                   <Link href={`/authors/${author._id}`} className="flex flex-col items-center h-full">
@@ -251,20 +245,18 @@ export default function AuthorsPage() {
                     </div>
 
                     {/* Author Name */}
-                    <h3 className="font-serif font-bold text-lg text-[#0F3D3E] group-hover:text-[#D4AF37] transition-colors mb-1 line-clamp-1">
+                    <h3 className="mb-1 font-serif text-lg font-bold [overflow-wrap:anywhere]">
                       {author.name}
                     </h3>
 
                     {/* Published Book Count Pill */}
                     <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#0F3D3E]/10 text-[#0F3D3E] text-xs font-bold mb-3">
                       <BookOpen className="h-3.5 w-3.5 text-[#D4AF37]" />
-                      <span>{count} Published Book{count === 1 ? "" : "s"}</span>
+                      <span>{count === null ? "Book count unavailable" : `${count} Published Book${count === 1 ? "" : "s"}`}</span>
                     </div>
 
                     {/* Bio Snippet */}
-                    <p className="text-xs text-[#5C6E6E] line-clamp-2 leading-relaxed font-sans mb-4">
-                      {author.bio || "Prominent author at Harglim Publishers."}
-                    </p>
+                    {author.bio?.trim() && <p className="mb-4 line-clamp-3 text-sm leading-relaxed text-muted-foreground">{author.bio}</p>}
 
                     {/* Bottom CTA Action */}
                     <div className="mt-auto pt-3 border-t border-[#E2E6DF]/60 w-full flex items-center justify-center gap-1 text-xs font-serif font-bold text-[#0F3D3E] group-hover:text-[#D4AF37] transition-colors">

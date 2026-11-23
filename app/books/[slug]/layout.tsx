@@ -4,39 +4,42 @@ import { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { fetchRecord, MISSING, notFoundMetadata } from '@/lib/fetch-record';
 import { serializeJsonLd } from '@/lib/json-ld';
+import { getBookAuthorInfo } from '@/lib/utils';
+import { bookPresentation } from '@/lib/book-presentation';
+import { metadataDescription } from '@/lib/seo-data';
 
 type Props = {
   params: Promise<{ slug: string }>;
   children: React.ReactNode;
 };
 
-const getBookData = (slug: string) => fetchRecord<Book>(`/books/${slug}`);
+const getBookData = (slug: string) => fetchRecord<Book>(`/books/${encodeURIComponent(slug)}`);
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const resolvedParams = await params;
-  const slug = resolvedParams.slug;
-  const book = await getBookData(slug);
+  const book = await getBookData(resolvedParams.slug);
   
   if (book === MISSING) return notFoundMetadata;
   if (!book) return {};
   const APP_URL = siteConfig.url;
+  const slug = encodeURIComponent(book.slug || resolvedParams.slug);
 
   return {
     title: book.title,
-    description: book.description?.substring(0, 160),
+    description: metadataDescription(book.description),
     alternates: {
       canonical: `${APP_URL}/books/${slug}`,
     },
     openGraph: {
       title: book.title,
-      description: book.description?.substring(0, 160),
+      description: metadataDescription(book.description),
       images: book.coverImage ? [book.coverImage] : [],
       url: `${APP_URL}/books/${slug}`,
     },
     twitter: {
       card: 'summary_large_image',
       title: book.title,
-      description: book.description?.substring(0, 160),
+      description: metadataDescription(book.description),
       images: book.coverImage ? [book.coverImage] : [],
     }
   };
@@ -50,23 +53,26 @@ export default async function BookLayout({ children, params }: Props) {
   if (book === MISSING) notFound();
   if (!book) return <>{children}</>;
 
+  const author = getBookAuthorInfo(book);
+  const { price } = bookPresentation(book);
+  const canonical = `${APP_URL}/books/${encodeURIComponent(book.slug || resolvedParams.slug)}`;
   const jsonLd = {
     '@context': 'https://schema.org',
     '@type': 'Book',
     name: book.title,
-    author: {
+    author: author.name !== 'Author unavailable' ? {
       '@type': 'Person',
-      name: (book.author && typeof book.author === 'object') ? book.author.name : (typeof book.author === 'string' ? book.author : 'Unknown Author'),
-    },
+      name: author.name,
+    } : undefined,
     image: book.coverImage,
     description: book.description,
     isbn: book.isbn,
-    offers: typeof book.price === 'number' && Number.isFinite(book.price) ? {
+    offers: price !== null ? {
       '@type': 'Offer',
-      price: book.price,
+      price,
       priceCurrency: 'INR',
       availability: typeof book.stock === 'number' ? (book.stock - (book.reservedStock ?? 0) > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock') : undefined,
-      url: `${APP_URL}/books/${resolvedParams.slug}`,
+      url: canonical,
     } : undefined,
   };
 
@@ -90,7 +96,7 @@ export default async function BookLayout({ children, params }: Props) {
         '@type': 'ListItem',
         position: 3,
         name: book.title,
-        item: `${APP_URL}/books/${resolvedParams.slug}`,
+        item: canonical,
       },
     ],
   };

@@ -47,15 +47,17 @@ for (const file of files) {
     if (ts.isCallExpression(node)) {
       const target = node.expression.getText(source);
       const match = target.match(/^(?:api|axios)\.(get|post|put|patch|delete)$/);
+      const helper = ['fetchPublicCollection', 'fetchRecord'].includes(target);
       const first = node.arguments[0];
-      if ((match || target === 'fetch') && first) {
-        const init = node.arguments[1]?.getText(source) || '';
+      if ((match || target === 'fetch' || helper) && first) {
+        const init = (helper ? (target === 'fetchPublicCollection' ? node.arguments[3] : undefined) : node.arguments[1])?.getText(source) || '';
         const method = (match?.[1] || init.match(/method:\s*['"](\w+)['"]/)?.[1] || 'get').toUpperCase();
         for (const { literal, url } of pathCandidates(first, source)) {
         const documented = literal ? routes.get(`${method} ${normalize(url)}`) : undefined;
         const call = {
           file: screen.file, line: source.getLineAndCharacterOfPosition(node.getStart()).line + 1,
           owner: ownerOf(node, source),
+          sourceKind: helper ? `GET helper: ${target}` : target,
           method, path: url, dynamicPath: !literal,
           evidence: documented ? 'documented; runtime verification required' : 'contract review required',
           requestExpression: init,

@@ -1,14 +1,5 @@
-import type { Metadata } from 'next';
+import { pageMetadata } from '@/lib/page-metadata';
 
-export const metadata: Metadata = {
-  title: 'Careers',
-  description:
-    'Explore career opportunities with Harglim Publishers and help authors share their stories with readers.',
-  alternates: { canonical: '/careers' },
-};
+export function generateMetadata() { return pageMetadata("/careers", "Careers", false); }
 
-export default function CareersLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
-  return children;
-}
+export default function Layout({ children }: { children: React.ReactNode }) { return children; }

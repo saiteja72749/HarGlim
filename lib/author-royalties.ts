@@ -1,6 +1,7 @@
 import type { RoyaltyLine } from "@/types/royalty-api";
 import { record } from "@/lib/api-error";
 import api from "@/lib/api";
+import { parseCollectionPage } from "@/lib/catalog-data";
 
 /**
  * GET /authors/me/royalties →
@@ -53,7 +54,19 @@ export async function fetchRoyaltyHistory(): Promise<RoyaltyHistory> {
   if (!Number.isInteger(first.pages) || first.pages < 0 || first.pages > 1_000) throw new Error("The backend returned invalid royalty pagination.");
   const entries = [...first.entries];
   for (let page = 2; page <= first.pages; page++) entries.push(...(await load(page)).entries);
+  if (entries.length !== first.totalLines) throw new Error("Royalty history changed or was incomplete. Refresh before exporting.");
   return { ...first, entries };
+}
+
+export async function fetchAuthorLedgerRows<T>(collection: "royalty-settlements" | "manual-royalties", listKey: "settlements" | "statements") {
+  const list: T[] = [];
+  for (let page = 1; page <= 1000; page++) {
+    const { data } = await api.get(`/authors/me/${collection}`, { params: { page, limit: 100 }, cache: "no-store" });
+    const result = parseCollectionPage<T>(data, listKey);
+    list.push(...result.items);
+    if (result.pages !== null ? page >= result.pages : result.items.length < 100) return list;
+  }
+  throw new Error("The author ledger exceeded the supported pagination limit.");
 }
 
 /** A sale recorded before rates were stored: show "Unavailable", never ₹0. */

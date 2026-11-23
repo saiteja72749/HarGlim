@@ -1,14 +1,5 @@
-import type { Metadata } from 'next';
+import { pageMetadata } from '@/lib/page-metadata';
 
-export const metadata: Metadata = {
-  title: 'Frequently Asked Questions',
-  description:
-    'Find answers about ordering books, publishing with Harglim, payments, delivery, returns, and royalties.',
-  alternates: { canonical: '/faq' },
-};
+export function generateMetadata() { return pageMetadata("/faq", "Frequently Asked Questions", false); }
 
-export default function FAQLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
-  return children;
-}
+export default function Layout({ children }: { children: React.ReactNode }) { return children; }

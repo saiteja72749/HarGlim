@@ -1,5 +1,6 @@
 import { describeApiError, record } from "@/lib/api-error";
 import api from "@/lib/api";
+import { fetchAuthorLedgerRows } from "@/lib/author-royalties";
 
 /**
  * Manual royalty statements: admin types, per book, the royalty per copy (100% of it goes to
@@ -101,10 +102,12 @@ const listFrom = (input: unknown): Record<string, unknown>[] => {
   return (candidates.find(Array.isArray) || []).map(record);
 };
 
-export function normalizeStatement(input: unknown): ManualRoyaltyStatement {
+export function normalizeStatement(input: unknown, authoritative = false): ManualRoyaltyStatement {
   const raw = record(input);
+  if (authoritative && (raw.totalRoyalty == null || raw.totalUnits == null)) throw new Error("The statement omitted its published totals.");
   const items: ManualRoyaltyItem[] = (Array.isArray(raw?.items) ? raw.items : []).map(record).map((item) => {
     const book = record(item.book);
+    if (authoritative && item.totalRoyalty == null) throw new Error("The statement omitted a line total.");
     const royaltyPerBook = amount(item?.royaltyPerBook);
     const unitsSold = Math.floor(amount(item?.unitsSold));
     return {
@@ -144,7 +147,7 @@ export async function listManualRoyalties(authorId?: string) {
     params: { limit: 100, ...(authorId ? { authorId } : {}) },
     cache: "no-store",
   });
-  return listFrom(data).map(normalizeStatement);
+  return listFrom(data).map((row) => normalizeStatement(row));
 }
 
 export async function voidManualRoyalty(id: string, reason: string) {
@@ -152,6 +155,6 @@ export async function voidManualRoyalty(id: string, reason: string) {
 }
 
 export async function listMyManualRoyalties() {
-  const { data } = await api.get("/authors/me/manual-royalties", { params: { limit: 100 }, cache: "no-store" });
-  return listFrom(data).map(normalizeStatement);
+  const rows = await fetchAuthorLedgerRows<unknown>("manual-royalties", "statements");
+  return rows.map((row) => normalizeStatement(row, true));
 }

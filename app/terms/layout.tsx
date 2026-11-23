@@ -1,14 +1,5 @@
-import type { Metadata } from 'next';
+import { pageMetadata } from '@/lib/page-metadata';
 
-export const metadata: Metadata = {
-  title: 'Terms of Service',
-  description:
-    "Read the terms governing use of Harglim Publishers' website, bookstore, publishing services, and author tools.",
-  alternates: { canonical: '/terms' },
-};
+export function generateMetadata() { return pageMetadata("/terms", "Terms and Conditions", false); }
 
-export default function TermsLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
-  return children;
-}
+export default function Layout({ children }: { children: React.ReactNode }) { return children; }

@@ -5,7 +5,6 @@ import { Footer } from '@/components/layout/footer';
 import { MainContainer } from '@/components/layout/main-container';
 import { Providers } from './providers';
 import { siteConfig } from '@/config/site';
-import { NoiseOverlay } from '@/components/ui/noise-overlay';
 import { serializeJsonLd } from '@/lib/json-ld';
 import { SiteStructuredData } from '@/components/layout/site-structured-data';
 import { NetworkStatus } from '@/components/layout/network-status';
@@ -69,11 +68,12 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const content = await fetchRecord('/content');
   const websiteJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
@@ -88,15 +88,15 @@ export default function RootLayout({
 
   return (
     <html lang="en" className="bg-background">
-      <body className="font-sans antialiased">
+      <body className="flex min-h-svh flex-col font-sans antialiased">
+        <a href="#main-content" className="skip-link">Skip to content</a>
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: serializeJsonLd(websiteJsonLd) }}
         />
-        <Providers>
+        <Providers initialContent={content === MISSING ? null : content}>
           <NetworkStatus />
           <SiteStructuredData />
-          <NoiseOverlay />
           <Navbar />
           <MainContainer>{children}</MainContainer>
           <Footer />

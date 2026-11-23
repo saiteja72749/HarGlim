@@ -4,7 +4,10 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: #F8F9F7;
+  --background: #F8F9F6;
+  --body-ink: #263238;
+  --site-content-width: 80rem;
+  --site-section-space: clamp(2rem, 5vw, 5rem);
   --foreground: #0F3D3E;
   --card: #FFFFFF;
   --card-foreground: #0F3D3E;
@@ -145,7 +148,31 @@
   }
 }
 
-/* Force hide Next.js dev indicator */
-nextjs-portal {
-  display: none !important;
+/* Navigation never translates fixed headers or hides server-rendered content. */
+@keyframes route-enter { from { opacity: .92; } to { opacity: 1; } }
+.route-transition { animation: route-enter 160ms ease-out; }
+.book-card { transition: border-color 160ms ease, box-shadow 160ms ease; }
+@media (hover: hover) and (pointer: fine) {
+  .book-card:hover { border-color: var(--primary); box-shadow: 0 5px 16px rgb(15 61 62 / .07); }
+}
+.skip-link { position: fixed; top: .5rem; left: 1rem; z-index: 100; transform: translateY(-200%); background: var(--primary); color: white; padding: .75rem 1rem; border-radius: .5rem; }
+.skip-link:focus { transform: translateY(0); }
+html { scroll-padding-top: calc(var(--site-header-height, 0px) + 1rem); }
+[data-slot="sheet-close"] { display: grid; min-width: 44px; min-height: 44px; place-items: center; }
+[data-slot="dialog-content"] { max-height: calc(100dvh - 2rem); overflow-y: auto; overscroll-behavior: contain; }
+[data-slot="table-container"] { min-width: 0; overscroll-behavior-inline: contain; }
+@media (pointer: coarse) {
+  [data-slot="button"] { min-height: 44px; min-width: 44px; }
+  [data-slot="dialog-close"] { min-height: 44px; min-width: 44px; }
+}
+@media (max-width: 639px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px; }
+  .reader-transactions, .reader-transactions tbody { display: block; }
+  .reader-transactions thead { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; }
+  .reader-transactions tbody tr { display: block; margin-bottom: .75rem; padding: .5rem; border: 1px solid var(--border); border-radius: var(--radius); }
+  .reader-transactions td { display: grid; grid-template-columns: minmax(4.5rem, .75fr) minmax(0, 1fr); gap: .5rem; align-items: start; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+  .reader-transactions td::before { content: attr(data-label); color: var(--muted-foreground); font-size: .75rem; font-weight: 500; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }

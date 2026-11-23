@@ -1,122 +1,53 @@
-import { siteConfig } from "@/config/site";
+import type { MetadataRoute } from 'next';
+import { siteConfig } from '@/config/site';
+import { lastModified } from '@/lib/seo-data';
 
-import { describeApiError } from "@/lib/api-error";
-import { MetadataRoute } from 'next';
+type PublicRecord = { slug?: string; _id?: string; updatedAt?: string };
+const publicCollections = ['books', 'authors'] as const;
+const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
-type SitemapRecord = {
-  slug?: string;
-  _id?: string;
-  updatedAt?: string;
-  name?: string;
-};
-
-function isSitemapRecord(value: unknown): value is SitemapRecord {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  return (
-    (record.slug === undefined || typeof record.slug === 'string') &&
-    (record._id === undefined || typeof record._id === 'string') &&
-    (record.updatedAt === undefined || typeof record.updatedAt === 'string') &&
-    (record.name === undefined || typeof record.name === 'string')
-  );
-}
-
-function getRecords(value: unknown): SitemapRecord[] {
-  if (Array.isArray(value)) return value.filter(isSitemapRecord);
-  if (typeof value === 'object' && value !== null && 'data' in value) {
-    return getRecords(value.data);
+async function publicRecords(collection: typeof publicCollections[number]): Promise<PublicRecord[]> {
+  const base = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
+  const records = new Map<string, PublicRecord>();
+  try {
+    for (let page = 1; page <= 1000; page++) {
+      const response = await fetch(`${base}/${collection}?page=${page}&limit=100`, { next: { revalidate: 3600 }, signal: AbortSignal.timeout(15000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload: unknown = await response.json();
+      const envelope = object(payload), data = object(envelope.data);
+      const items = [data[collection], envelope.data, envelope[collection], payload].find(Array.isArray);
+      if (!Array.isArray(items)) throw new Error('Invalid public list envelope');
+      const previous = records.size;
+      for (const item of items) {
+        const value = object(item);
+        const key = typeof value._id === 'string' ? value._id : typeof value.slug === 'string' ? value.slug : null;
+        if (key) records.set(key, value as PublicRecord);
+      }
+      const pagination = object(envelope.pagination ?? data.pagination);
+      const pages = pagination.pages ?? pagination.totalPages;
+      if (typeof pages === 'number' ? page >= pages : items.length < 100) break;
+      if (records.size === previous) throw new Error('Public pagination did not advance');
+    }
+  } catch (error) {
+    // Keep already verified public URLs if a later page is temporarily unavailable.
+    console.error(`sitemap: ${collection} incomplete`, error instanceof Error ? error.message : 'Request failed');
   }
-  return [];
+  return [...records.values()];
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const baseUrl = (siteConfig.url).replace(/\/+$/, '');
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
-
-  try {
-    // Fetch all books, categories, and authors for the sitemap
-    const [booksRes, categoriesRes, authorsRes] = await Promise.all([
-      fetch(`${API_URL}/books?limit=1000`, { next: { revalidate: 3600 } }).catch((e) => {
-        console.error('sitemap: failed to fetch books', describeApiError(e));
-        return null;
-      }),
-      fetch(`${API_URL}/categories?limit=100`, { next: { revalidate: 3600 } }).catch((e) => {
-        console.error('sitemap: failed to fetch categories', describeApiError(e));
-        return null;
-      }),
-      fetch(`${API_URL}/authors?limit=1000`, { next: { revalidate: 3600 } }).catch((e) => {
-        console.error('sitemap: failed to fetch authors', describeApiError(e));
-        return null;
-      }),
-    ]);
-
-    if (booksRes && !booksRes.ok) console.error(`sitemap: books request returned ${booksRes.status}`);
-    if (categoriesRes && !categoriesRes.ok) console.error(`sitemap: categories request returned ${categoriesRes.status}`);
-    if (authorsRes && !authorsRes.ok) console.error(`sitemap: authors request returned ${authorsRes.status}`);
-
-    const [booksData, categoriesData, authorsData] = await Promise.all([
-      booksRes?.ok ? booksRes.json() as Promise<unknown> : [],
-      categoriesRes?.ok ? categoriesRes.json() as Promise<unknown> : [],
-      authorsRes?.ok ? authorsRes.json() as Promise<unknown> : [],
-    ]);
-    const books = getRecords(booksData);
-    const categories = getRecords(categoriesData);
-    const authors = getRecords(authorsData);
-
-    const sitemapEntries: MetadataRoute.Sitemap = [
-      { url: `${baseUrl}/` },
-      { url: `${baseUrl}/about` },
-      { url: `${baseUrl}/author-guidelines` },
-      { url: `${baseUrl}/careers` },
-      { url: `${baseUrl}/contact` },
-      { url: `${baseUrl}/faq` },
-      { url: `${baseUrl}/publish` },
-      { url: `${baseUrl}/royalty-info` },
-      { url: `${baseUrl}/returns` },
-      { url: `${baseUrl}/terms` },
-      { url: `${baseUrl}/privacy` },
-      { url: `${baseUrl}/books` },
-      { url: `${baseUrl}/authors` },
-      { url: `${baseUrl}/categories` },
-    ];
-
-    // Add books
-    books.forEach((book) => {
-      if (book.slug || book._id) {
-        sitemapEntries.push({
-          url: `${baseUrl}/books/${book.slug || book._id}`,
-          ...(book.updatedAt ? { lastModified: new Date(book.updatedAt) } : {}),
-        });
-      }
-    });
-
-    // Add categories
-    categories.forEach((cat) => {
-      const slug = cat.slug || cat.name?.toLowerCase().replace(/ /g, '-');
-      if (slug) {
-        sitemapEntries.push({
-          url: `${baseUrl}/categories/${slug}`,
-          ...(cat.updatedAt ? { lastModified: new Date(cat.updatedAt) } : {}),
-        });
-      }
-    });
-
-    // Add authors
-    authors.forEach((author) => {
-      if (author._id) {
-        sitemapEntries.push({
-          url: `${baseUrl}/authors/${author._id}`,
-          ...(author.updatedAt ? { lastModified: new Date(author.updatedAt) } : {}),
-        });
-      }
-    });
-
-    return sitemapEntries;
-  } catch (error) {
-    console.error('sitemap: falling back to static sitemap after unexpected error', describeApiError(error));
-    return [
-      { url: `${baseUrl}/` },
-      { url: `${baseUrl}/books` },
-    ];
+  const base = siteConfig.url.replace(/\/+$/, '');
+  const paths = ['', '/about', '/author-guidelines', '/careers', '/contact', '/faq', '/publish', '/royalty-info', '/returns', '/terms', '/privacy', '/books', '/authors', '/spotlight'];
+  const entries: MetadataRoute.Sitemap = paths.map((path) => ({ url: `${base}${path || '/'}` }));
+  const collections = await Promise.all(publicCollections.map(publicRecords));
+  for (const [index, items] of collections.entries()) {
+    const name = publicCollections[index];
+    for (const item of items) {
+      const identity = name === 'authors' ? item._id : item.slug;
+      if (!identity) continue;
+      const modified = lastModified(item.updatedAt);
+      entries.push({ url: `${base}/${name}/${encodeURIComponent(identity)}`, ...(modified ? { lastModified: modified } : {}) });
+    }
   }
+  return [...new Map(entries.map((entry) => [entry.url, entry])).values()];
 }

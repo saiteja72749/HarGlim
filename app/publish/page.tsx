@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import Image from "next/image";
+import Image from '@/components/ui/backend-image';
 import {
   BookOpen,
   Edit3,
@@ -14,10 +14,7 @@ import {
   ArrowRight,
   CheckCircle2,
   FileText,
-  Award,
-  Sparkles,
   Users,
-  Globe,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -29,6 +26,7 @@ import { SpotlightSection } from "@/components/spotlight/spotlight-section";
 import { fetchPublicStats } from "@/lib/public-stats";
 import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
+import { parseCollectionPage } from "@/lib/catalog-data";
 
 /** Cloudinary covers resized for the hero (other hosts are used as they are). */
 const coverUrl = (src: string) =>
@@ -53,10 +51,13 @@ export default function PublishPage() {
   const [packages, setPackages] = useState<PackageCardData[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(true);
   const [packagesError, setPackagesError] = useState(false);
-  const [authorsCount, setAuthorsCount] = useState(0);
+  const [authorsCount, setAuthorsCount] = useState<number | null>(null);
 
   useEffect(() => {
-    const fetchAuthorsCount = async () => setAuthorsCount((await fetchPublicStats()).authorsCount);
+    const fetchAuthorsCount = async () => {
+      try { setAuthorsCount((await fetchPublicStats()).authorsCount); }
+      catch { setAuthorsCount(null); }
+    };
     fetchAuthorsCount();
   }, []);
 
@@ -66,12 +67,8 @@ export default function PublishPage() {
     api
       .get("/books", { params: { limit: 8 } })
       .then(({ data }) => {
-        const items = data?.data?.books || data?.books || data?.data || [];
-        // Only hosts allowed for next/image in next.config.mjs.
-        const allowed = (src: unknown) =>
-          typeof src === "string" &&
-          (src.startsWith("https://res.cloudinary.com/") || src.startsWith("https://harglimpublish-backend.onrender.com/"));
-        setShowcase((Array.isArray(items) ? items : []).filter((b: any) => allowed(b?.coverImage)).slice(0, 3));
+        const { items } = parseCollectionPage<{ _id: string; slug?: string; title: string; coverImage: string }>(data, "books");
+        setShowcase(items.filter((book) => typeof book.coverImage === "string" && /^(https?:\/\/|\/(?!\/))/.test(book.coverImage)).slice(0, 3));
       })
       .catch(() => setShowcase([]));
   }, []);
@@ -99,7 +96,7 @@ export default function PublishPage() {
   // Approved authors go straight to submission with the package preselected; everyone else
   // must apply to become an author first.
   const packageHref = (pkg: PackageCardData) =>
-    role === "author" ? `/author/manuscripts/new?packageId=${encodeURIComponent(pkg._id || "")}` : "/dashboard/become-author";
+    `${role === "author" ? "/author/manuscripts/new" : "/dashboard/become-author"}?packageId=${encodeURIComponent(pkg._id || "")}`;
 
   return (
     <div className="bg-[#F8F9F7] min-h-screen text-[#0F3D3E] font-sans">
@@ -107,32 +104,26 @@ export default function PublishPage() {
       {/* ------------------------------------------------------------------ */}
       {/* 1. HERO SECTION (Conversion Focused) */}
       {/* ------------------------------------------------------------------ */}
-      <section className="relative bg-gradient-to-b from-[#0B2E2F] via-[#0F3D3E] to-[#082223] text-white py-20 md:py-28 overflow-hidden">
+      <section className="relative bg-gradient-to-b from-[#0B2E2F] via-[#0F3D3E] to-[#082223] text-white py-[var(--site-section-space)] overflow-hidden">
         <div className="absolute top-0 right-0 w-96 h-96 bg-[#D4AF37]/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
           
           {/* Left Column Text & CTAs */}
-          <div className="lg:col-span-7 space-y-6 text-center lg:text-left">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#D4AF37]/20 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-serif font-bold">
-              <Award className="h-4 w-4" />
-              <span>Premier Independent Publishing House</span>
-            </div>
-
-            <h1 className="text-4xl sm:text-5xl md:text-6xl font-serif font-bold text-white tracking-tight leading-tight">
-              {content.publishTitle}
+          <div className={showcase.length ? "space-y-6 text-center lg:col-span-7 lg:text-left" : "space-y-6 text-center lg:col-span-12"}>
+            <h1 className="font-serif text-[clamp(2rem,5vw,4rem)] font-bold leading-tight tracking-tight">
+              {content.publishTitle || "Publish with Us"}
             </h1>
-
-            <p className="text-base sm:text-lg text-white/80 max-w-xl mx-auto lg:mx-0 font-light leading-relaxed">
-              {content.publishSubtitle}
-            </p>
+            {content.publishSubtitle && (
+              <p className="mx-auto max-w-xl text-base leading-relaxed text-white/85 lg:mx-0">{content.publishSubtitle}</p>
+            )}
 
             {/* CTAs */}
             <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start pt-2">
               <Button
                   size="lg"
-                  className="w-full sm:w-auto bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold h-14 px-8 rounded-full shadow-[0_0_25px_rgba(212,175,55,0.4)] transition-all gap-2 text-base"
-                 asChild><Link href="/dashboard/become-author">
+                  className="w-full sm:w-auto bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold h-14 px-8 rounded-full transition-colors gap-2 text-base"
+                 asChild><Link href={role === "author" ? "/author/manuscripts/new" : "/dashboard/become-author"}>
                   <span>Submit Manuscript</span>
                   <ArrowRight className="h-4 w-4" />
                 </Link></Button>
@@ -144,38 +135,16 @@ export default function PublishPage() {
                 </Link></Button>
             </div>
 
-            {/* Trust Badges Bar */}
-            <div className="pt-6 border-t border-white/15 grid grid-cols-3 gap-4 text-center lg:text-left">
-              <div className="space-y-1">
-                <div className="flex items-center justify-center lg:justify-start gap-1 text-[#D4AF37]">
-                  <Users className="h-4 w-4" />
-                  <span className="font-serif font-bold text-lg text-white">{authorsCount}+</span>
-                </div>
-                <p className="text-[11px] text-white/70">Authors Published</p>
-              </div>
-
-              <div className="space-y-1">
-                <div className="flex items-center justify-center lg:justify-start gap-1 text-[#D4AF37]">
-                  <Globe className="h-4 w-4" />
-                  <span className="font-serif font-bold text-lg text-white">Global</span>
-                </div>
-                <p className="text-[11px] text-white/70">Distribution</p>
-              </div>
-
-              <div className="space-y-1">
-                <div className="flex items-center justify-center lg:justify-start gap-1 text-[#D4AF37]">
-                  <DollarSign className="h-4 w-4" />
-                  <span className="font-serif font-bold text-lg text-white">Live</span>
-                </div>
-                <p className="text-[11px] text-white/70">Royalty Dashboard</p>
-              </div>
-            </div>
+            {authorsCount !== null && (
+              <Link href="/authors" className="inline-flex min-h-11 items-center gap-2 text-sm text-white/85 hover:underline">
+                <Users className="size-4" aria-hidden="true" /> {authorsCount.toLocaleString("en-IN")} published authors
+              </Link>
+            )}
           </div>
 
           {/* Right Column: real books published by Harglim authors */}
-          <div className="lg:col-span-5 flex flex-col items-center gap-5">
-            {showcase.length > 0 ? (
-              <>
+          {showcase.length > 0 && (
+            <div className="flex flex-col items-center gap-5 lg:col-span-5">
                 <div className="relative w-full max-w-sm h-[285px] sm:h-[310px]">
                   {showcase.map((book, idx) => {
                     // Front cover in the middle, the others fanned out behind it.
@@ -209,42 +178,15 @@ export default function PublishPage() {
                     Browse all books <ArrowRight className="h-3.5 w-3.5" />
                   </Link>
                 </div>
-              </>
-            ) : (
-              <div className="w-full max-w-sm rounded-3xl border-2 border-[#D4AF37]/40 bg-white/5 p-10 flex flex-col items-center text-center gap-4">
-                <div className="relative h-28 w-28">
-                  <Image src="/logo.png" alt="Harglim Publishers" fill sizes="112px" className="object-contain" />
-                </div>
-                <p className="font-serif font-bold text-lg text-white">Your book could be next</p>
-                <p className="text-xs text-white/70">Editing, design, ISBN and distribution handled for you.</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* 2. TRUST STRIP (NEW LOGOS / MARQUEE) */}
-      {/* ------------------------------------------------------------------ */}
-      <section className="py-6 bg-white border-b border-[#E2E6DF]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-4 text-center md:text-left">
-          <p className="text-xs font-bold uppercase tracking-wider text-[#5C6E6E]">
-            Published worldwide across major platforms:
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-10 text-xs font-serif font-bold text-[#0F3D3E]/80">
-            <span className="flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-[#D4AF37]" /> Amazon Kindle</span>
-            <span className="flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-[#D4AF37]" /> Flipkart Assured</span>
-            <span className="flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-[#D4AF37]" /> IngramSpark Global</span>
-            <span className="flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-[#D4AF37]" /> Google Play Books</span>
-            <span className="flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-[#D4AF37]" /> Barnes & Noble</span>
-          </div>
+            </div>
+          )}
         </div>
       </section>
 
       {/* ------------------------------------------------------------------ */}
       {/* 3. HOW IT WORKS (Visual Timeline) */}
       {/* ------------------------------------------------------------------ */}
-      <section className="py-16 sm:py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      {stepGuide.length > 0 && <section className="py-16 sm:py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-3xl mx-auto mb-12 space-y-2">
           <span className="text-xs font-bold uppercase tracking-wider text-[#8A6D1E] block">
             4-Step Seamless Journey
@@ -253,7 +195,7 @@ export default function PublishPage() {
             How Publishing Works With Us
           </h2>
           <p className="text-sm text-[#5C6E6E]">
-            Our step-by-step workflow ensures your book reaches perfection without any confusion.
+            See the steps from manuscript review to publication.
           </p>
         </div>
 
@@ -276,12 +218,12 @@ export default function PublishPage() {
             </motion.div>
           ))}
         </div>
-      </section>
+      </section>}
 
       {/* ------------------------------------------------------------------ */}
       {/* 4. SERVICES SECTION (Premium Grid Cards) */}
       {/* ------------------------------------------------------------------ */}
-      <section id="services" className="py-16 sm:py-20 bg-white border-y border-[#E2E6DF]">
+      {publishingServices.length > 0 && <section id="services" className="py-16 sm:py-20 bg-white border-y border-[#E2E6DF]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto mb-12 space-y-2">
             <span className="text-xs font-bold uppercase tracking-wider text-[#8A6D1E] block">
@@ -291,7 +233,7 @@ export default function PublishPage() {
               Our Editorial & Publishing Services
             </h2>
             <p className="text-sm text-[#5C6E6E]">
-              Everything you need to craft a successful, high-converting book.
+              Explore the services available for your manuscript.
             </p>
           </div>
 
@@ -324,7 +266,7 @@ export default function PublishPage() {
             ))}
           </div>
         </div>
-      </section>
+      </section>}
 
       {/* ------------------------------------------------------------------ */}
       {/* 5. PUBLISHING PACKAGES (Admin → Publishing Packages, GET /publish-packages) */}
@@ -360,9 +302,7 @@ export default function PublishPage() {
             packages.map((pkg) => (
               <motion.div
                 key={pkg._id}
-                whileHover={{ y: -6 }}
-                transition={{ duration: 0.2 }}
-                className={`flex ${pkg.highlighted ? "lg:scale-105" : ""}`}
+                className="flex min-w-0"
               >
                 <PackageCard pkg={pkg} href={packageHref(pkg)} />
               </motion.div>
@@ -405,8 +345,8 @@ export default function PublishPage() {
           </p>
           <Button
               size="lg"
-              className="bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold h-14 px-10 rounded-xl shadow-lg gap-2 text-base"
-             asChild><Link href="/dashboard/become-author" className="inline-block">
+              className="w-full sm:w-auto max-w-full bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold min-h-14 h-auto py-3 px-4 sm:px-10 rounded-xl shadow-lg gap-2 text-sm sm:text-base whitespace-normal"
+             asChild><Link href={role === "author" ? "/author/manuscripts/new" : "/dashboard/become-author"} className="inline-block">
               <span>Start Your Publishing Journey</span>
               <ArrowRight className="h-5 w-5" />
             </Link></Button>

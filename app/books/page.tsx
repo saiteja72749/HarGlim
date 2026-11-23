@@ -1,9 +1,9 @@
 "use client";
-import { describeApiError } from "@/lib/api-error";
+import { describeApiError, publicApiMessage, publicRetryAt } from "@/lib/api-error";
 
 
 import { useState, useEffect, useCallback, Suspense, useRef } from "react";
-import Image from "next/image";
+import Image from '@/components/ui/backend-image';
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -13,16 +13,13 @@ import {
   List,
   SlidersHorizontal,
   X,
-  Star,
   BookOpen,
   ChevronDown,
   ChevronUp,
-  ShieldCheck,
-  Truck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { BookCard } from "@/components/books/book-card";
+import { CompactBookCard } from "@/components/books/book-card";
 import { BookCardSkeleton } from "@/components/books/book-card-skeleton";
 import { ErrorState } from "@/components/ui/error-state";
 import {
@@ -43,48 +40,50 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import type { Book as BookType, Category } from "@/types";
-import api from "@/lib/api";
 import { fetchBackendCategories } from "@/lib/categories";
 import { onLiveChange } from "@/lib/live-sync";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { cn } from "@/lib/utils";
+import { useSearchParams } from 'next/navigation';
+import { fetchCatalogPage } from "@/lib/catalog";
+import { publishedNumber } from "@/lib/book-presentation";
 
 const priceRanges = [
   { label: "Under ₹300", min: 0, max: 300 },
   { label: "₹300 - ₹500", min: 300, max: 500 },
   { label: "₹500 - ₹800", min: 500, max: 800 },
-  { label: "Above ₹800", min: 800, max: 10000 },
+  { label: "Above ₹800", min: 800 },
 ];
 
-function BooksContent() {
-  const [books, setBooks] = useState<BookType[]>([]);
+function BooksContent({ initialQuery = '', initialCategory = '', initialTag = 'all', initialSort = 'newest' }: { initialQuery?: string; initialCategory?: string; initialTag?: 'all' | 'featured' | 'bestseller' | 'newRelease'; initialSort?: string }) {
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<unknown>(null);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
-  const [searchQuery, setSearchQuery] = useState("");
-  const debouncedQuery = useDebouncedValue(searchQuery.trim());
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
+  const queryInput = searchQuery.trim();
+  const debouncedQuery = useDebouncedValue(queryInput);
   const [reloadVersion, setReloadVersion] = useState(0);
-  const [sortBy, setSortBy] = useState("newest");
+  const params = useSearchParams();
+  const sortBy = initialSort;
   
   // Filter States
-  const [quickTagFilter, setQuickTagFilter] = useState<"all" | "featured" | "bestseller" | "newRelease">("all");
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [selectedFormats, setSelectedFormats] = useState<string[]>([]);
-  const [selectedPriceRange, setSelectedPriceRange] = useState<string | null>(null);
-  const [minRatingFilter, setMinRatingFilter] = useState<number | null>(null);
+  const quickTagFilter = initialTag;
+  const format = params.get("format") || "";
+  const minPrice = publishedNumber(params.get("minPrice")) ?? undefined;
+  const maxPrice = publishedNumber(params.get("maxPrice")) ?? undefined;
+  const selectedPriceRange = priceRanges.find((range) => range.min === minPrice && range.max === maxPrice)?.label;
+  const hasPriceFilter = minPrice !== undefined || maxPrice !== undefined;
   const [categories, setCategories] = useState<Category[]>([]);
-  const [categoryError, setCategoryError] = useState(false);
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false);
+  const [categoryError, setCategoryError] = useState<unknown>(null);
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
 
   // Accordion Section Collapse State
   const [openSections, setOpenSections] = useState({
     categories: true,
-    formats: true,
     price: true,
-    rating: true,
   });
 
   // Instant Suggestions state
@@ -92,144 +91,64 @@ function BooksContent() {
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
   const fetchCategories = useCallback(async (fresh = false) => {
-    setCategoryError(false);
+    setCategoryError(null);
     try {
       const items = (await fetchBackendCategories(fresh)) as Category[];
       setCategories(items);
-      setSelectedCategories((previous) => {
-        const valid = previous.filter((id) => items.some((category) => category._id === id || category.slug === id));
-        return valid.length === previous.length ? previous : valid;
-      });
+      setCategoriesLoaded(true);
     } catch (err) {
       console.error("Failed to fetch categories:", describeApiError(err));
-      setCategoryError(true);
+      setCategoryError(err);
     }
   }, []);
 
   useEffect(() => {
     void fetchCategories();
-    return onLiveChange(["categories", "author-data"], () => {
-      void fetchCategories(true).finally(() => setReloadVersion((version) => version + 1));
-    });
+    const stopCategories = onLiveChange("categories", (reason) => void fetchCategories(reason === "change"), 60_000);
+    const stopBooks = onLiveChange("books", () => {
+      setReloadVersion((version) => version + 1);
+    }, 20_000);
+    return () => { stopCategories(); stopBooks(); };
   }, [fetchCategories]);
 
-  const selectedCategorySlug = categories.find((category) => category._id === selectedCategories[0] || category.slug === selectedCategories[0])?.slug;
-  const resultsPending = loading || searchQuery.trim() !== debouncedQuery;
+  const selectedCategory = categories.find((category) => category._id === initialCategory || category.slug === initialCategory);
+  const unknownCategory = Boolean(initialCategory && categoriesLoaded && !selectedCategory);
+  const selectedCategoryId = selectedCategory?._id || initialCategory;
+  const selectedCategorySlug = selectedCategory?.slug || initialCategory;
+  const waitForCategory = Boolean(initialCategory && !categoriesLoaded && !categoryError);
+  const resultsPending = loading || waitForCategory || searchQuery.trim() !== debouncedQuery;
 
-  const fetchBooks = useCallback(async (signal: AbortSignal) => {
-    setLoading(true);
-    setError(false);
-    try {
-      const params: { page: number; limit: number; search?: string; q?: string; category?: string; minPrice?: number; maxPrice?: number; featured?: boolean; bestseller?: boolean; newRelease?: boolean; sort?: string } = {
-        page: currentPage,
-        limit: 12,
-      };
-
-      if (debouncedQuery) {
-        params.search = debouncedQuery;
-        params.q = debouncedQuery;
-      }
-      if (selectedCategorySlug) params.category = selectedCategorySlug;
-
-      if (selectedPriceRange) {
-        const range = priceRanges.find((r) => r.label === selectedPriceRange);
-        if (range) {
-          params.minPrice = range.min;
-          params.maxPrice = range.max;
-        }
-      }
-
-      if (quickTagFilter === "featured") params.featured = true;
-      if (quickTagFilter === "bestseller") params.bestseller = true;
-      if (quickTagFilter === "newRelease") params.newRelease = true;
-
-      if (sortBy === "price-low") params.sort = "price_asc";
-      else if (sortBy === "price-high") params.sort = "price_desc";
-      else if (sortBy === "rating") params.sort = "rating";
-      else if (sortBy === "newest") params.sort = "newest";
-      else if (sortBy === "featured") params.sort = "featured";
-
-      // Live backend: GET /books ignores `search`/`q` (returns the unfiltered list),
-      // so text queries go to GET /search?q=, which does full-text matching.
-      const query = debouncedQuery;
-      const intersectCategory = Boolean(query && params.category);
-      const { data } = query
-        ? await api.get("/search", { params: { q: query, page: intersectCategory ? 1 : currentPage, limit: intersectCategory ? 100 : 12 }, signal })
-        : await api.get("/books", { params, signal });
-
-      const items = data.data?.books || (Array.isArray(data.data) ? data.data : []) || (Array.isArray(data) ? data : []);
-      const pagination = data.pagination || data.data?.pagination || {};
-
-      let result: BookType[] = Array.isArray(items) ? [...items] : [];
-      if (intersectCategory) {
-        const searchPages = pagination.pages ?? pagination.totalPages ?? 1;
-        for (let page = 2; page <= searchPages; page++) {
-          const next = await api.get("/search", { params: { q: query, page, limit: 100 }, signal });
-          const nextItems = next.data?.data?.books ?? next.data?.data;
-          if (!Array.isArray(nextItems)) throw new Error("Invalid search results.");
-          result.push(...nextItems);
-        }
-      }
-
-      // Filters the backend ignores (newRelease) or that /search doesn't take are applied here.
-      if (quickTagFilter === "newRelease") result = result.filter((b) => b.isNewRelease);
-      if (query) {
-        if (quickTagFilter === "featured") result = result.filter((b) => b.isFeatured);
-        if (quickTagFilter === "bestseller") result = result.filter((b) => b.isBestseller);
-        if (params.category) {
-          result = result.filter(
-            (b) => typeof b.category === "object" && b.category !== null ? (b.category.slug === params.category || b.category._id === selectedCategories[0]) : b.category === selectedCategories[0]
-          );
-        }
-        if (params.minPrice !== undefined) {
-          result = result.filter((b) => {
-            const price = Number(b.price ?? b.mrp ?? 0);
-            return price >= (params.minPrice ?? 0) && (params.maxPrice === undefined || price <= params.maxPrice);
-          });
-        }
-      }
-
-      // Filter by selected format
-      if (selectedFormats.length > 0) {
-        result = result.filter((b) =>
-          selectedFormats.some((fmt) =>
-            (b.format || "").toLowerCase().includes(fmt.toLowerCase())
-          )
-        );
-      }
-
-      // Filter by min rating
-      if (minRatingFilter) {
-        result = result.filter((b) => (b.rating || b.ratings || 0) >= minRatingFilter);
-      }
-
-      // Backend ignores sort=rating / sort=newest; order the returned page here.
-      if (sortBy === "rating") {
-        result = [...result].sort((a, b) => (b.ratings ?? b.rating ?? 0) - (a.ratings ?? a.rating ?? 0));
-      } else if (sortBy === "newest") {
-        result = [...result].sort(
-          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-        );
-      }
-
-      if (signal.aborted) return;
-      setBooks(intersectCategory ? result.slice((currentPage - 1) * 12, currentPage * 12) : result);
-      setTotalPages(intersectCategory ? Math.max(1, Math.ceil(result.length / 12)) : (pagination.pages || Math.ceil((pagination.total || result.length) / 12) || 1));
-    } catch (err) {
-      if (signal.aborted) return;
-      console.error("Failed to fetch books:", describeApiError(err));
-      setError(true);
-      setBooks([]);
-    } finally {
-      if (!signal.aborted) setLoading(false);
-    }
-  }, [debouncedQuery, sortBy, selectedCategorySlug, selectedCategories, selectedFormats, selectedPriceRange, minRatingFilter, quickTagFilter, currentPage]);
-
+  const [result, setResult] = useState<{ books: BookType[]; pages: number }>({ books: [], pages: 1 });
+  const { books, pages: totalPages } = result;
+  const visiblePage = Math.min(currentPage, totalPages);
   useEffect(() => {
+    if (waitForCategory || unknownCategory || queryInput !== debouncedQuery) return;
     const controller = new AbortController();
-    void fetchBooks(controller.signal);
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await fetchCatalogPage({
+          q: debouncedQuery, category: selectedCategorySlug, page: currentPage, limit: 12,
+          format: format || undefined, minPrice, maxPrice,
+          tag: quickTagFilter, sort: sortBy,
+        }, controller.signal);
+        if (!controller.signal.aborted) {
+          if (currentPage > result.pages) setCurrentPage(result.pages);
+          else setResult(result);
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        console.error("Failed to load catalog:", describeApiError(error));
+        setError(error);
+        setResult({ books: [], pages: 1 });
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
+    void load();
     return () => controller.abort();
-  }, [fetchBooks, reloadVersion]);
+  }, [queryInput, debouncedQuery, selectedCategorySlug, currentPage, format, minPrice, maxPrice, quickTagFilter, sortBy, reloadVersion, waitForCategory, unknownCategory]);
 
   // Click outside listener for suggestions
   useEffect(() => {
@@ -242,28 +161,31 @@ function BooksContent() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleCategoryToggle = (categoryId: string) => {
+  const updateURL = (changes: Record<string, string>) => {
+    const next = new URLSearchParams(window.location.search);
+    for (const [name, value] of Object.entries(changes)) {
+      if (value) next.set(name, value);
+      else next.delete(name);
+    }
+    const query = next.toString();
+    if (query !== params.toString()) window.history.pushState(null, "", `/books${query ? `?${query}` : ""}`);
     setCurrentPage(1);
-    setSelectedCategories((prev) =>
-      prev.includes(categoryId) ? prev.filter((id) => id !== categoryId) : [categoryId]
-    );
+  };
+
+  const handleCategoryToggle = (categoryId: string) => {
+    const slug = categories.find((category) => category._id === categoryId)?.slug;
+    updateURL({ category: categoryId === selectedCategoryId ? "" : slug || categoryId });
   };
 
   const clearFilters = () => {
-    setQuickTagFilter("all");
-    setSelectedCategories([]);
-    setSelectedFormats([]);
-    setSelectedPriceRange(null);
-    setMinRatingFilter(null);
+    updateURL({ category: "", sort: "", tag: "", featured: "", bestseller: "", newRelease: "", q: "", search: "", format: "", minPrice: "", maxPrice: "", minRating: "" });
     setSearchQuery("");
     setCurrentPage(1);
   };
 
   const hasActiveFilters =
-    selectedCategories.length > 0 ||
-    selectedFormats.length > 0 ||
-    selectedPriceRange !== null ||
-    minRatingFilter !== null ||
+    Boolean(initialCategory) || quickTagFilter !== "all" || sortBy !== "newest" ||
+    Boolean(format) || hasPriceFilter ||
     searchQuery.trim() !== "";
 
   // Suggestions matches
@@ -305,9 +227,9 @@ function BooksContent() {
 
         {openSections.categories && (
           <div className="mt-3 space-y-2.5">
-            {categoryError && <p role="alert" className="text-xs text-rose-700">Could not load categories. <button type="button" className="underline" onClick={() => void fetchCategories(true)}>Retry</button></p>}
+            {Boolean(categoryError) && <p role="alert" className="text-xs text-rose-700">{publicApiMessage(categoryError, "Could not load categories.")} <button type="button" className="underline" onClick={() => void fetchCategories()}>Retry</button></p>}
             {categories.map((category) => {
-              const isChecked = selectedCategories.includes(category._id);
+              const isChecked = selectedCategoryId === category._id;
               return (
                 <div key={category._id} className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-2.5">
@@ -341,7 +263,18 @@ function BooksContent() {
 
 
 
-      {/* Accordion Section 3: Price Range */}
+      <div className="space-y-2">
+        <Label htmlFor={`${idPrefix}-format`}>Format</Label>
+        <select id={`${idPrefix}-format`} value={format} onChange={(event) => updateURL({ format: event.target.value })} className="min-h-11 w-full rounded-md border bg-card px-2 text-sm">
+          <option value="">All formats</option>
+          <option value="paperback">Paperback</option>
+          <option value="hardcover">Hardcover</option>
+          <option value="ebook">E-book</option>
+          <option value="audiobook">Audiobook</option>
+        </select>
+      </div>
+
+      {/* Price range */}
       <div className="border-b border-[#E2E6DF]/60 pb-4">
         <button
           type="button"
@@ -362,7 +295,7 @@ function BooksContent() {
                     id={`${idPrefix}-price-${range.label}`}
                     checked={isSelected}
                     onCheckedChange={() =>
-                      setSelectedPriceRange(isSelected ? null : range.label)
+                      updateURL({ minPrice: isSelected ? "" : String(range.min), maxPrice: !isSelected && range.max !== undefined ? String(range.max) : "" })
                     }
                     className="border-[#E2E6DF] data-[state=checked]:bg-[#0F3D3E]"
                   />
@@ -382,51 +315,6 @@ function BooksContent() {
         )}
       </div>
 
-      {/* Accordion Section 4: Minimum Rating */}
-      <div>
-        <button
-          type="button"
-          onClick={() => setOpenSections((prev) => ({ ...prev, rating: !prev.rating }))}
-          className="w-full flex items-center justify-between font-serif font-bold text-sm text-[#0F3D3E] py-1"
-        >
-          <span>Customer Rating</span>
-          {openSections.rating ? <ChevronUp className="h-4 w-4 text-[#5C6E6E]" /> : <ChevronDown className="h-4 w-4 text-[#5C6E6E]" />}
-        </button>
-
-        {openSections.rating && (
-          <div className="mt-3 space-y-2">
-            {[4, 3, 2].map((stars) => {
-              const isSelected = minRatingFilter === stars;
-              return (
-                <button
-                  key={stars}
-                  type="button"
-                  onClick={() => setMinRatingFilter(isSelected ? null : stars)}
-                  className={cn(
-                    "w-full flex items-center gap-2 p-2 rounded-xl border text-xs font-semibold transition-all",
-                    isSelected
-                      ? "bg-[#0F3D3E]/10 border-[#0F3D3E] text-[#0F3D3E]"
-                      : "bg-[#F8F9F7] border-[#E2E6DF] text-[#5C6E6E] hover:border-[#0F3D3E]"
-                  )}
-                >
-                  <div className="flex items-center gap-0.5">
-                    {[...Array(5)].map((_, i) => (
-                      <Star
-                        key={i}
-                        className={cn(
-                          "h-3.5 w-3.5",
-                          i < stars ? "fill-[#D4AF37] text-[#D4AF37]" : "text-gray-200"
-                        )}
-                      />
-                    ))}
-                  </div>
-                  <span>& Up</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
     </div>
   );
 
@@ -448,34 +336,23 @@ function BooksContent() {
               </p>
             </div>
 
-            {/* Micro Trust Signals */}
-            <div className="flex items-center gap-4 text-xs font-sans text-[#5C6E6E] border-t md:border-t-0 md:border-l border-[#E2E6DF] pt-3 md:pt-0 md:pl-6">
-              <div className="flex items-center gap-1.5">
-                <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                <span>100% Verified Copies</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Truck className="h-4 w-4 text-[#0F3D3E]" />
-                <span>Fast India Shipping</span>
-              </div>
-            </div>
           </div>
         </div>
       </div>
 
       {/* 2. Main Workspace Layout (Sidebar + Grid) */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div id="catalog" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex flex-col lg:flex-row gap-8">
           
           {/* LEFT: Desktop Sticky Filter Panel */}
           <aside className="hidden lg:block w-72 flex-shrink-0">
-            <div className="sticky top-24 bg-white p-6 rounded-2xl border border-[#E2E6DF] shadow-xs">
+            <div className="sticky top-[calc(var(--site-header-height,4rem)+1rem)] max-h-[calc(100dvh-var(--site-header-height,4rem)-2rem)] overflow-y-auto bg-white p-6 rounded-2xl border border-[#E2E6DF] shadow-xs">
               {renderFilters("desktop")}
             </div>
           </aside>
 
           {/* RIGHT: Search & Toolbar & Books Grid */}
-          <div className="flex-1 space-y-6">
+          <div className="min-w-0 flex-1 space-y-6">
             
             {/* Top Toolbar (Search, Mobile Drawer, Sort, View Mode) */}
             <div className="bg-white p-4 rounded-2xl border border-[#E2E6DF] shadow-xs space-y-4 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-4">
@@ -490,15 +367,23 @@ function BooksContent() {
                   aria-busy={resultsPending}
                   value={searchQuery}
                   onFocus={() => setShowSuggestions(true)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setShowSuggestions(false);
+                    if (event.key === "Enter") {
+                      updateURL({ q: searchQuery.trim(), search: "" });
+                      setShowSuggestions(false);
+                    }
+                  }}
                   onChange={(e) => {
+                    setCurrentPage(1);
                     setSearchQuery(e.target.value);
                     setShowSuggestions(true);
                   }}
-                  className="pl-10 h-10 bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs"
+                  className="min-h-11 rounded-xl border-border bg-background pl-10 pr-11 text-sm"
                 />
                 {searchQuery && (
                   <button
-                    onClick={() => setSearchQuery("")}
+                    onClick={() => { setSearchQuery(""); updateURL({ q: "", search: "" }); }}
                     aria-label="Clear search"
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-[#5C6E6E] hover:text-[#0F3D3E]"
                   >
@@ -544,7 +429,7 @@ function BooksContent() {
               </div>
 
               {/* Toolbar Controls */}
-              <div className="flex items-center gap-3 justify-between sm:justify-end">
+              <div className="flex flex-wrap items-center gap-3 justify-between sm:justify-end">
                 
                 {/* Mobile Filter Sheet Trigger */}
                 <Sheet>
@@ -559,7 +444,7 @@ function BooksContent() {
                       )}
                     </Button>
                   </SheetTrigger>
-                  <SheetContent side="left" className="bg-white border-[#E2E6DF] w-80">
+                  <SheetContent side="left" aria-describedby={undefined} className="w-[min(20rem,calc(100vw-1rem))] overflow-y-auto bg-white border-[#E2E6DF]">
                     <SheetHeader>
                       <SheetTitle className="font-serif font-bold text-[#0F3D3E]">Filters</SheetTitle>
                     </SheetHeader>
@@ -570,13 +455,12 @@ function BooksContent() {
                 </Sheet>
 
                 {/* Sort Selector */}
-                <Select value={sortBy} onValueChange={setSortBy}>
-                  <SelectTrigger className="w-40 h-10 bg-[#F8F9F7] border-[#E2E6DF] text-xs font-semibold">
+                <Select value={sortBy} onValueChange={(sort) => updateURL({ sort, tag: quickTagFilter })}>
+                  <SelectTrigger aria-label="Sort books" className="w-40 h-10 bg-[#F8F9F7] border-[#E2E6DF] text-xs font-semibold">
                     <SelectValue placeholder="Sort by" />
                   </SelectTrigger>
                   <SelectContent className="bg-white border-[#E2E6DF]">
                     <SelectItem value="newest" className="text-xs">Newest Arrivals</SelectItem>
-                    <SelectItem value="rating" className="text-xs">Top Rated</SelectItem>
                     <SelectItem value="price-low" className="text-xs">Price: Low to High</SelectItem>
                     <SelectItem value="price-high" className="text-xs">Price: High to Low</SelectItem>
                   </SelectContent>
@@ -608,6 +492,18 @@ function BooksContent() {
               </div>
             </div>
 
+            {categories.length > 0 && (
+              <div className="flex flex-wrap gap-2" aria-label="Browse categories" role="group">
+                {categories.slice(0, 6).map((category) => (
+                  <Button key={category._id} type="button" variant={selectedCategoryId === category._id ? "default" : "outline"}
+                    aria-pressed={selectedCategoryId === category._id} className="min-h-11 max-w-full whitespace-normal text-left"
+                    onClick={() => handleCategoryToggle(category._id)}>
+                    {category.name}
+                  </Button>
+                ))}
+              </div>
+            )}
+
             {/* Quick Tag Filter Pills */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1 font-sans text-xs">
               {[
@@ -619,11 +515,11 @@ function BooksContent() {
                 <button
                   key={tab.id}
                   onClick={() => {
-                    setQuickTagFilter(tab.id as typeof quickTagFilter);
-                    setCurrentPage(1);
+                    updateURL({ tag: tab.id, featured: "", bestseller: "", newRelease: "" });
                   }}
+                  aria-pressed={quickTagFilter === tab.id}
                   className={cn(
-                    "px-3.5 py-1.5 rounded-full font-bold transition-all whitespace-nowrap",
+                    "min-h-11 px-3.5 py-1.5 rounded-full font-bold transition-all whitespace-nowrap",
                     quickTagFilter === tab.id
                       ? "bg-[#0F3D3E] text-[#D4AF37] shadow-xs"
                       : "bg-white text-[#5C6E6E] hover:text-[#0F3D3E] border border-[#E2E6DF]"
@@ -638,39 +534,25 @@ function BooksContent() {
             {hasActiveFilters && (
               <div className="flex flex-wrap items-center gap-2 bg-white p-3 rounded-2xl border border-[#E2E6DF] text-xs">
                 <span className="font-bold text-[#5C6E6E] text-[11px] uppercase tracking-wider">Active Filters:</span>
-                {selectedCategories.map((catId) => {
-                  const cat = categories.find((c) => c._id === catId);
-                  return cat ? (
-                    <span
-                      key={catId}
-                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#0F3D3E]/10 text-[#0F3D3E] font-bold rounded-full"
-                    >
-                      <span>Category: {cat.name}</span>
-                      <button onClick={() => handleCategoryToggle(catId)} aria-label={`Remove category filter: ${cat.name}`} className="hover:text-rose-600">
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  ) : null;
-                })}
+                {initialCategory && (
+                  <Badge variant="secondary" className="gap-2">
+                    {selectedCategory ? `Category: ${selectedCategory.name}` : "Selected category"}
+                    <button type="button" className="inline-flex min-h-7 min-w-7 items-center justify-center" onClick={() => updateURL({ category: "" })} aria-label="Remove category filter">
+                      <X className="size-4" />
+                    </button>
+                  </Badge>
+                )}
 
-
-                {selectedPriceRange && (
+                {hasPriceFilter && (
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#0F3D3E]/10 text-[#0F3D3E] font-bold rounded-full">
-                    <span>Price: {selectedPriceRange}</span>
-                    <button onClick={() => setSelectedPriceRange(null)} aria-label="Remove price filter" className="hover:text-rose-600">
+                    <span>Price: {selectedPriceRange || [minPrice !== undefined ? `from ₹${minPrice}` : "", maxPrice !== undefined ? `up to ₹${maxPrice}` : ""].filter(Boolean).join(" ")}</span>
+                    <button onClick={() => updateURL({ minPrice: "", maxPrice: "" })} aria-label="Remove price filter" className="hover:text-rose-600">
                       <X className="h-3 w-3" />
                     </button>
                   </span>
                 )}
 
-                {minRatingFilter && (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#0F3D3E]/10 text-[#0F3D3E] font-bold rounded-full">
-                    <span>Rating: {minRatingFilter}★ & Up</span>
-                    <button onClick={() => setMinRatingFilter(null)} aria-label="Remove rating filter" className="hover:text-rose-600">
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                )}
+                {format && <Button type="button" size="sm" variant="outline" onClick={() => updateURL({ format: "" })} aria-label="Remove format filter">{format} <X aria-hidden="true" /></Button>}
 
                 <Button
                   variant="ghost"
@@ -691,7 +573,12 @@ function BooksContent() {
             </div>
 
             {/* Main Books Grid / List Rendering */}
-            {resultsPending ? (
+            {unknownCategory ? (
+              <div className="space-y-3 rounded-xl border bg-card p-6">
+                <h2 className="font-serif text-xl font-semibold">Category not found</h2>
+                <Button variant="outline" onClick={() => updateURL({ category: "" })}>Browse all categories</Button>
+              </div>
+            ) : resultsPending ? (
               <div
                 className={
                   viewMode === "grid"
@@ -700,13 +587,14 @@ function BooksContent() {
                 }
               >
                 {[...Array(6)].map((_, i) => (
-                  <BookCardSkeleton key={i} />
+                  <BookCardSkeleton key={i} horizontal={viewMode === "list"} />
                 ))}
               </div>
             ) : error ? (
               <ErrorState
                 title="Unable to load catalog"
-                message="We encountered an issue fetching the books list. Please try again."
+                message={publicApiMessage(error, "The book list could not load. Please try again.")}
+                retryAt={publicRetryAt(error)}
                 onRetry={() => setReloadVersion((version) => version + 1)}
               />
             ) : books.length === 0 ? (
@@ -734,10 +622,10 @@ function BooksContent() {
                   }
                 >
                   {books.map((book) => (
-                    <BookCard
-                      key={book._id || book.id}
+                    <CompactBookCard
+                      key={book._id || book.id || book.slug}
                       book={book}
-                      variant={viewMode === "list" ? "horizontal" : "default"}
+                      horizontal={viewMode === "list"}
                     />
                   ))}
                 </motion.div>
@@ -748,19 +636,19 @@ function BooksContent() {
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={currentPage <= 1}
+                      disabled={visiblePage <= 1}
                       onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                       className="border-[#E2E6DF] text-[#0F3D3E] font-semibold text-xs h-9 px-4 rounded-xl"
                     >
                       Previous
                     </Button>
                     <span className="text-xs font-bold text-[#0F3D3E] font-mono px-3">
-                      Page {currentPage} of {totalPages}
+                      Page {visiblePage} of {totalPages}
                     </span>
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={currentPage >= totalPages}
+                      disabled={visiblePage >= totalPages}
                       onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                       className="border-[#E2E6DF] text-[#0F3D3E] font-semibold text-xs h-9 px-4 rounded-xl"
                     >
@@ -777,10 +665,18 @@ function BooksContent() {
   );
 }
 
+function CatalogFromURL() {
+  const params = useSearchParams();
+  const sort = params.get('sort');
+  const explicitTag = params.get("tag");
+  const tag = explicitTag === "all" || explicitTag === "bestseller" || explicitTag === "featured" || explicitTag === "newRelease" ? explicitTag : sort === 'bestseller' || params.get('bestseller') === 'true' ? 'bestseller' : sort === 'new' || params.get('newRelease') === 'true' ? 'newRelease' : params.get('featured') === 'true' ? 'featured' : 'all';
+  return <BooksContent key={params.get("q") || params.get("search") || ""} initialQuery={params.get('q') || params.get('search') || ''} initialCategory={params.get('category') || ''} initialTag={tag} initialSort={sort && ['newest', 'price-low', 'price-high', 'featured'].includes(sort) ? sort : 'newest'} />;
+}
+
 export default function BooksPage() {
   return (
     <Suspense fallback={<div className="flex min-h-screen items-center justify-center font-serif text-[#0F3D3E]">Loading catalog...</div>}>
-      <BooksContent />
+      <CatalogFromURL />
     </Suspense>
   );
 }

@@ -1,14 +1,5 @@
-import type { Metadata } from 'next';
+import { pageMetadata } from '@/lib/page-metadata';
 
-export const metadata: Metadata = {
-  title: 'Author Royalties',
-  description:
-    'Learn how Harglim Publishers calculates, reports, and pays royalties to authors.',
-  alternates: { canonical: '/royalty-info' },
-};
+export function generateMetadata() { return pageMetadata("/royalty-info", "Royalty Information", false); }
 
-export default function RoyaltyInfoLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
-  return children;
-}
+export default function Layout({ children }: { children: React.ReactNode }) { return children; }

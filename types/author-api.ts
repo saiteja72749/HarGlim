@@ -14,6 +14,7 @@ export interface BookPerformance extends AuthorMetrics {
   status?: string;
   publishingStatus?: string;
   book?: Partial<AuthorBook>;
+  royaltyPerCopy?: number | null;
 }
 
 export interface AuthorBook extends Partial<Book>, AuthorMetrics {
@@ -47,6 +48,9 @@ export interface AuthorBook extends Partial<Book>, AuthorMetrics {
 
 export interface AnalyticsPoint extends AuthorMetrics { _id?: string; date?: string; day?: string }
 export interface AuthorAnalytics extends AuthorMetrics {
+  period?: string;
+  startDate?: string;
+  endDate?: string;
   summary?: AuthorMetrics;
   totals?: AuthorMetrics;
   series?: AnalyticsPoint[];

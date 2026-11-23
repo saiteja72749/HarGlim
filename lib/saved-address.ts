@@ -54,16 +54,17 @@ const clean = (address: Partial<SavedAddress>): SavedAddress => {
 
 export async function fetchSavedAddresses(): Promise<SavedAddress[]> {
   const { data } = await api.get("/users/me/addresses", { cache: "no-store" });
-  const list = data?.data ?? data?.addresses ?? [];
-  return Array.isArray(list) ? list : [];
+  const list = [data?.data?.addresses, data?.data, data?.addresses, data].find(Array.isArray);
+  if (!list || data?.success === false) throw new Error("The server did not return saved addresses.");
+  return list;
 }
 
 export async function saveAddresses(addresses: Partial<SavedAddress>[]): Promise<SavedAddress[]> {
   const { data } = await api.put("/users/me/addresses", {
     addresses: addresses.slice(0, MAX_SAVED_ADDRESSES).map(clean),
   });
-  const list = data?.data ?? data?.addresses ?? [];
-  return Array.isArray(list) ? list : [];
+  if (data?.success === false) throw new Error("The server did not save the addresses.");
+  return fetchSavedAddresses();
 }
 
 export const getDefaultAddress = (addresses: SavedAddress[]) =>

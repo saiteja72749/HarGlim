@@ -10,7 +10,7 @@ type Props = {
   children: React.ReactNode;
 };
 
-const getCategoryData = (slug: string) => fetchRecord<Category>(`/categories/${slug}`);
+const getCategoryData = (slug: string) => fetchRecord<Category>(`/categories/${encodeURIComponent(slug)}`);
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const resolvedParams = await params;
@@ -22,17 +22,17 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const APP_URL = siteConfig.url;
 
   const title = `${category.name} Books`;
-  const description = category.description || `Explore our collection of books in the ${category.name} category at Harglim Publishers.`;
+  const description = category.description || undefined;
 
   return {
     title,
-    description: description.substring(0, 160),
+    description: description?.substring(0, 160),
     alternates: {
       canonical: `${APP_URL}/categories/${slug}`,
     },
     openGraph: {
       title,
-      description: description.substring(0, 160),
+      description: description?.substring(0, 160),
       url: `${APP_URL}/categories/${slug}`,
     },
   };

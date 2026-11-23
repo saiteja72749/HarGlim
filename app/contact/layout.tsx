@@ -1,15 +1,5 @@
-import { Metadata } from 'next';
+import { pageMetadata } from '@/lib/page-metadata';
 
-export const metadata: Metadata = {
-  title: 'Contact Us',
-  description: 'Get in touch with Harglim Publishers for general inquiries, author services, order support, and partnerships.',
-  alternates: { canonical: '/contact' },
-};
+export function generateMetadata() { return pageMetadata("/contact", "Contact", false); }
 
-export default function ContactLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return <>{children}</>;
-}
+export default function Layout({ children }: { children: React.ReactNode }) { return children; }
