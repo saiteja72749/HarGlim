@@ -1,15 +1,14 @@
 "use client";
-import { describeApiError } from "@/lib/api-error";
+
 
 
 import type { AuthorAnalytics, BookPerformance, AnalyticsPoint } from "@/types/author-api";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   BookOpen,
   ShoppingCart,
   DollarSign,
-  Star,
   RefreshCw,
   TrendingUp,
   AlertTriangle,
@@ -18,12 +17,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import api from "@/lib/api";
-import { extractList } from "@/lib/tracking";
-import { useAuthStore } from "@/store/auth-store";
+import { parseCollectionPage } from "@/lib/catalog-data";
+
 import { useHashSection } from "@/hooks/use-hash-section";
 import { authorPanelProblem } from "@/lib/author-panel";
 import { onLiveChange } from "@/lib/live-sync";
 import { AuthorDataNotice } from "@/components/authors/author-data-notice";
+import { publishedNumber } from "@/lib/book-presentation";
 import { AuthorDashboardAccess } from "@/components/authors/author-dashboard-access";
 
 const RANGES = [
@@ -43,67 +43,65 @@ const num = (...values: unknown[]) => {
 };
 
 // Performance rows: { bookId|book, title, unitsSold, grossRevenue, knownRoyalty, status, ... }
-const perfTitle = (b: BookPerformance) => b.title || b.book?.title || "Untitled";
-const perfUnits = (b: BookPerformance) => num(b.unitsSold, b.totalSales, b.sales);
-const perfGross = (b: BookPerformance) => num(b.grossRevenue, b.grossBookRevenue, b.revenue);
-const perfRoyalty = (b: BookPerformance) => num(b.knownAccruedRoyalty, b.knownRoyalty, b.royalty, b.royaltyEarned, b.accruedRoyalty);
-const perfStatus = (b: BookPerformance) => String(b.status || b.publishingStatus || b.book?.status || "").toLowerCase();
-const perfRating = (b: BookPerformance) => num(b.ratings, b.rating, b.book?.ratings);
+const perfTitle = (book: BookPerformance) => book.title || book.book?.title || "Book title unavailable";
+const perfStatus = (book: BookPerformance) => String(book.status || book.publishingStatus || book.book?.status || "").toLowerCase();
+const currency = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" });
+const display = (value: unknown, money = false) => {
+  const amount = publishedNumber(value);
+  return amount === null ? "Unavailable" : money ? currency.format(amount) : amount.toLocaleString("en-IN");
+};
 
 export default function AnalyticsPage() {
   return <AuthorDashboardAccess><AnalyticsContent /></AuthorDashboardAccess>;
 }
 
 function AnalyticsContent() {
-  const { user } = useAuthStore();
   const [loading, setLoading] = useState(true);
   useHashSection(!loading);
   const [range, setRange] = useState("30d");
   const [analyticsData, setAnalyticsData] = useState<AuthorAnalytics | null>(null);
   const [performanceData, setPerformanceData] = useState<BookPerformance[]>([]);
-  const [problem, setProblem] = useState<string | null>(null);
-  const latestRequest = useRef(0);
+  const [performanceLoaded, setPerformanceLoaded] = useState(false);
+  const [periodProblem, setPeriodProblem] = useState<string | null>(null);
+  const [performanceProblem, setPerformanceProblem] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
+  const fetchAnalytics = useCallback(() => setRevision((n) => n + 1), []);
 
-  const fetchAnalytics = useCallback(async () => {
-    if (!user) return;
-    const requestId = ++latestRequest.current;
-    setLoading(true);
-    try {
-      const noStore = { cache: "no-store" as const };
-      const [analyticsRes, perfRes] = await Promise.allSettled([
-        api.get("/authors/me/analytics", { params: { range }, ...noStore }),
-        api.get("/authors/me/books/performance", noStore),
-      ]);
-      if (requestId !== latestRequest.current) return;
-
-      setProblem(
-        authorPanelProblem([
-          { label: "sales analytics", result: analyticsRes },
-          { label: "book performance", result: perfRes },
-        ])
-      );
-      if (analyticsRes.status === "fulfilled") {
-        setAnalyticsData(analyticsRes.value.data?.data || analyticsRes.value.data);
-      } else {
-        setAnalyticsData(null);
-      }
-      if (perfRes.status === "fulfilled") {
-        setPerformanceData(extractList<BookPerformance>(perfRes.value.data, "books"));
-      } else {
-        setPerformanceData([]);
-      }
-    } catch (err) {
-      console.error("Failed to fetch author analytics:", describeApiError(err));
-    } finally {
-      if (requestId === latestRequest.current) setLoading(false);
-    }
-  }, [user, range]);
+  useEffect(() => onLiveChange("author-data", fetchAnalytics), [fetchAnalytics]);
 
   useEffect(() => {
-    fetchAnalytics();
-    // Coming back to the tab reloads, so new sales show without a refresh.
-    return onLiveChange("author-data", fetchAnalytics);
-  }, [fetchAnalytics]);
+    const controller = new AbortController();
+    setLoading(true);
+    setAnalyticsData(null);
+    setPeriodProblem(null);
+    api.get("/authors/me/analytics", { params: { range }, cache: "no-store", signal: controller.signal })
+      .then(({ data }) => {
+        if (!controller.signal.aborted) setAnalyticsData(data?.data ?? data);
+      })
+      .catch((reason) => {
+        if (!controller.signal.aborted) setPeriodProblem(authorPanelProblem([{ label: "sales analytics", result: { status: "rejected", reason } }]));
+      })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [range, revision]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api.get("/authors/me/books/performance", { cache: "no-store", signal: controller.signal })
+      .then(({ data }) => {
+        if (controller.signal.aborted) return;
+        setPerformanceData(parseCollectionPage<BookPerformance>(data, "books").items);
+        setPerformanceLoaded(true);
+        setPerformanceProblem(null);
+      })
+      .catch((reason) => {
+        if (controller.signal.aborted) return;
+        setPerformanceLoaded(false);
+        setPerformanceData([]);
+        setPerformanceProblem(authorPanelProblem([{ label: "lifetime per-book performance", result: { status: "rejected", reason } }]));
+      });
+    return () => controller.abort();
+  }, [revision]);
 
   const summary = { ...(analyticsData || {}), ...(analyticsData?.summary || {}), ...(analyticsData?.totals || {}) };
   const series: AnalyticsPoint[] = (
@@ -116,53 +114,34 @@ function AnalyticsContent() {
   const seriesRows = Array.isArray(series) ? series : [];
 
   const publishedCount = performanceData.filter((b) => perfStatus(b) === "published").length;
-  // Never label lifetime performance totals as sales within the selected date range.
-  const rangeLoaded = [analyticsData?.series, analyticsData?.daily, analyticsData?.timeSeries, analyticsData?.data].some(Array.isArray);
-  const sumSeries = (pick: (row: AnalyticsPoint) => number) => seriesRows.reduce((sum, row) => sum + pick(row), 0);
-  const totalUnits = rangeLoaded
-    ? sumSeries((r) => num(r.units, r.unitsSold, r.quantity))
-    : num(summary.unitsSold, summary.totalUnitsSold);
-  const grossRevenue = rangeLoaded
-    ? sumSeries((r) => num(r.revenue, r.grossRevenue))
-    : num(summary.grossBookRevenue, summary.grossRevenue, summary.revenue);
-  const royalty = rangeLoaded
-    ? sumSeries((r) => num(r.knownRoyalty, r.royalty, r.royaltyAmount))
-    : num(summary.royalty, summary.accruedKnown, summary.knownRoyalty);
-  const unresolved = rangeLoaded
-    ? sumSeries((r) => num(r.unresolvedLegacyCount))
-    : num(summary.historicalUnresolvedSales, summary.unresolvedSales, summary.historicalUnresolvedCount);
-  const rated = performanceData.filter((b) => perfRating(b) > 0);
-  const avgRating = rated.length ? rated.reduce((s, b) => s + perfRating(b), 0) / rated.length : 0;
+  const emptyRange = Array.isArray(analyticsData?.series) && analyticsData.series.length === 0;
+  const totalUnits = summary.unitsSold ?? summary.totalUnitsSold ?? (emptyRange ? 0 : null);
+  const grossRevenue = summary.grossBookRevenue ?? summary.grossRevenue ?? summary.revenue;
+  const royalty = summary.accruedKnown ?? summary.knownRoyalty ?? summary.royalty;
+  const unresolved = num(summary.historicalUnresolvedSales, summary.unresolvedSales, summary.historicalUnresolvedCount);
 
   const stats = [
-    { label: "Published Titles", value: `${publishedCount}`, sub: `${performanceData.length} titles total`, icon: BookOpen, color: "text-primary", bgColor: "bg-primary/10" },
-    { label: "Units Sold", value: analyticsData ? totalUnits.toLocaleString("en-IN") : "Unavailable", sub: `Last ${RANGES.find((r) => r.value === range)?.label}`, icon: ShoppingCart, color: "text-emerald-500", bgColor: "bg-emerald-500/10" },
-    { label: "Gross Book Revenue", value: analyticsData ? `₹${grossRevenue.toLocaleString("en-IN")}` : "Unavailable", sub: "Before royalty split", icon: TrendingUp, color: "text-indigo-500", bgColor: "bg-indigo-500/10" },
-    { label: "Royalty Earned", value: analyticsData ? `₹${royalty.toLocaleString("en-IN")}` : "Unavailable", sub: "Known royalty", icon: DollarSign, color: "text-blue-500", bgColor: "bg-blue-500/10" },
-    { label: "Average Rating", value: rated.length ? avgRating.toFixed(1) : "—", sub: `${rated.length} rated titles`, icon: Star, color: "text-amber-500", bgColor: "bg-amber-500/10" },
+    { label: "Published Titles", value: performanceLoaded ? String(publishedCount) : "Unavailable", sub: "Current catalog", icon: BookOpen, color: "text-primary", bgColor: "bg-primary/10" },
+    { label: "Units Sold", value: display(totalUnits), sub: `Last ${RANGES.find((r) => r.value === range)?.label}`, icon: ShoppingCart, color: "text-emerald-500", bgColor: "bg-emerald-500/10" },
+    { label: "Gross Book Revenue", value: display(grossRevenue, true), sub: "Selected period, before royalties", icon: TrendingUp, color: "text-indigo-500", bgColor: "bg-indigo-500/10" },
+    { label: "Royalty Earned", value: display(royalty, true), sub: "Selected period, known royalty", icon: DollarSign, color: "text-blue-500", bgColor: "bg-blue-500/10" },
   ];
 
   const maxUnits = Math.max(1, ...seriesRows.map((r) => num(r.unitsSold, r.units, r.quantity)));
 
-  if (loading && !analyticsData) {
-    return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3">
-        <RefreshCw className="h-8 w-8 animate-spin text-primary" />
-        <p className="text-sm text-muted-foreground">Loading analytics...</p>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-8">
-      <AuthorDataNotice message={problem} onRetry={fetchAnalytics} />
+    <div className="space-y-8" aria-busy={loading}>
+      <AuthorDataNotice message={periodProblem || performanceProblem} onRetry={fetchAnalytics} />
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold font-serif lg:text-3xl text-foreground">Author Analytics</h1>
+          <h1 className="text-2xl font-bold font-serif lg:text-3xl text-foreground">Performance &amp; Analytics</h1>
           <p className="text-muted-foreground mt-1 text-sm">Sales, revenue and royalty for your books</p>
+          {analyticsData?.startDate && analyticsData?.endDate && <p className="mt-1 text-sm text-muted-foreground">
+            {new Date(analyticsData.startDate).toLocaleDateString("en-IN")} to {new Date(analyticsData.endDate).toLocaleDateString("en-IN")}
+          </p>}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex rounded-lg border p-0.5" role="group" aria-label="Date range">
+          <div className="flex max-w-full flex-wrap rounded-lg border p-0.5" role="group" aria-label="Date range">
             {RANGES.map((r) => (
               <button
                 key={r.value}
@@ -181,7 +160,7 @@ function AnalyticsContent() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat, index) => (
           <motion.div key={stat.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }}>
             <Card>
@@ -246,8 +225,8 @@ function AnalyticsContent() {
                             <span className="tabular-nums text-xs">{units}</span>
                           </div>
                         </td>
-                        <td className="py-2 px-3 text-right tabular-nums">₹{num(row.grossRevenue, row.revenue).toLocaleString("en-IN")}</td>
-                        <td className="py-2 px-3 text-right tabular-nums text-emerald-700">₹{num(row.royalty, row.knownRoyalty, row.royaltyAmount).toLocaleString("en-IN")}</td>
+                        <td className="py-2 px-3 text-right tabular-nums">{display(row.grossBookRevenue ?? row.grossRevenue ?? row.revenue, true)}</td>
+                        <td className="py-2 px-3 text-right tabular-nums text-emerald-700">{display(row.knownRoyalty ?? row.royalty ?? row.royaltyAmount, true)}</td>
                       </tr>
                     );
                   })}
@@ -260,6 +239,7 @@ function AnalyticsContent() {
 
       {/* Book Performance Table */}
       <Card id="performance" className="scroll-mt-20">
+        <p className="px-5 text-sm text-muted-foreground">Lifetime per-book performance. The period selector applies to the trend and period summary above.</p>
         <CardHeader>
           <CardTitle className="text-lg">Book Performance</CardTitle>
         </CardHeader>
@@ -280,7 +260,6 @@ function AnalyticsContent() {
                     <th className="py-3 px-4 text-right">Units Sold</th>
                     <th className="py-3 px-4 text-right">Gross Revenue</th>
                     <th className="py-3 px-4 text-right">Known Royalty</th>
-                    <th className="py-3 px-4">Rating</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y border-b">
@@ -290,15 +269,9 @@ function AnalyticsContent() {
                       <td className="py-3 px-4">
                         <Badge variant="outline" className="text-[10px] capitalize">{perfStatus(book).replace(/_/g, " ") || "—"}</Badge>
                       </td>
-                      <td className="py-3 px-4 text-right font-semibold tabular-nums">{perfUnits(book).toLocaleString("en-IN")}</td>
-                      <td className="py-3 px-4 text-right tabular-nums">₹{perfGross(book).toLocaleString("en-IN")}</td>
-                      <td className="py-3 px-4 text-right font-bold text-emerald-600 tabular-nums">₹{perfRoyalty(book).toLocaleString("en-IN")}</td>
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-1">
-                          <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-500" />
-                          <span className="text-xs font-medium">{perfRating(book).toFixed(1)}</span>
-                        </div>
-                      </td>
+                      <td className="py-3 px-4 text-right font-semibold tabular-nums">{display(book.unitsSold)}</td>
+                      <td className="py-3 px-4 text-right tabular-nums">{display(book.grossBookRevenue ?? book.grossRevenue, true)}</td>
+                      <td className="py-3 px-4 text-right font-bold text-emerald-600 tabular-nums">{display(book.knownAccruedRoyalty ?? book.knownRoyalty, true)}</td>
                     </tr>
                   ))}
                 </tbody>

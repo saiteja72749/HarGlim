@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Image from "next/image";
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
 import { BookOpen, Users, Target, Heart, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { editedContent, useSiteContent } from "@/context/site-content-context";
@@ -32,16 +33,16 @@ export default function AboutPage() {
     fetchLiveStats();
   }, []);
 
-  const stats = [
-    { label: "Books Published", value: liveStats ? `${liveStats.booksCount}+` : "—", icon: BookOpen },
-    { label: "Happy Authors", value: liveStats ? `${liveStats.authorsCount}+` : "—", icon: Users },
-  ];
+  const stats = liveStats ? [
+    { label: "Books published", value: liveStats.booksCount, icon: BookOpen, href: "/books" },
+    { label: "Authors", value: liveStats.authorsCount, icon: Users, href: "/authors" },
+  ] : [];
 
   return (
     <div className="bg-[#F8F9F7] min-h-screen text-[#0F3D3E] font-sans">
       
       {/* 1. HERO SECTION */}
-      <section className="relative bg-gradient-to-b from-[#0B2E2F] via-[#0F3D3E] to-[#082223] text-white py-20 md:py-28 overflow-hidden text-center">
+      <section className="relative bg-gradient-to-b from-[#0B2E2F] via-[#0F3D3E] to-[#082223] text-white py-[var(--site-section-space)] overflow-hidden text-center">
         <div className="absolute top-0 right-0 w-96 h-96 bg-[#D4AF37]/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 space-y-4">
@@ -50,7 +51,7 @@ export default function AboutPage() {
             <span>Our Publishing Philosophy</span>
           </div>
 
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-serif font-bold text-white tracking-tight">
+          <h1 className="text-[clamp(2rem,5vw,3.75rem)] font-serif font-bold text-white tracking-tight">
             {aboutTitle || "About Harglim Publishers"}
           </h1>
 
@@ -60,71 +61,22 @@ export default function AboutPage() {
         </div>
       </section>
 
-      {/* 2. STATS BAR */}
-      <section className="py-12 bg-white border-b border-[#E2E6DF]">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-center">
-            {stats.map((stat, idx) => (
-              <div key={idx} className="space-y-1">
-                <div className="h-12 w-12 rounded-2xl bg-[#0F3D3E] text-[#D4AF37] flex items-center justify-center mx-auto shadow-xs mb-2">
-                  <stat.icon className="h-6 w-6" />
-                </div>
-                <p className="text-3xl sm:text-4xl font-serif font-bold text-[#0F3D3E]">
-                  {stat.value}
-                </p>
-                <p className="text-xs text-[#5C6E6E] font-medium uppercase tracking-wider">{stat.label}</p>
-              </div>
+      {(aboutMission || aboutVision) && (
+        <section className="mx-auto max-w-4xl space-y-6 px-4 py-[var(--site-section-space)] sm:px-6">
+          <h2 className="font-serif text-3xl font-semibold">Our mission and vision</h2>
+          {aboutMission && <div className="space-y-4 text-base leading-relaxed text-[var(--body-ink)]">
+            {aboutMission.split(/\n\s*\n/).filter((part) => part.trim()).map((part, index) => (
+              <p className="whitespace-pre-line" key={index}>{part.trim()}</p>
             ))}
-          </div>
-        </div>
-      </section>
-
-      {/* 3. OUR STORY */}
-      <section className="py-16 sm:py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
-          <div className="lg:col-span-7 space-y-4">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#8A6D1E] block">
-              Empowering Writers
-            </span>
-            <h2 className="text-3xl sm:text-4xl font-serif font-bold text-[#0F3D3E]">
-              Our Story & Mission
-            </h2>
-            <div className="space-y-4 text-xs sm:text-sm text-[#5C6E6E] leading-relaxed font-sans">
-              {aboutMission ? (
-                aboutMission
-                  .split(/\n\s*\n/)
-                  .filter((para) => para.trim())
-                  .map((para, i) => (
-                    <p key={i} className="whitespace-pre-line">
-                      {para.trim()}
-                    </p>
-                  ))
-              ) : null}
-              {aboutVision && (
-                <p className="whitespace-pre-line">
-                  <span className="font-semibold text-[#0F3D3E]">Our vision: </span>
-                  {aboutVision}
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="lg:col-span-5">
-            <div className="relative aspect-[4/3] rounded-3xl overflow-hidden shadow-xl border-2 border-[#D4AF37]/30">
-              <Image
-                src="/logo.png"
-                alt="Harglim Library"
-                fill
-                sizes="(max-width: 1024px) 100vw, 42vw"
-                className="object-cover opacity-90 p-4"
-              />
-            </div>
-          </div>
-        </div>
-      </section>
+          </div>}
+          {aboutVision && <p className="whitespace-pre-line border-l-2 border-secondary pl-4 text-base leading-relaxed">
+            <strong className="font-medium">Our vision</strong><br />{aboutVision}
+          </p>}
+        </section>
+      )}
 
       {/* 4. CORE VALUES */}
-      <section className="py-16 sm:py-20 bg-white border-y border-[#E2E6DF]">
+      {values.length > 0 && <section className="border-y bg-card py-[var(--site-section-space)]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto mb-12 space-y-2">
             <span className="text-xs font-bold uppercase tracking-wider text-[#8A6D1E] block">
@@ -147,11 +99,11 @@ export default function AboutPage() {
             ))}
           </div>
         </div>
-      </section>
+      </section>}
 
       {/* 5. TEAM (Admin → Site Content → Page Sections → Team members) */}
       {team.length > 0 && (
-        <section className="py-16 sm:py-20 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-6">
+        <section id="team" className="py-16 sm:py-20 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-6">
           <div className="space-y-2">
             <span className="text-xs font-bold uppercase tracking-wider text-[#8A6D1E] block">Leadership</span>
             <h2 className="text-3xl font-serif font-bold text-[#0F3D3E]">{team.length === 1 ? "Meet Our Founder" : "Meet Our Team"}</h2>
@@ -186,6 +138,20 @@ export default function AboutPage() {
           </div>
         </section>
       )}
+      {stats.length > 0 && (
+        <section className="mx-auto grid max-w-4xl gap-3 px-4 pt-8 sm:grid-cols-2 sm:px-6" aria-label="Authors and books">
+          {stats.map(({ label, value, href, icon: Icon }) => (
+            <Link key={href} href={href} className="flex min-h-11 items-center gap-3 rounded-xl border bg-card p-4 hover:bg-muted">
+              <Icon aria-hidden="true" className="size-5 shrink-0" />
+              <span><strong>{value.toLocaleString("en-IN")}</strong> {label.toLowerCase()}</span>
+            </Link>
+          ))}
+        </section>
+      )}
+      <section className="mx-auto max-w-4xl space-y-3 px-4 py-[var(--site-section-space)] sm:px-6">
+        <h2 className="font-serif text-2xl font-semibold">Publish with Harglim</h2>
+        <Button asChild><Link href="/publish">Explore publishing services</Link></Button>
+      </section>
     </div>
   );
 }

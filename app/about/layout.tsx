@@ -1,15 +1,5 @@
-import { Metadata } from 'next';
+import { pageMetadata } from '@/lib/page-metadata';
 
-export const metadata: Metadata = {
-  title: 'About Us',
-  description: 'Learn more about Harglim Publishers, our mission, and our team of publishing experts.',
-  alternates: { canonical: '/about' },
-};
+export function generateMetadata() { return pageMetadata("/about", "About Us", false); }
 
-export default function AboutLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return <>{children}</>;
-}
+export default function Layout({ children }: { children: React.ReactNode }) { return children; }

@@ -1,481 +1,136 @@
-"use client";
-import type { AuthorBook } from "@/types/author-api";
-import { describeApiError } from "@/lib/api-error";
+﻿"use client";
 
-
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import {
-  AlertCircle,
-  ArrowRight,
-  BookOpen,
-  CheckCircle,
-  Clock,
-  DollarSign,
-  FileText,
-  PlusCircle,
-  RefreshCw,
-  ShoppingCart,
-  Wallet,
-} from "lucide-react";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { useAuthStore } from "@/store/auth-store";
-import api from "@/lib/api";
-import { normalizeAuthorDashboard, type AuthorDashboardSummary } from "@/lib/author-dashboard";
-import { AuthorSalesPanel } from "@/components/authors/author-sales-panel";
-import { AuthorDataNotice } from "@/components/authors/author-data-notice";
-import { authorPanelProblem } from "@/lib/author-panel";
-import { onLiveChange } from "@/lib/live-sync";
-import { getAuthorBookStage } from "@/lib/author-book-status";
 import { AuthorDashboardAccess } from "@/components/authors/author-dashboard-access";
+import { AuthorDataNotice } from "@/components/authors/author-data-notice";
+import api from "@/lib/api";
+import { record } from "@/lib/api-error";
 import { fetchAuthorBooks } from "@/lib/author-books";
+import { getAuthorBookStage } from "@/lib/author-book-status";
+import { authorPanelProblem } from "@/lib/author-panel";
+import { publishedNumber } from "@/lib/book-presentation";
+import { onLiveChange } from "@/lib/live-sync";
+import type { AuthorBook } from "@/types/author-api";
 
-type DashboardBook = Pick<Partial<AuthorBook>, "_id" | "id" | "slug" | "status" | "totalSales" | "unitsSold" | "copiesSold" | "sales" | "soldCount"> & { title: string; bookId?: string | null };
+const money = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" });
+const number = new Intl.NumberFormat("en-IN");
 
-type AuthorDashboardData = {
-  totalBooks: number;
-  publishedBooks: number;
-  manuscriptsCount: number;
-  pendingCount: number;
-  processingCount: number;
-  rejectedCount: number;
-  totalSold: number;
-  totalEarnings: number;
-  grossRevenue: number;
-  eligibleUnsettled: number;
-  pendingPayout: number;
-  paidLifetime: number;
-  recentBooks: DashboardBook[];
-  manuscripts: AuthorBook[];
-};
-
-const emptyDashboardData: AuthorDashboardData = {
-  totalBooks: 0,
-  publishedBooks: 0,
-  manuscriptsCount: 0,
-  pendingCount: 0,
-  processingCount: 0,
-  rejectedCount: 0,
-  totalSold: 0,
-  totalEarnings: 0,
-  grossRevenue: 0,
-  eligibleUnsettled: 0,
-  pendingPayout: 0,
-  paidLifetime: 0,
-  recentBooks: [],
-  manuscripts: [],
-};
-
-const getNumber = (...values: unknown[]) => {
-  for (const value of values) {
-    // Number(null) and Number("") are 0: skip them so a missing field doesn't hide the fallback.
-    if (value === null || value === undefined || value === "") continue;
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return 0;
-};
-
-const getSoldCount = (book: DashboardBook) =>
-  getNumber(book?.totalSales, book?.unitsSold, book?.copiesSold, book?.sales, book?.soldCount);
-
-const getBookId = (book: DashboardBook) => String(book?._id || book?.id || book?.bookId || book?.slug || book?.title || "");
-
-const getStatusLabel = (status: unknown) => {
-  const normalized = getAuthorBookStage({ status });
-  if (normalized === "draft") return "Draft";
-  if (["processing", "under_review", "in_editing", "submitted"].includes(normalized)) return "Processing";
-  if (["approved", "published"].includes(normalized)) return "Published";
-  if (["rejected", "revision_required", "changes_requested"].includes(normalized)) return "Needs Revision";
-  return String(status || "Draft");
-};
-
-export default function AuthorDashboard() {
-  return <AuthorDashboardAccess><AuthorDashboardContent /></AuthorDashboardAccess>;
+function metric(value: unknown, rupees = false) {
+  const n = publishedNumber(value);
+  return n === null ? "Unavailable" : (rupees ? money : number).format(n);
 }
 
-function AuthorDashboardContent() {
-  const { user } = useAuthStore();
-  const [dashboardData, setDashboardData] = useState<AuthorDashboardData>(emptyDashboardData);
-  const [loading, setLoading] = useState(true);
-  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
-  const [salesSummary, setSalesSummary] = useState<AuthorDashboardSummary | null>(null);
+function StudioOverview() {
+  const [dashboard, setDashboard] = useState<Record<string, unknown>>({});
+  const [ownedBooks, setOwnedBooks] = useState<AuthorBook[] | null>(null);
+  const [trend, setTrend] = useState<Record<string, unknown>[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [booksLoaded, setBooksLoaded] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const fetchDashboardData = useCallback(async () => {
-    if (!user) return;
-
+  const refresh = useCallback(async () => {
     setLoading(true);
-    try {
-      const requestConfig = { cache: "no-store" as const };
-
-      // Two calls cover the whole page: the grouped dashboard (book counts, sales, royalties,
-      // topBooks, recentSales) and the author's own book list (manuscript statuses).
-      const [dashboardRes, booksRes] = await Promise.allSettled([
-        api.get("/authors/me/dashboard", requestConfig),
-        fetchAuthorBooks({ sort: "-updatedAt" }),
-      ]);
-
-      const summary = dashboardRes.status === "fulfilled" ? normalizeAuthorDashboard(dashboardRes.value.data) : null;
-      setSalesSummary(summary);
-      setProblem(
-        authorPanelProblem([
-          { label: "your dashboard", result: dashboardRes },
-          { label: "your book list", result: booksRes },
-        ])
-      );
-      setBooksLoaded(booksRes.status === "fulfilled");
-      const authorBooks = booksRes.status === "fulfilled" ? booksRes.value : [];
-
-      const publishedBooksList = authorBooks.filter((book) => getAuthorBookStage(book) === "published");
-      const manuscripts = authorBooks.filter(
-        (book) => !["published", "archived"].includes(getAuthorBookStage(book))
-      );
-
-      const statusCounts = authorBooks.reduce(
-        (counts, book) => {
-          const status = getAuthorBookStage(book);
-          if (status === "draft") counts.pending += 1;
-          if (["processing", "under_review", "in_editing", "submitted"].includes(status)) {
-            counts.processing += 1;
-          }
-          if (["rejected", "revision_required", "changes_requested"].includes(status)) {
-            counts.rejected += 1;
-          }
-          return counts;
-        },
-        { pending: 0, processing: 0, rejected: 0 }
-      );
-
-      const nextData: AuthorDashboardData = {
-        // The server's counts; the list is only a fallback when the dashboard did not load.
-        totalBooks: summary ? summary.books.total : authorBooks.length,
-        publishedBooks: summary ? summary.books.published : publishedBooksList.length,
-        manuscriptsCount: manuscripts.length,
-        pendingCount: statusCounts.pending,
-        processingCount: statusCounts.processing,
-        rejectedCount: statusCounts.rejected,
-        totalSold: summary?.unitsSold ?? 0,
-        totalEarnings: summary?.accrued ?? 0,
-        grossRevenue: summary?.grossRevenue ?? 0,
-        eligibleUnsettled: summary?.eligibleUnsettled ?? 0,
-        pendingPayout: summary?.pendingPayout ?? 0,
-        paidLifetime: summary?.paidLifetime ?? 0,
-        recentBooks: (summary?.topBooks.length ? summary.topBooks : publishedBooksList).slice(0, 5),
-        manuscripts: manuscripts.slice(0, 5),
-      };
-
-      setDashboardData(nextData);
-      setLastSyncedAt(new Date());
-    } catch (err) {
-      console.warn("Error fetching author dashboard data:", describeApiError(err));
-      setSalesSummary(null);
-      setBooksLoaded(false);
-      setProblem("Couldn't load your dashboard. Please retry.");
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
+    const [summary, manuscripts, analytics] = await Promise.allSettled([
+      api.get("/authors/me/dashboard", { cache: "no-store" }),
+      fetchAuthorBooks(),
+      api.get("/authors/me/analytics", { params: { range: "30d" }, cache: "no-store" }),
+    ]);
+    setDashboard(summary.status === "fulfilled" ? record(summary.value.data?.data ?? summary.value.data) : {});
+    setOwnedBooks(manuscripts.status === "fulfilled" ? manuscripts.value : null);
+    const data = analytics.status === "fulfilled" ? record(analytics.value.data?.data ?? analytics.value.data) : {};
+    setTrend(Array.isArray(data.series) ? data.series.map(record) : null);
+    setProblem(authorPanelProblem([
+      { label: "overview", result: summary },
+      { label: "manuscripts", result: manuscripts },
+      { label: "sales trend", result: analytics },
+    ]));
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
-    fetchDashboardData();
-    // Coming back to the tab reloads, so changes made by the admin show without a refresh.
-    return onLiveChange("author-data", fetchDashboardData);
-  }, [fetchDashboardData]);
+    void refresh();
+    return onLiveChange("author-data", refresh);
+  }, [refresh]);
 
-  const statCards = useMemo(
-    () => [
-      {
-        label: "Total Books",
-        value: salesSummary || booksLoaded ? dashboardData.totalBooks : "Unavailable",
-        helper: `${dashboardData.publishedBooks} published`,
-        icon: BookOpen,
-        iconClass: "bg-[#0F3D3E] text-[#D4AF37]",
-      },
-      {
-        label: "Copies Sold",
-        value: salesSummary ? dashboardData.totalSold : "Unavailable",
-        helper: "Live backend sales",
-        icon: ShoppingCart,
-        iconClass: "bg-emerald-500/10 text-emerald-700 border border-emerald-500/20",
-      },
-      {
-        label: "Pending",
-        value: booksLoaded ? dashboardData.pendingCount : "Unavailable",
-        helper: "Drafts or waiting review",
-        icon: Clock,
-        iconClass: "bg-amber-500/10 text-amber-700 border border-amber-500/20",
-      },
-      {
-        label: "Processing",
-        value: booksLoaded ? dashboardData.processingCount : "Unavailable",
-        helper: "Submitted or under review",
-        icon: FileText,
-        iconClass: "bg-blue-500/10 text-blue-700 border border-blue-500/20",
-      },
-      {
-        label: "Needs Revision",
-        value: booksLoaded ? dashboardData.rejectedCount : "Unavailable",
-        helper: "Rejected or changes requested",
-        icon: AlertCircle,
-        iconClass: "bg-rose-500/10 text-rose-700 border border-rose-500/20",
-      },
-      {
-        label: "Royalty Earned",
-        value: salesSummary ? `₹${Number(dashboardData.totalEarnings).toLocaleString("en-IN")}` : "Unavailable",
-        helper: salesSummary ? `From ₹${Number(dashboardData.grossRevenue).toLocaleString("en-IN")} gross book revenue` : "Royalty data could not be loaded",
-        icon: DollarSign,
-        iconClass: "bg-[#D4AF37]/20 text-[#0F3D3E] border border-[#D4AF37]/40",
-      },
-      {
-        label: "Eligible for Payout",
-        value: salesSummary ? `₹${Number(dashboardData.eligibleUnsettled).toLocaleString("en-IN")}` : "Unavailable",
-        helper: "Not yet in a settlement",
-        icon: Wallet,
-        iconClass: "bg-emerald-500/10 text-emerald-700 border border-emerald-500/20",
-      },
-      {
-        label: "Payout Pending",
-        value: salesSummary ? `₹${Number(dashboardData.pendingPayout).toLocaleString("en-IN")}` : "Unavailable",
-        helper: "Settled, awaiting transfer",
-        icon: Clock,
-        iconClass: "bg-amber-500/10 text-amber-700 border border-amber-500/20",
-      },
-      {
-        label: "Paid to You",
-        value: salesSummary ? `₹${Number(dashboardData.paidLifetime).toLocaleString("en-IN")}` : "Unavailable",
-        helper: "Lifetime payouts",
-        icon: CheckCircle,
-        iconClass: "bg-[#0F3D3E] text-[#D4AF37]",
-      },
-    ],
-    [dashboardData, salesSummary, booksLoaded]
-  );
-
-  // Spinner only before the first load; later reloads update the figures in place.
-  if (loading && !lastSyncedAt) {
-    return (
-      <div className="flex min-h-[50vh] items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-[#0F3D3E]" />
-      </div>
-    );
-  }
+  const books = record(dashboard.books);
+  const sales = record(dashboard.sales);
+  const royalties = record(dashboard.royalties);
+  const needsAction = ownedBooks?.filter((book) => ["draft", "changes_requested", "rejected"].includes(getAuthorBookStage(book)));
+  const inReview = ownedBooks?.filter((book) => ["submitted", "under_review"].includes(getAuthorBookStage(book))).length;
+  const recentSales = Array.isArray(dashboard.recentSales) ? dashboard.recentSales.map(record) : null;
+  const metrics = [
+    ["Published books", metric(books.published), "Current catalog"],
+    ["Copies sold", metric(sales.unitsSold), "Lifetime sales"],
+    ["Gross book revenue", metric(sales.grossBookRevenue, true), "Lifetime, before royalties"],
+    ["Royalty earned", metric(royalties.accruedKnown ?? royalties.accrued, true), "Lifetime, known royalties"],
+    ["Pending manuscripts", metric(inReview), "Submitted or in review"],
+    ["Pending payout", metric(royalties.settledPendingPayment, true), "Approved settlements awaiting payment"],
+  ];
 
   return (
-    <div className="space-y-8 text-[#0F3D3E] font-sans">
-      <AuthorDataNotice message={problem} onRetry={fetchDashboardData} />
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E2E6DF] pb-5">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-serif font-bold text-[#0F3D3E]">
-            Author Workspace
-          </h1>
-          <p className="text-xs sm:text-sm text-[#5C6E6E] mt-0.5">
-            Welcome back, {user?.name || "Author"}! Track your books, sales, and royalty earnings.
-          </p>
-          {lastSyncedAt && (
-            <p className="text-[11px] text-[#5C6E6E] mt-1">
-              Last synced {lastSyncedAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-            </p>
-          )}
-        </div>
-
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={fetchDashboardData}
-            disabled={loading}
-            className="h-11 rounded-xl text-xs font-bold gap-2 border-[#0F3D3E]/30 text-[#0F3D3E]"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            <span>Refresh</span>
-          </Button>
-          <Button
-            asChild
-            className="bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] border border-[#D4AF37]/40 font-serif font-bold text-xs h-11 px-5 rounded-xl shadow-xs gap-2"
-          >
-            <Link href="/author/manuscripts/new">
-              <PlusCircle className="h-4 w-4" />
-              <span>Submit New Manuscript</span>
-            </Link>
-          </Button>
-        </div>
+    <div className="space-y-6" aria-busy={loading}>
+      <header>
+        <h1 className="font-serif text-3xl font-semibold">Author Studio Overview</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Your catalog, editorial submissions and recorded sales.</p>
+      </header>
+      <AuthorDataNotice message={problem} onRetry={refresh} />
+      <div className="flex flex-wrap gap-2">
+        <Button asChild><Link href="/author/manuscripts/new">Submit Manuscript</Link></Button>
+        <Button asChild variant="outline"><Link href="/author/books">View My Books</Link></Button>
+        <Button asChild variant="outline"><Link href="/author/royalties">View Royalties</Link></Button>
       </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
-        {statCards.map((stat) => (
-          <Card
-            key={stat.label}
-            className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xs flex items-center justify-between"
-          >
-            <div className="space-y-1 min-w-0">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#5C6E6E]">
-                {stat.label}
-              </span>
-              <p className="text-3xl font-serif font-bold text-[#0F3D3E]">
-                {typeof stat.value === "number" ? Number(stat.value).toLocaleString("en-IN") : stat.value}
-              </p>
-              <p className="text-[11px] text-[#5C6E6E]">{stat.helper}</p>
+      {loading && <p role="status" className="text-sm text-muted-foreground">Loading overview…</p>}
+      {!loading && <>
+        <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {metrics.map(([label, value, period]) => (
+            <div key={label} className="rounded-xl border bg-card p-4">
+              <dt className="text-sm font-medium">{label}</dt>
+              <dd className="mt-1 font-serif text-2xl font-semibold">{value}</dd>
+              <dd className="mt-1 text-xs text-muted-foreground">{period}</dd>
             </div>
-            <div className={`h-12 w-12 rounded-2xl flex items-center justify-center shadow-xs shrink-0 ${stat.iconClass}`}>
-              <stat.icon className="h-6 w-6" />
-            </div>
-          </Card>
-        ))}
-      </div>
-
-      {salesSummary && (salesSummary.topBooks.length > 0 || salesSummary.recentSales.length > 0) && (
-        <Card className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xs space-y-4">
-          <h2 className="text-base font-serif font-bold text-[#0F3D3E]">Your Book Sales</h2>
-          <AuthorSalesPanel summary={salesSummary} />
-        </Card>
-      )}
-
-      <div className="space-y-3">
-        <h2 className="text-base font-serif font-bold text-[#0F3D3E]">Quick Actions</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <QuickActionCard
-            href="/author/manuscripts/new"
-            icon={<PlusCircle className="h-5 w-5" />}
-            title="Submit Manuscript"
-            description="Upload new book draft"
-          />
-          <QuickActionCard
-            href="/author/books"
-            icon={<BookOpen className="h-5 w-5" />}
-            title="Manage Books"
-            description="View published catalog"
-          />
-          <QuickActionCard
-            href="/author/royalties"
-            icon={<DollarSign className="h-5 w-5" />}
-            title="Royalty Records"
-            description="Sales and payout history"
-          />
+          ))}
+        </dl>
+        <div className="grid gap-4 xl:grid-cols-2">
+          <section className="min-w-0 space-y-3 rounded-xl border bg-card p-4">
+            <h2 className="font-serif text-xl font-semibold">Recent sales and royalties</h2>
+            {recentSales?.length ? <ul className="divide-y">
+              {recentSales.slice(0, 5).map((sale, index) => {
+                const title = typeof sale.bookTitle === "string" && sale.bookTitle.trim() && (sale.bookId || sale.bookTitle !== "Book") ? sale.bookTitle : "Book title unavailable";
+                const royalty = sale.royaltyStatus === "HISTORICAL_RATE_UNAVAILABLE" ? null : sale.accruedRoyalty;
+                return <li key={`${sale.orderNumber}-${sale.bookId}-${index}`} className="py-2.5 [overflow-wrap:anywhere]">
+                  <p className="font-medium">{title}</p>
+                  <p className="text-sm text-muted-foreground">{metric(sale.quantity)} copies · {metric(sale.grossRevenue, true)} gross · {metric(royalty, true)} royalty</p>
+                </li>;
+              })}
+            </ul> : <p className="text-sm text-muted-foreground">{recentSales ? "No recorded sales yet." : "Sales records unavailable."}</p>}
+          </section>
+          <div className="grid gap-4">
+            <section className="space-y-3 rounded-xl border bg-card p-4">
+              <h2 className="font-serif text-xl font-semibold">Manuscripts needing attention</h2>
+              {needsAction?.length ? <ul className="space-y-2">
+                {needsAction.slice(0, 4).map((book) => <li key={book._id} className="text-sm [overflow-wrap:anywhere]">
+                  <Link href="/author/manuscripts" className="underline">{book.title}</Link>
+                  <span className="ml-2 text-muted-foreground capitalize">{getAuthorBookStage(book).replaceAll("_", " ")}</span>
+                </li>)}
+              </ul> : <p className="text-sm text-muted-foreground">{needsAction ? "No manuscripts need attention." : "Manuscript status unavailable."}</p>}
+            </section>
+            <section className="space-y-3 rounded-xl border bg-card p-4">
+              <h2 className="font-serif text-xl font-semibold">Sales trend · last 30 days</h2>
+              {trend?.length ? <ul className="space-y-1">
+                {trend.slice(-5).map((point, index) => <li key={index} className="text-sm">
+                  {String(point.date ?? point.day ?? point._id ?? "Date unavailable")} · {metric(point.unitsSold ?? point.units)} copies
+                </li>)}
+              </ul> : <p className="text-sm text-muted-foreground">{trend ? "No recorded sales in this period." : "Trend unavailable."}</p>}
+              <Link href="/author/analytics" className="inline-flex min-h-11 items-center text-sm underline">View performance and analytics</Link>
+            </section>
+          </div>
         </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xs space-y-4">
-          <div className="flex items-center justify-between border-b border-[#E2E6DF] pb-3">
-            <h3 className="font-serif font-bold text-base text-[#0F3D3E] flex items-center gap-2">
-              <BookOpen className="h-4 w-4 text-[#D4AF37]" />
-              <span>Book Sales</span>
-            </h3>
-            <Button variant="ghost" size="sm" asChild className="text-xs text-[#0F3D3E] font-bold">
-              <Link href="/author/books">View All</Link>
-            </Button>
-          </div>
-
-          <div className="space-y-3">
-            {dashboardData.recentBooks.length === 0 ? (
-              <EmptyPanel
-                title="No book sales yet"
-                text="Published titles and sold-copy counts will appear here after backend sales are recorded."
-              />
-            ) : (
-              dashboardData.recentBooks.map((book) => (
-                <div key={getBookId(book)} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF]">
-                  <div className="min-w-0">
-                    <p className="font-serif font-bold text-xs text-[#0F3D3E] truncate">
-                      {book.title || "Untitled Book"}
-                    </p>
-                    <p className="text-[11px] text-[#5C6E6E]">
-                      {getSoldCount(book).toLocaleString("en-IN")} copies sold
-                    </p>
-                  </div>
-                  <Badge className="bg-[#0F3D3E]/10 text-[#0F3D3E] border border-[#0F3D3E]/20 text-[10px] shrink-0">
-                    {getStatusLabel(book.status)}
-                  </Badge>
-                </div>
-              ))
-            )}
-          </div>
-        </Card>
-
-        <Card className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xs space-y-4">
-          <div className="flex items-center justify-between border-b border-[#E2E6DF] pb-3">
-            <h3 className="font-serif font-bold text-base text-[#0F3D3E] flex items-center gap-2">
-              <FileText className="h-4 w-4 text-[#D4AF37]" />
-              <span>Manuscript Pipeline</span>
-            </h3>
-            <Button variant="ghost" size="sm" asChild className="text-xs text-[#0F3D3E] font-bold">
-              <Link href="/author/manuscripts">View All</Link>
-            </Button>
-          </div>
-
-          <div className="space-y-3">
-            {dashboardData.manuscripts.length === 0 ? (
-              <EmptyPanel
-                title="No manuscripts in progress"
-                text="Draft, pending, and processing manuscripts will sync here from the backend."
-              />
-            ) : (
-              dashboardData.manuscripts.map((item) => (
-                <div key={getBookId(item)} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF]">
-                  <div className="min-w-0">
-                    <p className="font-serif font-bold text-xs text-[#0F3D3E] truncate">
-                      {item.title || "Untitled Manuscript"}
-                    </p>
-                    <p className="text-[11px] text-[#5C6E6E]">
-                      {item.updatedAt || item.createdAt
-                        ? `Updated ${new Date(item.updatedAt || item.createdAt || "").toLocaleDateString("en-IN")}`
-                        : "Awaiting backend timestamp"}
-                    </p>
-                  </div>
-                  <Badge className="bg-amber-50 text-amber-700 border border-amber-200 text-[10px] shrink-0">
-                    {getStatusLabel(getAuthorBookStage(item))}
-                  </Badge>
-                </div>
-              ))
-            )}
-          </div>
-        </Card>
-      </div>
+      </>}
     </div>
   );
 }
 
-function QuickActionCard({
-  href,
-  icon,
-  title,
-  description,
-}: {
-  href: string;
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-}) {
-  return (
-    <Link href={href} className="block">
-      <Card className="bg-white border border-[#E2E6DF] hover:border-[#D4AF37] rounded-2xl p-5 shadow-xs hover:shadow-md transition-all flex items-center justify-between group cursor-pointer">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="h-10 w-10 rounded-xl bg-[#0F3D3E] text-[#D4AF37] flex items-center justify-center shrink-0">
-            {icon}
-          </div>
-          <div className="min-w-0">
-            <h3 className="font-serif font-bold text-sm text-[#0F3D3E] group-hover:text-[#D4AF37] transition-colors truncate">
-              {title}
-            </h3>
-            <p className="text-[11px] text-[#5C6E6E] truncate">{description}</p>
-          </div>
-        </div>
-        <ArrowRight className="h-4 w-4 text-[#5C6E6E] group-hover:translate-x-1 transition-transform shrink-0" />
-      </Card>
-    </Link>
-  );
-}
-
-function EmptyPanel({ title, text }: { title: string; text: string }) {
-  return (
-    <div className="rounded-xl border border-dashed border-[#E2E6DF] bg-[#F8F9F7] p-5 text-center">
-      <CheckCircle className="h-6 w-6 mx-auto text-[#5C6E6E]/50 mb-2" />
-      <p className="text-sm font-serif font-bold text-[#0F3D3E]">{title}</p>
-      <p className="text-xs text-[#5C6E6E] mt-1">{text}</p>
-    </div>
-  );
+export default function Page() {
+  return <AuthorDashboardAccess><StudioOverview /></AuthorDashboardAccess>;
 }

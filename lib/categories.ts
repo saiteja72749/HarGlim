@@ -1,6 +1,6 @@
 
 import { describeApiError, record } from "@/lib/api-error";
-import api, { invalidateApiCache } from "@/lib/api";
+import api, { getPublic, invalidateApiCache } from "@/lib/api";
 import { categoryIsActive, findDuplicateCategory, parseCategoryPage, resolveCategoryId, type BackendCategory } from "@/lib/category-data";
 import { notifyLiveChange } from "@/lib/live-sync";
 export type { BackendCategory } from "@/lib/category-data";
@@ -45,9 +45,10 @@ export async function fetchAllCategories(admin = false): Promise<BackendCategory
   const categories = new Map<string, BackendCategory>();
   for (const active of admin ? [true, false] : [true]) {
     for (let page = 1; ; page++) {
-      const response = await api.get(admin ? "/admin/categories" : "/categories", {
-        params: { active, page, limit: 100 }, cache: "no-store",
-      });
+      const params = { active, page, limit: 100 };
+      const response = admin
+        ? await api.get("/admin/categories", { params, cache: "no-store" })
+        : await getPublic("/categories", { params });
       const parsed = parseCategoryPage(response.data);
       const previousSize = categories.size;
       parsed.categories.forEach((category) => categories.set(category._id, category));

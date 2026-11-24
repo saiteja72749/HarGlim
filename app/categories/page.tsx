@@ -4,7 +4,7 @@ import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import Image from "next/image";
+import Image from '@/components/ui/backend-image';
 import { motion } from "framer-motion";
 import {
   ArrowRight,
@@ -29,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { publishedNumber } from "@/lib/book-presentation";
 import type { Category } from "@/types";
 import { fetchBackendCategories } from "@/lib/categories";
 
@@ -57,7 +58,7 @@ const getCategoryIcon = (slugOrName: string) => {
 };
 
 const getCategoryImage = (cat: Category) => {
-  if (cat.image && (cat.image.startsWith("http") || cat.image.startsWith("/")) && !cat.image.includes("placeholder")) {
+  if (cat.image && (cat.image.startsWith("http") || cat.image.startsWith("/"))) {
     return cat.image;
   }
   return "/logo.png";
@@ -147,14 +148,14 @@ export default function CategoriesPage() {
                   ⭐ Featured Genre
                 </Badge>
                 <span className="text-xs text-[#5C6E6E]">
-                  {featuredCategory.bookCount || 0} Books Available
+                  {publishedNumber(featuredCategory.bookCount) === null ? "Book count unavailable" : `${featuredCategory.bookCount} Books Available`}
                 </span>
               </div>
               <h2 className="text-2xl sm:text-3xl font-serif font-bold text-[#0F3D3E]">
                 {featuredCategory.name}
               </h2>
               <p className="text-xs sm:text-sm text-[#5C6E6E] line-clamp-2">
-                {featuredCategory.description || "Discover groundbreaking titles in this genre."}
+                {featuredCategory.description || "A description has not been published."}
               </p>
             </div>
             <div className="lg:col-span-4 text-right">
@@ -235,19 +236,18 @@ export default function CategoriesPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredCategories.map((category) => {
-              const bookCount = category.bookCount || 0;
-              const hasBooks = bookCount > 0;
+              const bookCount = publishedNumber(category.bookCount);
               const IconComponent = getCategoryIcon(category.slug || category.name);
               const bgImg = getCategoryImage(category);
 
               return (
                 <motion.div
                   key={category._id}
-                  whileHover={hasBooks ? { y: -8, scale: 1.02 } : {}}
+                  whileHover={{ y: -2 }}
                   transition={{ type: "spring", stiffness: 300, damping: 20 }}
                   className="group relative overflow-hidden rounded-2xl bg-white border border-[#E2E6DF] hover:border-[#D4AF37] shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col h-full cursor-pointer"
                 >
-                  {hasBooks ? (
+
                     <Link href={`/categories/${category.slug || category._id}`} className="flex flex-col h-full">
                       {/* Image & Dark Overlay */}
                       <div className="relative aspect-[16/10] overflow-hidden bg-[#0F3D3E]">
@@ -267,7 +267,7 @@ export default function CategoriesPage() {
                             <IconComponent className="h-5 w-5" />
                           </div>
                           <Badge className="bg-[#D4AF37] text-[#0F3D3E] font-serif font-bold text-xs shadow-sm">
-                            {bookCount} Book{bookCount === 1 ? "" : "s"}
+                            {bookCount === null ? "Book count unavailable" : `${bookCount} Book${bookCount === 1 ? "" : "s"}`}
                           </Badge>
                         </div>
 
@@ -294,32 +294,7 @@ export default function CategoriesPage() {
                         </div>
                       </div>
                     </Link>
-                  ) : (
-                    /* Disabled State for Empty Category */
-                    <div className="flex flex-col h-full opacity-60 pointer-events-none">
-                      <div className="relative aspect-[16/10] overflow-hidden bg-gray-200">
-                        <Image
-                          src={bgImg}
-                          alt={category.name}
-                          fill
-                          sizes="(max-width: 768px) 100vw, 50vw"
-                          className="object-cover grayscale"
-                        />
-                        <div className="absolute inset-0 bg-black/60" />
-                        <div className="absolute top-4 right-4">
-                          <Badge variant="secondary" className="bg-gray-800 text-gray-200 text-xs">
-                            Coming Soon
-                          </Badge>
-                        </div>
-                        <div className="absolute bottom-4 left-4 right-4 text-white">
-                          <h2 className="text-2xl font-serif font-bold">{category.name}</h2>
-                        </div>
-                      </div>
-                      <div className="p-4 bg-gray-50 text-xs text-gray-500 font-semibold">
-                        0 Books Available
-                      </div>
-                    </div>
-                  )}
+
                 </motion.div>
               );
             })}

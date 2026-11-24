@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/ui/error-state";
+import { publishedNumber } from "@/lib/book-presentation";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
@@ -153,6 +155,7 @@ export default function PaymentsPage() {
   const { user } = useAuthStore();
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | PaymentState>("ALL");
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -163,6 +166,7 @@ export default function PaymentsPage() {
     const userId = user._id || user.id;
 
     setLoading(true);
+    setError(false);
     try {
       // Filtering happens client-side: the backend status values (PAYMENT_VERIFIED, QR_GENERATED...)
       // don't match the old filter values (VERIFIED, INTENT_CREATED...), so server filtering returned nothing.
@@ -185,6 +189,7 @@ export default function PaymentsPage() {
       const err = describeApiError(caughtError);
       console.warn("Failed to fetch user payments:", describeApiError(err));
       setPayments([]);
+      setError(true);
       toast.error(err?.response?.data?.message || "Could not load your payments. Please try again.");
     } finally {
       setLoading(false);
@@ -325,7 +330,7 @@ export default function PaymentsPage() {
                 </div>
                 <div>
                   <p className="text-2xl font-bold">{payments.length}</p>
-                  <p className="text-sm text-muted-foreground">Total Transactions</p>
+                  <p className="text-sm text-muted-foreground">Transactions loaded</p>
                 </div>
               </div>
             </CardContent>
@@ -339,13 +344,14 @@ export default function PaymentsPage() {
           <div className="flex flex-col gap-4 sm:flex-row">
             <div className="flex-1">
               <Input
-                placeholder="Search by Payment ID, Order Number, or UTR..."
+                aria-label="Search payments"
+                placeholder="Search by payment reference, order or UTR"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
             <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "ALL" | PaymentState)}>
-              <SelectTrigger className="w-full sm:w-56">
+              <SelectTrigger aria-label="Filter payment status" className="w-full sm:w-56">
                 <Filter className="mr-2 h-4 w-4" />
                 <SelectValue placeholder="Filter by status" />
               </SelectTrigger>
@@ -367,14 +373,16 @@ export default function PaymentsPage() {
           <CardTitle>Transactions</CardTitle>
         </CardHeader>
         <CardContent>
-          {loading ? (
-            <div className="flex flex-col items-center justify-center py-12">
+          {error ? (
+            <ErrorState title="Payment history unavailable" message="Retry to load your payment records." onRetry={fetchPayments} />
+          ) : loading ? (
+            <div role="status" className="flex flex-col items-center justify-center py-12">
               <RefreshCw className="h-8 w-8 animate-spin text-primary mb-3" />
               <p className="text-sm text-muted-foreground">Loading transactions from server...</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <Table>
+              <Table className="reader-transactions">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Payment Reference</TableHead>
@@ -391,6 +399,8 @@ export default function PaymentsPage() {
                   {filteredPayments.map((payment) => {
                     const StatusIcon = getStatusIcon(payment.status);
                     const state = mapPaymentStatus(payment.status);
+                    const amount = publishedNumber(payment.amount);
+                    const orderId = getPaymentOrderId(payment);
                     const purpose = PURPOSE_LABEL[String(payment.purpose || "").toUpperCase()];
                     const orderNo =
                       payment.order?.orderNumber ||
@@ -407,30 +417,30 @@ export default function PaymentsPage() {
 
                     return (
                       <TableRow key={payment._id || payment.id}>
-                        <TableCell className="font-mono text-xs">
-                          {payment._id ? `${payment._id.slice(0, 8)}...` : "—"}
+                        <TableCell data-label="Payment reference" className="font-mono text-xs">
+                          {payment.reference || payment._id || payment.id || "Unavailable"}
                         </TableCell>
-                        <TableCell className="font-semibold text-xs">{orderNo}</TableCell>
-                        <TableCell className="text-xs">{dateStr}</TableCell>
-                        <TableCell className="text-xs font-medium uppercase">
-                          {payment.paymentMethod || "UPI"}
+                        <TableCell data-label="Order" className="font-semibold text-xs">{orderNo}</TableCell>
+                        <TableCell data-label="Date" className="text-xs">{dateStr}</TableCell>
+                        <TableCell data-label="Method" className="text-xs font-medium uppercase">
+                          {payment.paymentMethod || payment.method || "Unavailable"}
                         </TableCell>
-                        <TableCell className="text-xs font-mono">
+                        <TableCell data-label="UTR" className="text-xs font-mono">
                           {payment.utr || payment.transactionReference || (
                             <span className="text-muted-foreground italic">Not submitted</span>
                           )}
                         </TableCell>
-                        <TableCell className="font-semibold text-sm">
-                          ₹{(Number(payment.amount) || 0).toLocaleString()}
+                        <TableCell data-label="Amount" className="font-semibold text-sm">
+                          {amount === null ? "Unavailable" : new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(amount)}
                         </TableCell>
-                        <TableCell>
+                        <TableCell data-label="Status">
                           <Badge variant="outline" className={`gap-1 font-semibold text-xs ${state ? PAYMENT_STATE_META[state].tone : getStatusColor(payment.status)}`}>
                             <StatusIcon className="h-3 w-3" />
                             {state ? PAYMENT_STATE_META[state].label : getFriendlyStatus(payment.status)}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-right">
-                          {state === "paid" && payment.purpose !== "AUTHOR_ACCESS" ? (
+                        <TableCell data-label="Actions" className="text-right">
+                          {state === "paid" && orderId && payment.purpose !== "AUTHOR_ACCESS" ? (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -441,9 +451,9 @@ export default function PaymentsPage() {
                               <Download className="h-3.5 w-3.5" />
                               {downloadingId === payment._id ? "..." : "Invoice"}
                             </Button>
-                          ) : state === "awaiting_payment" || state === "failed" ? (
+                          ) : orderId && (state === "awaiting_payment" || state === "failed") ? (
                             <Button variant="ghost" size="sm" className="text-xs" asChild>
-                              <a href="/dashboard/orders">Pay in My Orders</a>
+                              <a href={`/dashboard/orders?orderId=${encodeURIComponent(orderId)}`}>Open order payment</a>
                             </Button>
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
@@ -457,7 +467,7 @@ export default function PaymentsPage() {
             </div>
           )}
 
-          {!loading && filteredPayments.length === 0 && (
+          {!loading && !error && filteredPayments.length === 0 && (
             <div className="flex flex-col items-center justify-center py-12">
               <CreditCard className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="font-semibold text-lg">No payment transactions found</h3>

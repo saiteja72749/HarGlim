@@ -69,3 +69,7 @@ it('uses the actual backend author instead of a book-specific override', () => {
   expect(getBookAuthorInfo(book).name).toBe('Backend Author');
   expect(getBookAuthorInfo(null).name).toBe('Author unavailable');
 });
+
+it('does not hide a real author because their name contains admin', () => {
+  expect(getBookAuthorInfo({ author: { name: 'Administration Research Group', role: 'author' } }).name).toBe('Administration Research Group');
+});

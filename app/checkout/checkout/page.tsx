@@ -1,601 +1,329 @@
-"use client";
+﻿"use client";
 
-import { describeApiError } from "@/lib/api-error";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { AuthGuard } from "@/components/auth/auth-guard";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useHydration } from "@/hooks/useHydration";
+import api from "@/lib/api";
+import { describeApiError, record } from "@/lib/api-error";
+import { getPayableAmount, getPaymentQr, getUpiDestination, normalizeUtr } from "@/lib/checkout-payment";
+import { fetchSavedAddresses, getDefaultAddress, saveAddresses, withDefaultAddress, type SavedAddress } from "@/lib/saved-address";
+import { useAuthStore } from "@/store/auth-store";
+import { useCartStore } from "@/store/cart-store";
 
-import { useEffect, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
-import { CreditCard, QrCode, CheckCircle2, Loader2, X, Copy, Check } from 'lucide-react';
-import Link from 'next/link';
-import { Button } from '@/components/ui/button';
-import { useCartStore } from '@/store/cart-store';
-import { AnimatePresence, motion } from 'framer-motion';
-import api from '@/lib/api';
-import toast from 'react-hot-toast';
-import { useAuthStore } from '@/store/auth-store';
-import {
-  fetchSavedAddresses,
-  getDefaultAddress,
-  saveAddresses,
-  withDefaultAddress,
-  type SavedAddress,
-} from '@/lib/saved-address';
-
-const defaultAddress = {
-  fullName: '',
-  addressLine1: '',
-  addressLine2: '',
-  city: '',
-  state: '',
-  postalCode: '',
-  country: 'India',
-  phone: '',
-  email: '',
+const emptyAddress = {
+  fullName: "", email: "", phone: "", addressLine1: "", addressLine2: "",
+  city: "", state: "", postalCode: "", country: "India",
 };
 
-import { AuthGuard } from '@/components/auth/auth-guard';
+const fields = [
+  { id: "fullName", label: "Full name", autoComplete: "name" },
+  { id: "email", label: "Email address", autoComplete: "email", type: "email" },
+  { id: "phone", label: "Phone number", autoComplete: "tel", type: "tel" },
+  { id: "addressLine1", label: "Address line 1", autoComplete: "address-line1", wide: true },
+  { id: "addressLine2", label: "Address line 2 (optional)", autoComplete: "address-line2", wide: true },
+  { id: "city", label: "City", autoComplete: "address-level2" },
+  { id: "state", label: "State or province", autoComplete: "address-level1" },
+  { id: "postalCode", label: "PIN or postal code", autoComplete: "postal-code" },
+  { id: "country", label: "Country", autoComplete: "country-name" },
+] as const;
 
-export default function CheckoutStepPage() {
+type ConfirmedOrder = {
+  id: string;
+  number: string;
+  amount: number | null;
+  shipping: number | null;
+  qr: string;
+  upi: ReturnType<typeof getUpiDestination>;
+};
+
+const rupees = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" });
+
+function CheckoutForm() {
   const router = useRouter();
+  const hydrated = useHydration();
   const items = useCartStore((state) => state.items);
   const subtotal = useCartStore((state) => state.getSubtotal());
-  useCartStore((state) => state.getTax());
-  useCartStore((state) => state.getShipping());
-  const total = useCartStore((state) => state.getTotal());
-  const clearCart = useCartStore((state) => state.clearCart);
-
-  const [address, setAddress] = useState(defaultAddress);
-  const authUser = useAuthStore((state) => state.user);
-  const authUserId = authUser?._id || authUser?.id;
-
-  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
-  const [selectedAddressId, setSelectedAddressId] = useState<string>('');
-  const [saveThisAddress, setSaveThisAddress] = useState(true);
-
-  const applySavedAddress = (saved: SavedAddress | null) => {
-    setSelectedAddressId(saved?._id || '');
-    setAddress({
-      ...defaultAddress,
-      ...Object.fromEntries(Object.entries(saved || {}).filter(([, v]) => typeof v === 'string' && v)),
-      fullName: saved?.fullName || authUser?.name || '',
-      email: saved?.email || authUser?.email || '',
-    });
-  };
-
-  // Load the account's saved addresses (GET /users/me/addresses) and pre-select the default.
-  useEffect(() => {
-    if (!authUserId) return;
-    let cancelled = false;
-    fetchSavedAddresses()
-      .then((list) => {
-        if (cancelled) return;
-        setSavedAddresses(list);
-        applySavedAddress(getDefaultAddress(list));
-      })
-      .catch(() => {
-        if (!cancelled) applySavedAddress(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authUserId]);
-  const [paymentMethod, setPaymentMethod] = useState<'card' | 'upi' | 'cod'>('upi');
+  const user = useAuthStore((state) => state.user);
+  const [address, setAddress] = useState(() => ({ ...emptyAddress, fullName: user?.name || "", email: user?.email || "" }));
+  const [addresses, setAddresses] = useState<SavedAddress[] | null>(null);
+  const [selectedAddressId, setSelectedAddressId] = useState("");
+  const [saveAsDefault, setSaveAsDefault] = useState(false);
+  const addressEdited = useRef(false);
+  const busy = useRef(false);
   const [submitting, setSubmitting] = useState(false);
-  const [showUpiModal, setShowUpiModal] = useState(false);
-  const [upiStatus, setUpiStatus] = useState<'waiting' | 'success'>('waiting');
-  const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
-  const [currentOrderId, setCurrentOrderId] = useState('');
-  const [currentOrderNumber, setCurrentOrderNumber] = useState('');
-  const [backendOrder, setBackendOrder] = useState<any>(null);
-  const [backendPayment, setBackendPayment] = useState<any>(null);
-  const [utr, setUtr] = useState('');
-  const [copiedUpi, setCopiedUpi] = useState(false);
-  const [copiedAmt, setCopiedAmt] = useState(false);
+  const [order, setOrder] = useState<ConfirmedOrder | null>(null);
+  const [uncertain, setUncertain] = useState(false);
+  const [utr, setUtr] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState("");
+  const [addressNotice, setAddressNotice] = useState("");
+  const [qrFailed, setQrFailed] = useState(false);
 
-  const copyText = (text: string, type: 'upi' | 'amt') => {
-    navigator.clipboard.writeText(text);
-    if (type === 'upi') {
-      setCopiedUpi(true);
-      toast.success("UPI ID copied! 📋");
-      setTimeout(() => setCopiedUpi(false), 2000);
-    } else {
-      setCopiedAmt(true);
-      toast.success("Amount copied! 📋");
-      setTimeout(() => setCopiedAmt(false), 2000);
-    }
+  const name = user?.name || "";
+  const email = user?.email || "";
+  useEffect(() => {
+    let current = true;
+    fetchSavedAddresses().then((list) => {
+      if (!current) return;
+      setAddresses(list);
+      if (addressEdited.current) return;
+      const saved = getDefaultAddress(list);
+      setSelectedAddressId(saved?._id || "");
+      setAddress({ ...emptyAddress, ...saved, fullName: saved?.fullName || name, email: saved?.email || email });
+    }).catch(() => {
+      if (current) setAddressNotice("Saved addresses are unavailable. You can still enter a delivery address.");
+    });
+    return () => { current = false; };
+  }, [name, email]);
+
+  const selectAddress = (id: string) => {
+    const saved = addresses?.find((entry) => entry._id === id);
+    addressEdited.current = true;
+    setSelectedAddressId(id);
+    setAddress({ ...emptyAddress, ...saved, fullName: saved?.fullName || name, email: saved?.email || email });
   };
 
-  const [upiUrl, setUpiUrl] = useState('');
-
-  useEffect(() => {
-    // Once an order exists the cart is cleared on purpose; don't bounce to the cart then.
-    if (!items.length && !currentOrderId) {
-      router.push('/checkout/cart');
-    }
-  }, [items.length, router, currentOrderId]);
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const confirmOrder = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-
-    if (!address.fullName || !address.addressLine1 || !address.city || !address.state || !address.postalCode || !address.country || !address.phone || !address.email) {
-      toast.error("Please fill in all required shipping address fields (including phone, state, and pincode).");
+    if (busy.current || order || uncertain || !items.length) return;
+    const shippingAddress = {
+      fullName: address.fullName.trim(), email: address.email.trim(), phone: address.phone.trim(),
+      addressLine1: address.addressLine1.trim(), addressLine2: address.addressLine2.trim(),
+      city: address.city.trim(), state: address.state.trim(), postalCode: address.postalCode.trim(), country: address.country.trim(),
+    };
+    if (Object.entries(shippingAddress).some(([key, value]) => key !== "addressLine2" && !value)) {
+      setError("Fill in all required shipping details.");
+      return;
+    }
+    if (!/^\+?\d{7,15}$/.test(shippingAddress.phone.replace(/[\s()-]/g, ""))) {
+      setError("Enter a valid phone number with its country code if applicable.");
+      return;
+    }
+    if (/^(india|in)$/i.test(shippingAddress.country) && !/^[1-9]\d{5}$/.test(shippingAddress.postalCode)) {
+      setError("Enter a valid six-digit PIN code for India.");
       return;
     }
 
-    processOrder();
-  };
-
-  const processOrder = async () => {
+    busy.current = true;
     setSubmitting(true);
+    setError("");
     try {
-      const formattedItems = items.map(item => ({
-        book: item.book._id || (item.book as any).id,
-        quantity: item.quantity
-      }));
-
-      const enteredFullName = address.fullName.trim();
-      const enteredEmail = address.email.trim();
-      const enteredPhone = address.phone.trim();
-      const enteredAddressLine1 = address.addressLine1.trim();
-      const enteredAddressLine2 = address.addressLine2 ? address.addressLine2.trim() : "";
-      const enteredCity = address.city.trim();
-      const enteredState = address.state.trim();
-      const enteredPostalCode = address.postalCode.trim();
-      const enteredCountry = (address.country || "India").trim();
-
-      // POST /orders schema: shippingAddress {fullName, addressLine1, addressLine2, city,
-      // postalCode, country, email, phone}. `state` is not in the schema yet but is kept so
-      // it reaches the backend once supported (couriers need it).
-      const shippingAddressObj = {
-        fullName: enteredFullName,
-        addressLine1: enteredAddressLine1,
-        addressLine2: enteredAddressLine2 || undefined,
-        city: enteredCity,
-        state: enteredState,
-        postalCode: enteredPostalCode,
-        country: enteredCountry,
-        email: enteredEmail,
-        phone: enteredPhone,
-      };
-
-      // customerEmail / customerPhone are sent explicitly so the backend never replaces
-      // the contact typed here with the account's registered email.
-      const payload = {
-        items: formattedItems,
-        shippingAddress: shippingAddressObj,
-        customerEmail: enteredEmail,
-        customerPhone: enteredPhone,
-        paymentMethod: 'UPI',
-      };
-
-      const { data } = await api.post('/orders', payload);
-
-      if (data.success || data.status === 'success' || data._id || data.data?._id) {
-        const responseData = data.data || data;
-        const orderObj = responseData.order || responseData;
-        const paymentObj = typeof responseData.payment === 'object' ? responseData.payment : responseData;
-
-        setBackendOrder(orderObj);
-        setBackendPayment(paymentObj);
-
-        const orderId = orderObj._id || orderObj.id || responseData._id || responseData.id || '';
-        if (!orderId) throw new Error('The backend did not return an order ID. Check My Orders before retrying.');
-        const orderNum = orderObj.orderNumber || responseData.orderNumber || '';
-
-        setCurrentOrderId(orderId);
-        setCurrentOrderNumber(orderNum);
-        const serverAmount = paymentObj?.amount ?? orderObj.totalPrice ?? orderObj.totalAmount;
-        if (typeof serverAmount !== 'number' || !Number.isFinite(serverAmount) || serverAmount <= 0) {
-          toast.error('Your order was created, but its payment amount could not be verified. Check My Orders before retrying.');
-          router.push('/dashboard/orders');
-          return;
-        }
-        if (saveThisAddress) {
-          // Saving the address is separate from the order: a failure here never blocks payment.
-          const next = withDefaultAddress(savedAddresses, { ...shippingAddressObj, _id: selectedAddressId || undefined });
-          if (next) {
-            saveAddresses(next)
-              .then(setSavedAddresses)
-              .catch(() => toast.error("Order placed, but the address could not be saved to your account."));
-          }
-        }
-
-        let rawQr = responseData.qrCodeDataUrl || data.qrCodeDataUrl || paymentObj?.qrCodeDataUrl || orderObj?.qrCodeDataUrl || '';
-        if (rawQr && !rawQr.startsWith('data:') && !rawQr.startsWith('http')) {
-          rawQr = `data:image/png;base64,${rawQr}`;
-        }
-        setQrCodeDataUrl(rawQr);
-        setUpiUrl(paymentObj?.upiUrl || responseData?.upiUrl || '');
-        setShowUpiModal(true);
-      } else {
-        throw new Error(data.message || "Failed to create order");
+      const { data } = await api.post("/orders", {
+        items: items.map((item) => ({ book: item.book._id || item.book.id, quantity: item.quantity })),
+        shippingAddress: { ...shippingAddress, addressLine2: shippingAddress.addressLine2 || undefined },
+        customerEmail: shippingAddress.email,
+        customerPhone: shippingAddress.phone,
+        paymentMethod: "UPI",
+      });
+      const envelope = record(data);
+      const payload = record(envelope.data ?? data);
+      const createdOrder = record(payload.order ?? payload);
+      const payment = record(payload.payment ?? payload);
+      const id = createdOrder._id ?? createdOrder.id ?? payload._id ?? payload.id;
+      if (envelope.success === false || typeof id !== "string" || !id) {
+        setUncertain(true);
+        setError("We could not confirm the order response. Check My Orders before placing another order.");
+        window.history.replaceState(null, "", "/checkout/checkout?orderCheck=1");
+        return;
       }
-    } catch (caughtError) {
-      const error = describeApiError(caughtError);
-      toast.error(error.response?.data?.message || error.message || "Failed to create order");
+
+      const orderNumber = createdOrder.orderNumber ?? payload.orderNumber;
+      const shipping = createdOrder.shippingPrice ?? createdOrder.shippingFee;
+      setOrder({
+        id,
+        number: typeof orderNumber === "string" ? orderNumber : "",
+        amount: getPayableAmount(createdOrder, payment),
+        shipping: typeof shipping === "number" && Number.isFinite(shipping) ? shipping : null,
+        qr: getPaymentQr(payload.qrCodeDataUrl ?? envelope.qrCodeDataUrl ?? payment.qrCodeDataUrl ?? record(payment.qr).dataUrl ?? createdOrder.qrCodeDataUrl),
+        upi: getUpiDestination(payment.upiUrl ?? payload.upiUrl ?? record(payment.qr).upiUrl),
+      });
+      window.history.replaceState(null, "", `/checkout/checkout?orderId=${encodeURIComponent(id)}`);
+      // Keep any quantities added to the cart while the order request was pending.
+      const ordered = new Map(items.map(({ book, quantity }) => [book._id, quantity]));
+      useCartStore.setState((state) => ({
+        items: state.items.flatMap((item) => {
+          const remaining = item.quantity - (ordered.get(item.book._id) || 0);
+          return remaining > 0 ? [{ ...item, quantity: remaining }] : [];
+        }),
+      }));
+      if (saveAsDefault && addresses) {
+        try {
+          const latest = await fetchSavedAddresses();
+          const next = withDefaultAddress(latest, { ...shippingAddress, _id: selectedAddressId || undefined });
+          if (next) await saveAddresses(next);
+          else if (latest.length >= 10 && !selectedAddressId) {
+            setAddressNotice("Your order was created. Manage your saved addresses in Profile to make room for a new one.");
+          }
+        } catch {
+          setAddressNotice("Your order was created. The default address could not be saved.");
+        }
+      }
+    } catch (cause) {
+      const failure = describeApiError(cause);
+      const status = failure.response?.status;
+      if (!status || status >= 500 || status === 408) {
+        setUncertain(true);
+        setError("The order request could not be confirmed. Check My Orders before placing another order.");
+        window.history.replaceState(null, "", "/checkout/checkout?orderCheck=1");
+      } else {
+        setError(failure.response?.data?.message || "Could not create the order. Check your details and try again.");
+      }
     } finally {
+      busy.current = false;
       setSubmitting(false);
     }
   };
 
-  const handleVerifyUtr = async () => {
-    const sanitizedUtr = utr.trim().toUpperCase();
-
-    // UTR Validation: A-Z, 0-9, hyphen. Length 6 to 64 characters
-    const utrRegex = /^[A-Z0-9-]{6,64}$/;
-    if (!utrRegex.test(sanitizedUtr)) {
-      toast.error("Invalid UTR format. Must be 6 to 64 alphanumeric characters or hyphens.");
+  const submitUtr = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!order || busy.current || submitted) return;
+    const reference = normalizeUtr(utr);
+    if (!reference) {
+      setError("Enter the UTR from your UPI app using 6–64 letters, digits or hyphens.");
       return;
     }
-
+    busy.current = true;
+    setSubmitting(true);
+    setError("");
     try {
-      const { data } = await api.put(`/orders/${currentOrderId}/verify-payment`, { utr: sanitizedUtr });
-      if (data.success || data.status === "success" || data._id || data.data?._id) {
-        setUpiStatus('success');
-        clearCart();
-        toast.success("Payment UTR submitted for admin verification! 💳");
-        await new Promise(resolve => setTimeout(resolve, 1800));
-        setShowUpiModal(false);
-        router.push(`/checkout/success?orderId=${encodeURIComponent(currentOrderId)}`);
-      } else {
-        throw new Error(data.message || "Payment verification failed");
-      }
-    } catch (caughtError) {
-      const error = describeApiError(caughtError);
-      toast.error(error.response?.data?.message || error?.message || "Failed to verify payment");
-      setUpiStatus('waiting');
+      const { data } = await api.put(`/orders/${encodeURIComponent(order.id)}/verify-payment`, { utr: reference });
+      if (data?.success === false || data?.status === "error") throw new Error("The reference could not be accepted.");
+      setSubmitted(true);
+    } catch (cause) {
+      setError(describeApiError(cause).response?.data?.message || "Could not confirm submission. Check the payment status in My Orders before trying again.");
+    } finally {
+      busy.current = false;
+      setSubmitting(false);
     }
   };
 
-  return (
-    <AuthGuard>
-      <div className="bg-background min-h-screen py-16">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          {/* 3-Step Checkout Progress Stepper */}
-          <div className="mb-8 bg-card border border-border rounded-2xl p-4 shadow-2xs">
-            <div className="flex items-center justify-between max-w-2xl mx-auto text-xs font-serif font-bold">
-              <Link href="/checkout/cart" className="flex items-center gap-2 text-emerald-700 hover:underline">
-                <span className="h-7 w-7 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-sans text-xs">✓</span>
-                <span>1. Cart Review</span>
-              </Link>
-              <div className="h-0.5 w-10 sm:w-16 bg-emerald-300" />
-              <div className="flex items-center gap-2 text-foreground">
-                <span className="h-7 w-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-sans text-xs">2</span>
-                <span>2. Delivery Address</span>
-              </div>
-              <div className="h-0.5 w-10 sm:w-16 bg-border" />
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <span className="h-7 w-7 rounded-full bg-muted text-muted-foreground flex items-center justify-center font-sans text-xs">3</span>
-                <span>3. UPI Payment &amp; UTR</span>
-              </div>
+  useEffect(() => {
+    if (!hydrated || order || busy.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const createdId = params.get("orderId");
+    if (createdId) {
+      router.replace(`/dashboard/orders?orderId=${encodeURIComponent(createdId)}`);
+    } else if (params.has("orderCheck")) {
+      setUncertain(true);
+      setError("The order request could not be confirmed. Check My Orders before placing another order.");
+    } else if (!items.length) {
+      router.replace("/checkout/cart");
+    }
+  }, [hydrated, items.length, order, router]);
+
+  const ordersHref = order ? `/dashboard/orders?orderId=${encodeURIComponent(order.id)}` : "/dashboard/orders";
+
+  if (order) {
+    return (
+      <div className="mx-auto w-full max-w-xl px-4 py-8 sm:py-12">
+        <section className="space-y-5 rounded-2xl border bg-card p-5 sm:p-8" aria-labelledby="payment-heading">
+          <h1 id="payment-heading" className="font-serif text-3xl font-semibold">Complete payment</h1>
+          {order.number && <p className="text-muted-foreground">Order {order.number}</p>}
+          {order.amount !== null && <p className="text-xl font-semibold">Amount payable {rupees.format(order.amount)}</p>}
+          {order.shipping !== null && <p className="text-sm text-muted-foreground">Includes shipping of {rupees.format(order.shipping)}</p>}
+          {addressNotice && <p role="status" className="text-sm text-muted-foreground">{addressNotice}</p>}
+          {submitted ? (
+            <div role="status" className="rounded-lg bg-muted p-4">
+              <p className="font-semibold">Payment details submitted. Awaiting verification.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Harglim’s team will manually verify your transaction.</p>
             </div>
-          </div>
-          <div className="mb-10">
-            <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground">Checkout</p>
-            <h1 className="text-3xl font-bold">Complete Your Order</h1>
-            <p className="text-muted-foreground mt-2">Enter shipping details, select payment, and confirm your purchase.</p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="grid gap-8 lg:grid-cols-[2fr_1fr]">
-            <section className="space-y-6 rounded-3xl border border-border bg-card p-6 shadow-sm">
-              <div>
-                <h2 className="text-xl font-semibold">Shipping Address</h2>
-                <p className="text-sm text-muted-foreground mt-1">Where should we deliver your books?</p>
-              </div>
-
-              {savedAddresses.length > 0 && (
-                <label className="block space-y-2">
-                  <span className="text-sm font-medium">Saved addresses</span>
-                  <select
-                    id="savedAddress"
-                    value={selectedAddressId}
-                    onChange={(event) =>
-                      applySavedAddress(savedAddresses.find((a) => a._id === event.target.value) || null)
-                    }
-                    className="w-full rounded-2xl border border-border bg-background px-4 py-3 outline-none transition focus:border-primary/80"
-                  >
-                    {savedAddresses.map((a) => (
-                      <option key={a._id} value={a._id}>
-                        {[a.label, a.fullName, a.addressLine1, a.city, a.postalCode].filter(Boolean).join(' · ')}
-                        {a.isDefault ? ' (default)' : ''}
-                      </option>
-                    ))}
-                    <option value="">Use a new address</option>
-                  </select>
-                </label>
+          ) : order.amount !== null ? (
+            <>
+              {(order.qr && !qrFailed || order.upi) && (
+                <div className="space-y-3">
+                  <p className="text-sm">Pay the exact amount using the UPI details for this order.</p>
+                  {order.upi?.name && <p className="text-sm">Merchant <strong>{order.upi.name}</strong></p>}
+                  {order.upi?.id && <p className="break-all text-sm">UPI ID <strong>{order.upi.id}</strong></p>}
+                  {order.qr && !qrFailed && (
+                    // eslint-disable-next-line @next/next/no-img-element -- the API may provide an inline QR image
+                    <img src={order.qr} alt="Merchant UPI payment QR" width={192} height={192} onError={() => setQrFailed(true)} className="rounded-lg border bg-white" />
+                  )}
+                  {order.upi && <Button asChild variant="outline"><a href={order.upi.url}>Open UPI app</a></Button>}
+                </div>
               )}
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                {[
-                  { name: 'fullName', label: 'Full Name', type: 'text' },
-                  { name: 'email', label: 'Email Address', type: 'email' },
-                ].map((field) => (
-                  <label key={field.name} className="space-y-2">
-                    <span className="text-sm font-medium">{field.label}</span>
-                    <input
-                      type={field.type}
-                      required
-                      placeholder={field.name === 'email' ? 'e.g. yourname@gmail.com' : 'e.g. John Doe'}
-                      value={(address as any)[field.name]}
-                      onChange={(event) => setAddress({ ...address, [field.name]: event.target.value })}
-                      className="w-full rounded-2xl border border-border bg-background px-4 py-3 outline-none transition focus:border-primary/80"
-                    />
-                  </label>
-                ))}
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                {[
-                  { name: 'addressLine1', label: 'Address Line 1 *' },
-                  { name: 'addressLine2', label: 'Address Line 2 (optional)' },
-                ].map((field) => (
-                  <label key={field.name} className="space-y-2">
-                    <span className="text-sm font-medium">{field.label}</span>
-                    <input
-                      type="text"
-                      required={field.name === 'addressLine1'}
-                      value={(address as any)[field.name]}
-                      onChange={(event) => setAddress({ ...address, [field.name]: event.target.value })}
-                      className="w-full rounded-2xl border border-border bg-background px-4 py-3 outline-none transition focus:border-primary/80"
-                    />
-                  </label>
-                ))}
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
-                {[
-                  { name: 'city', label: 'City' },
-                  { name: 'state', label: 'State' },
-                  { name: 'postalCode', label: 'PIN / Postal Code' },
-                  { name: 'country', label: 'Country' },
-                ].map((field) => (
-                  <label key={field.name} className="space-y-2">
-                    <span className="text-sm font-medium">{field.label}</span>
-                    <input
-                      type="text"
-                      value={(address as any)[field.name]}
-                      onChange={(event) => setAddress({ ...address, [field.name]: event.target.value })}
-                      className="w-full rounded-2xl border border-border bg-background px-4 py-3 outline-none transition focus:border-primary/80"
-                      required
-                    />
-                  </label>
-                ))}
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="space-y-2">
-                  <span className="text-sm font-medium">Phone Number *</span>
-                  <input
-                    type="tel"
-                    required
-                    placeholder="e.g. +91 9876543210"
-                    value={address.phone}
-                    onChange={(event) => setAddress({ ...address, phone: event.target.value })}
-                    className="w-full rounded-2xl border border-border bg-background px-4 py-3 outline-none transition focus:border-primary/80"
-                  />
-                </label>
-                <label className="flex items-center gap-3 self-end pb-3 text-sm">
-                  <input
-                    id="saveThisAddress"
-                    type="checkbox"
-                    checked={saveThisAddress}
-                    onChange={(event) => setSaveThisAddress(event.target.checked)}
-                    className="h-4 w-4 accent-[#0F3D3E]"
-                  />
-                  <span>Save this as my default address</span>
-                </label>
-              </div>
-
-              <div className="space-y-4 rounded-3xl border border-border bg-background p-4">
-                <h2 className="text-lg font-semibold">Payment Method</h2>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  {([
-                    { value: 'upi', label: 'UPI' },
-                  ] as const).map((method) => (
-                    <button
-                      type="button"
-                      key={method.value}
-                      onClick={() => setPaymentMethod(method.value)}
-                      className={`rounded-2xl border p-4 text-left transition ${paymentMethod === method.value ? 'border-primary bg-primary/10' : 'border-border bg-card'}`}
-                    >
-                      <p className="font-semibold">{method.label}</p>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Pay via Google Pay, PhonePe, Paytm QR Code
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Once submitted, your order will appear in the dashboard.</p>
-                </div>
-                <Button type="submit" disabled={submitting}>
-                  {submitting ? 'Placing Order...' : 'Place Order'}
-                </Button>
-              </div>
-            </section>
-
-            <aside className="space-y-6 rounded-3xl border border-border bg-card p-6 shadow-sm">
-              <div className="flex items-center gap-3 rounded-2xl bg-primary/5 p-4">
-                <CreditCard className="h-5 w-5 text-primary" />
-                <div>
-                  <p className="text-sm font-medium">Order Summary</p>
-                  <p className="text-sm text-muted-foreground">Review your purchase before confirming.</p>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between text-sm text-muted-foreground">
-                  <span>Subtotal</span>
-                  <span>₹{(backendOrder?.subtotal ?? subtotal).toFixed(2)}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm font-medium text-emerald-600">
-                  <span>Shipping</span>
-                  <span>{typeof backendOrder?.shippingPrice === "number" ? `₹${backendOrder.shippingPrice.toFixed(2)}` : "Confirmed with your order"}</span>
-                </div>
-              </div>
-
-              <div className="border-t border-border pt-4">
-                <div className="flex items-center justify-between text-lg font-semibold">
-                  <span>{backendOrder ? "Order Total" : "Estimated book subtotal"}</span>
-                  <span>₹{(backendOrder?.totalPrice ?? backendPayment?.amount ?? total).toFixed(2)}</span>
-                </div>
-              </div>
-
-              <div className="rounded-3xl border border-border bg-background p-4">
-                <p className="text-sm font-medium">Items</p>
-                <div className="mt-3 space-y-3">
-                  {items.map((item) => (
-                    <div key={item.book._id} className="flex items-center justify-between gap-3 text-sm">
-                      <span className="truncate">{item.book.title}</span>
-                      <span className="text-muted-foreground">×{item.quantity}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </aside>
-          </form>
-        </div>
-
-        {/* UPI Modal Simulation */}
-        <AnimatePresence>
-          {showUpiModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="relative w-full max-w-sm rounded-3xl bg-card border border-border p-6 shadow-2xl text-center"
-              >
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-4 top-4"
-                  onClick={() => {
-                    setShowUpiModal(false);
-                    setUpiStatus('waiting');
-                    if (currentOrderId) {
-                      // The order (and its stock reservation) already exists. Keeping the cart
-                      // would let "Place Order" create a duplicate, so finish it from My Orders.
-                      clearCart();
-                      toast.success(`Order ${currentOrderNumber} saved. Pay and submit your UTR anytime from My Orders.`, { duration: 6000 });
-                      router.push('/dashboard/orders');
-                    }
-                  }}
-                  disabled={upiStatus === 'success'}
-                  aria-label="Close payment dialog"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-
-                {upiStatus === 'waiting' ? (
-                  <>
-                    <div className="mx-auto w-16 h-16 bg-[#0F3D3E]/10 text-[#0F3D3E] flex items-center justify-center rounded-2xl mb-3">
-                      <QrCode className="h-8 w-8 text-[#0F3D3E]" />
-                    </div>
-
-                    <div className="space-y-1 mb-4">
-                      <span className="text-[10px] font-bold uppercase tracking-wider bg-[#D4AF37]/20 text-[#0F3D3E] px-2.5 py-0.5 rounded-md">
-                        Order #{currentOrderNumber}
-                      </span>
-                      <h3 className="text-xl font-serif font-bold text-[#0F3D3E]">Scan to Pay with UPI</h3>
-                      <div className="flex items-center justify-center gap-2 text-xs text-[#5C6E6E]">
-                        <span>Amount: <strong className="text-[#0F3D3E] text-base font-bold font-serif">₹{(backendPayment?.amount ?? backendOrder?.totalPrice ?? backendOrder?.totalAmount).toFixed(2)}</strong></span>
-                        <button
-                          type="button"
-                          onClick={() => copyText((backendPayment?.amount ?? backendOrder?.totalPrice ?? backendOrder?.totalAmount).toFixed(2), 'amt')}
-                          className="p-1 text-[#5C6E6E] hover:text-[#0F3D3E] rounded border border-[#E2E6DF] bg-white text-[10px] font-mono cursor-pointer"
-                          title="Copy amount"
-                        >
-                          {copiedAmt ? <Check className="h-3 w-3 text-emerald-600 inline" /> : <Copy className="h-3 w-3 inline" />}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="aspect-square bg-white w-48 mx-auto rounded-2xl border-2 border-dashed border-[#E2E6DF] flex items-center justify-center mb-4 overflow-hidden shadow-xs">
-                      {qrCodeDataUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element -- client-generated data URI; next/image adds no benefit here.
-                        <img
-                          src={qrCodeDataUrl}
-                          alt="UPI payment QR"
-                          width={192}
-                          height={192}
-                          className="w-full h-full object-contain p-2"
-                        />
-                      ) : (
-                        <QrCode className="h-24 w-24 text-muted-foreground/30" />
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-center gap-2 mb-3">
-                        <button
-                          type="button"
-                          onClick={() => copyText("harglimpublications@okaxis", 'upi')}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#F8F9F7] hover:bg-[#F0F2ED] border border-[#E2E6DF] rounded-xl text-xs font-mono font-semibold text-[#0F3D3E] transition-colors cursor-pointer"
-                        >
-                          {copiedUpi ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-                          <span>{copiedUpi ? "UPI ID Copied" : "Copy UPI ID"}</span>
-                        </button>
-                      </div>
-                      {upiUrl && (
-                      <a
-                        href={upiUrl}
-                        target="_self"
-                        className="inline-flex items-center justify-center gap-2 w-full py-2.5 mb-4 text-xs font-serif font-bold rounded-xl bg-[#0F3D3E] text-[#D4AF37] hover:bg-[#174C4D] transition-colors shadow-xs"
-                      >
-                        <span>Pay via UPI App (PhonePe / GPay / Paytm)</span>
-                      </a>
-                    )}
-
-                    <p className="text-xs text-[#5C6E6E] mb-4 font-sans leading-relaxed">
-                      Open your UPI app, scan this QR code or click the button above to pay, then enter your 12-digit UTR below.
-                    </p>
-
-                    <div className="space-y-2 mb-4">
-                      <input
-                        type="text"
-                        placeholder="Enter UTR / Transaction ID (e.g. UPI1234567890)"
-                        value={utr}
-                        onChange={(e) => setUtr(e.target.value.toUpperCase())}
-                        maxLength={64}
-                        className="w-full rounded-xl border border-[#E2E6DF] bg-[#F8F9F7] px-4 py-3 text-xs font-mono font-bold uppercase tracking-wider outline-none transition focus:border-[#0F3D3E]"
-                      />
-                      <p className="text-[10px] text-[#5C6E6E] text-left">
-                        * Minimum 6 characters (Letters, numbers, hyphens allowed)
-                      </p>
-                    </div>
-
-                    <Button className="w-full bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] font-serif font-bold text-sm h-11 rounded-xl shadow-xs" onClick={handleVerifyUtr}>
-                      Submit UTR for Verification
-                    </Button>
-                  </>
-                ) : (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="py-8 space-y-4"
-                  >
-                    <div className="mx-auto w-20 h-20 bg-emerald-500/10 text-emerald-600 flex items-center justify-center rounded-full shadow-sm">
-                      <CheckCircle2 className="h-10 w-10" />
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-serif font-bold text-[#0F3D3E]">Payment Submitted!</h3>
-                      <p className="text-xs text-amber-700 font-medium mt-1 bg-amber-50 border border-amber-200 p-2.5 rounded-xl">
-                        ⏳ Payment UTR submitted. Waiting for admin verification.
-                      </p>
-                    </div>
-                    <p className="text-xs text-[#5C6E6E] flex items-center justify-center gap-2 font-sans pt-2">
-                      <Loader2 className="h-4 w-4 animate-spin text-[#0F3D3E]" /> Redirecting to order confirmation...
-                    </p>
-                  </motion.div>
-                )}
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
+              {(!order.qr || qrFailed) && !order.upi && <p className="text-sm text-muted-foreground">Open My Orders to retrieve the UPI payment details for this order.</p>}
+              <form onSubmit={submitUtr} className="space-y-3">
+                <label htmlFor="checkout-utr" className="block text-sm font-medium">UPI transaction reference (UTR)</label>
+                <Input id="checkout-utr" autoCapitalize="characters" spellCheck={false} maxLength={64} required value={utr} onChange={(event) => setUtr(event.target.value)} className="min-h-11" />
+                <Button type="submit" disabled={submitting}>Submit UTR for verification</Button>
+              </form>
+            </>
+          ) : <p role="status">Payment amount unavailable. Open My Orders to check this order before paying.</p>}
+          {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" asChild><Link href={ordersHref}>View in My Orders</Link></Button>
+            {submitted && <Button variant="ghost" asChild><Link href={`/checkout/success?orderId=${encodeURIComponent(order.id)}`}>View order confirmation</Link></Button>}
+          </div>
+        </section>
       </div>
-    </AuthGuard>
+    );
+  }
+
+  if (!hydrated || !items.length) return <p role="status" className="p-8 text-center">Loading checkout…</p>;
+
+  return (
+    <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
+      <Link href="/checkout/cart" className="inline-flex min-h-11 items-center text-sm underline">Back to cart</Link>
+      <h1 className="mb-6 font-serif text-[clamp(2rem,5vw,3rem)] font-semibold">Checkout</h1>
+      <form onSubmit={confirmOrder} className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+        <section className="min-w-0 space-y-5 rounded-2xl border bg-card p-4 sm:p-6" aria-labelledby="shipping-heading">
+          <h2 id="shipping-heading" className="font-serif text-2xl font-semibold">Shipping details</h2>
+          {addressNotice && <p role="status" className="text-sm text-muted-foreground">{addressNotice}</p>}
+          {!!addresses?.length && (
+            <label className="block min-w-0 space-y-2 text-sm font-medium">
+              <span>Saved addresses</span>
+              <select value={selectedAddressId} onChange={(event) => selectAddress(event.target.value)} className="min-h-11 w-full min-w-0 rounded-md border bg-background px-2">
+                <option value="">Use a new address</option>
+                {addresses.filter((entry) => entry._id).map((entry) => (
+                  <option key={entry._id} value={entry._id}>{[entry.label, entry.addressLine1, entry.city].filter(Boolean).join(" · ")}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          <div className="grid gap-4 sm:grid-cols-[repeat(2,minmax(0,1fr))]">
+            {fields.map((field) => (
+              <label key={field.id} htmlFor={field.id} className={`block space-y-2 text-sm font-medium ${"wide" in field ? "sm:col-span-2" : ""}`}>
+                <span>{field.label}</span>
+                <Input id={field.id} type={"type" in field ? field.type : "text"} autoComplete={field.autoComplete}
+                  value={address[field.id] || ""} required={field.id !== "addressLine2"} className="min-h-11"
+                  onChange={(event) => { addressEdited.current = true; setAddress({ ...address, [field.id]: event.target.value }); }} />
+              </label>
+            ))}
+          </div>
+          {addresses && (
+            <label className="flex min-h-11 items-center gap-2 text-sm">
+              <input type="checkbox" checked={saveAsDefault} onChange={(event) => setSaveAsDefault(event.target.checked)} className="size-4 accent-primary" />
+              Save this as my default address
+            </label>
+          )}
+        </section>
+        <aside className="min-w-0 space-y-4 rounded-2xl border bg-card p-4 sm:p-6" aria-labelledby="summary-heading">
+          <h2 id="summary-heading" className="font-serif text-2xl font-semibold">Order summary</h2>
+          <ul className="space-y-2 border-b pb-4 text-sm">
+            {items.map(({ book, quantity }) => (
+              <li key={book._id} className="flex justify-between gap-3"><span className="[overflow-wrap:anywhere]">{book.title}</span><span className="shrink-0">× {quantity}</span></li>
+            ))}
+          </ul>
+          <dl className="space-y-2 text-sm">
+            <div className="flex justify-between gap-3"><dt>Estimated book subtotal</dt><dd>{rupees.format(subtotal)}</dd></div>
+            <div className="flex justify-between gap-3"><dt>Shipping</dt><dd className="text-right">Calculated at order confirmation</dd></div>
+            <div className="flex justify-between gap-3"><dt>Payment method</dt><dd>UPI</dd></div>
+          </dl>
+          <p className="text-sm text-muted-foreground">You’ll see the final payable amount before paying. Harglim verifies the UPI reference after submission.</p>
+          {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+          {uncertain
+            ? <Button asChild variant="outline" className="w-full"><Link href={ordersHref}>Check My Orders</Link></Button>
+            : <Button type="submit" className="w-full min-h-11" disabled={submitting}>{submitting ? "Confirming order…" : "Confirm Order"}</Button>}
+        </aside>
+      </form>
+    </div>
   );
+}
+
+export default function CheckoutStepPage() {
+  return <AuthGuard><CheckoutForm /></AuthGuard>;
 }

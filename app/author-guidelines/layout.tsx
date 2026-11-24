@@ -1,14 +1,5 @@
-import type { Metadata } from 'next';
+import { pageMetadata } from '@/lib/page-metadata';
 
-export const metadata: Metadata = {
-  title: 'Author Guidelines',
-  description:
-    "Review Harglim Publishers' manuscript submission, formatting, review, and publishing guidelines for authors.",
-  alternates: { canonical: '/author-guidelines' },
-};
+export function generateMetadata() { return pageMetadata("/author-guidelines", "Author Guidelines", false); }
 
-export default function AuthorGuidelinesLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
-  return children;
-}
+export default function Layout({ children }: { children: React.ReactNode }) { return children; }

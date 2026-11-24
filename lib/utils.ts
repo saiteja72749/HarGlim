@@ -66,8 +66,8 @@ export function getBookAuthorInfo(book: {
     const rawId = book.author._id || book.author.id || "";
     const role = (book.author.role || "").toLowerCase();
 
-    // If author name is Demo Admin or role is admin, prefer explicit authorName or fallback
-    if (rawName.toLowerCase().includes("admin") || role === "admin" || rawName === "Demo Admin") {
+    // Role is authoritative. A person's name is not an authorization signal.
+    if (role === "admin") {
       if (explicitAuthorName) {
         return { name: explicitAuthorName, id: null, hasProfile: false };
       }

@@ -13,10 +13,10 @@ test('real author signs in through the website and signs out across tabs', async
   await page.getByLabel(/password/i).first().fill(password);
   await page.getByRole('button', { name: 'Sign In with Password', exact: true }).click();
   await expect(page).toHaveURL(/\/author$/, { timeout: 45_000 });
-  await expect(page.getByRole('heading', { name: 'Author Workspace', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Author Studio Overview', exact: true })).toBeVisible();
   const secondTab = await context.newPage();
   await secondTab.goto('/author', { waitUntil: 'domcontentloaded' });
-  await expect(secondTab.getByRole('heading', { name: 'Author Workspace', exact: true })).toBeVisible();
+  await expect(secondTab.getByRole('heading', { name: 'Author Studio Overview', exact: true })).toBeVisible();
   const logout = page.waitForResponse((response) => response.url().endsWith('/api/auth/logout') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Sign Out', exact: true }).click();
   expect((await logout).ok()).toBe(true);

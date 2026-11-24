@@ -168,7 +168,7 @@ export default function AdminReviewsPage() {
               ) : (
                 filteredReviews.map((rev) => {
                   const revId = rev._id || rev.id;
-                  const ratingNum = Number(rev.rating || 5);
+                  const ratingNum = Number(rev.rating ?? 0);
                   const isApproved = rev.status === "approved";
                   const isRejected = rev.status === "rejected";
 

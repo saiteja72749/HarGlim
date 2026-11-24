@@ -1,11 +1,13 @@
 
 import { describeApiError } from "@/lib/api-error";
-import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios';
+import axios, { type AxiosRequestConfig } from 'axios';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/auth-store';
 import { UserContextData } from '@/types';
 import { isTrustedApiTarget } from '@/lib/api-origin';
 import { record } from '@/lib/api-error';
+import { createPublicApiCache } from '@/lib/public-api-cache';
+import { notifyLiveChange, onLiveChange } from '@/lib/live-sync';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
 
@@ -18,78 +20,37 @@ const api = axios.create({
   },
 });
 
-const GET_CACHE_MS = 30 * 1000;
-const inflightGetRequests = new Map<string, Promise<AxiosResponse<unknown>>>();
-const responseCache = new Map<string, { response: AxiosResponse<unknown>; expiresAt: number }>();
+const rawGet = api.get.bind(api);
+const publicCache = createPublicApiCache(rawGet, (url, config) => {
+  const params = new URL(api.getUri({ url, params: config.params })).searchParams;
+  params.sort();
+  return `${url.split('?')[0]}?${params.toString()}`;
+});
 
-const getCacheKey = (url?: string, params?: unknown) => {
-  const serializedParams = params ? JSON.stringify(params, typeof params === 'object' ? Object.keys(params).sort() : undefined) : '';
-  return `${url || ''}?${serializedParams}`;
-};
+export const getPublic = publicCache.get;
+export const invalidateApiCache = publicCache.invalidate;
 
-export function invalidateApiCache(match: string | RegExp) {
-  for (const key of responseCache.keys()) {
-    const matched = typeof match === 'string' ? key.includes(match) : match.test(key);
-    if (matched) {
-      responseCache.delete(key);
-      inflightGetRequests.delete(key);
+if (typeof window !== 'undefined') {
+  onLiveChange('books', (reason) => {
+    if (reason === 'change') {
+      invalidateApiCache('/books');
+      invalidateApiCache('/search');
+      invalidateApiCache('/authors');
     }
-  }
+  });
 }
 
-const rawGet = api.get.bind(api);
 api.get = ((url: string, config: AxiosRequestConfig = {}) => {
-  const noStore = config?.cache === 'no-store' || config?.headers?.['Cache-Control'] === 'no-store';
-  const hasAuthorizationHeader = Boolean(
-    config?.headers?.Authorization || config?.headers?.authorization
-  );
-  const hasSessionToken =
-    typeof window !== 'undefined' && Boolean(useAuthStore.getState().token);
-  const bypassCache = noStore || hasAuthorizationHeader || hasSessionToken;
-  const cacheable = !config.signal && !bypassCache;
-  const cacheKey = getCacheKey(url, config?.params);
-
-  if (cacheable) {
-    const cached = responseCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-      return Promise.resolve(cached.response);
-    }
-
-    const inflight = inflightGetRequests.get(cacheKey);
-    if (inflight) {
-      return inflight;
-    }
-  }
-
-  const request = rawGet(url, {
+  const headers = config.headers;
+  const cacheControl = headers instanceof axios.AxiosHeaders
+    ? headers.get('Cache-Control')
+    : headers?.['Cache-Control'] ?? headers?.['cache-control'];
+  const noStore = config.cache === 'no-store' || cacheControl === 'no-store';
+  return rawGet(url, noStore ? {
     ...config,
-    // `cache: 'no-store'` is our frontend option. Forward it to the browser too:
-    // disabling this module's cache alone does not prevent HTTP-cached readback.
-    ...(bypassCache ? {
-      adapter: config.adapter ?? 'fetch',
-      fetchOptions: { ...config.fetchOptions, cache: 'no-store' },
-    } : {}),
-    metadata: { ...(config?.metadata || {}), cacheKey },
-  })
-    .then((response) => {
-      if (response.status === 304) {
-        const cached = responseCache.get(cacheKey);
-        if (cached) return cached.response;
-      }
-      if (cacheable && response.status >= 200 && response.status < 300) {
-        responseCache.set(cacheKey, { response, expiresAt: Date.now() + GET_CACHE_MS });
-      }
-      return response;
-    })
-    .finally(() => {
-      inflightGetRequests.delete(cacheKey);
-    });
-
-  if (cacheable) {
-    inflightGetRequests.set(cacheKey, request);
-  }
-
-  return request;
+    adapter: config.adapter ?? 'fetch',
+    fetchOptions: { ...config.fetchOptions, cache: 'no-store' },
+  } : config);
 }) as typeof api.get;
 
 let isRefreshing = false;
@@ -112,7 +73,7 @@ api.interceptors.request.use(
   (config) => {
     if ((config.baseURL || API_URL).replace(/\/$/, '') !== API_URL.replace(/\/$/, '')) throw new Error('The request base URL cannot override the configured backend API.');
     if (!isTrustedApiTarget(config.url || '', API_URL)) throw new Error('The request target is outside the configured backend API.');
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && !config.publicRead) {
       const state = useAuthStore.getState();
       if (state.token && !config.headers.Authorization) {
         config.headers.Authorization = `Bearer ${state.token}`;
@@ -137,8 +98,12 @@ api.interceptors.response.use(
     const url = response.config?.url || '';
 
     if (method && method !== 'get') {
-      const baseResource = url.split('?')[0].split('/').slice(0, 3).join('/');
-      if (baseResource) invalidateApiCache(baseResource);
+      const resource = url.replace(/^\/admin(?=\/)/, '').split(/[/?]/)[1];
+      if (resource) invalidateApiCache(`/${resource}`);
+      if (resource === 'books' && /^\/(?:admin\/)?books(?:\/[^/?]+)?(?:\?|$)/.test(url)) {
+        invalidateApiCache('/search');
+        notifyLiveChange('books');
+      }
     }
 
     return response;
@@ -148,12 +113,14 @@ api.interceptors.response.use(
 
     if (
       error.response?.status === 401 &&
-      originalRequest && !originalRequest._retry &&
+      originalRequest && !originalRequest._retry && !originalRequest.publicRead &&
       !originalRequest.url?.includes('/auth/login') &&
       !originalRequest.url?.includes('/auth/google') &&
       !originalRequest.url?.includes('/auth/refresh')
     ) {
       const currentSession = useAuthStore.getState();
+      const canReplay = originalRequest.method?.toLowerCase() !== 'post';
+      originalRequest._retry = true;
       if (isRefreshing) {
         if (currentSession.refreshToken !== refreshingSessionToken) {
           return Promise.reject(error);
@@ -163,12 +130,11 @@ api.interceptors.response.use(
         })
           .then((token) => {
             originalRequest.headers.Authorization = `Bearer ${token}`;
-            return api(originalRequest);
+            return canReplay ? api(originalRequest) : Promise.reject(error);
           })
           .catch((err) => Promise.reject(err));
       }
 
-      originalRequest._retry = true;
       isRefreshing = true;
 
       const { refreshToken, logout, login, user } = currentSession;
@@ -194,7 +160,7 @@ api.interceptors.response.use(
           login(user, newAccessToken, newRefreshToken, expiresAt);
           originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
           processQueue(null, newAccessToken);
-          return api(originalRequest);
+          return canReplay ? api(originalRequest) : Promise.reject(error);
         } else {
           throw new Error('Refresh response missing token');
         }
@@ -213,6 +179,12 @@ api.interceptors.response.use(
     const status = error.response?.status;
     const method = originalRequest?.method?.toUpperCase?.() || 'REQUEST';
     const url = originalRequest?.url || 'unknown URL';
+    if (status === 401 && originalRequest?._retry) {
+      const current = useAuthStore.getState();
+      if (current.token && originalRequest.headers?.Authorization === `Bearer ${current.token}`) {
+        void current.logout();
+      }
+    }
 
     if (typeof window !== 'undefined') {
       if (error.name === 'CanceledError' || error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
@@ -238,10 +210,10 @@ api.interceptors.response.use(
         // Expected configuration response, not a failure: the dashboard is free.
         console.info(`[api] 409 paid author dashboard access disabled for ${method} ${url}`);
       } else if (status === 429) {
-        console.warn(`[api] 429 too many requests for ${method} ${url}`);
-        toast.error('Too many requests. Please wait a few seconds and try again.', {
-          id: 'rate-limit-toast',
-        });
+        console.warn('[api] Rate-limited request', { method, requestId: describeApiError(error).response?.headers['x-request-id'] });
+        if (!originalRequest?.publicRead) {
+          toast.error('Too many requests. Please wait before trying again.', { id: 'rate-limit-toast' });
+        }
       } else if (status >= 500) {
         console.error(`[api] ${status} backend/server failure for ${method} ${url}`);
       }

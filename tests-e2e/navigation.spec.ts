@@ -105,3 +105,15 @@ test.describe('Protected routes without a session', () => {
     });
   }
 });
+
+test('legacy author links redirect to their canonical Studio destinations', async ({ request }) => {
+  for (const [from, to] of [
+    ['/author/add-book?packageId=original', '/author/manuscripts/new?packageId=original'],
+    ['/author/book-performance', '/author/analytics#performance'],
+    ['/author/royalty-settlements', '/author/royalties#settlements'],
+  ]) {
+    const response = await request.get(from, { maxRedirects: 0 });
+    expect(response.status()).toBe(308);
+    expect(response.headers().location).toBe(to);
+  }
+});

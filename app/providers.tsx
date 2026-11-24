@@ -3,10 +3,11 @@
 import { Toaster } from 'react-hot-toast';
 import { SiteContentProvider } from '@/context/site-content-context';
 import { SessionBootstrap } from '@/components/auth/session-bootstrap';
+import { MotionConfig } from 'framer-motion';
 
-export function Providers({ children }: { children: React.ReactNode }) {
+export function Providers({ children, initialContent }: { children: React.ReactNode; initialContent: Record<string, unknown> | null }) {
   return (
-    <SiteContentProvider>
+    <MotionConfig reducedMotion="user"><SiteContentProvider initialContent={initialContent}>
       <SessionBootstrap />
       {children}
       <Toaster
@@ -34,6 +35,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
           },
         }}
       />
-    </SiteContentProvider>
+    </SiteContentProvider></MotionConfig>
   );
 }

@@ -4,7 +4,7 @@ import { describeApiError } from "@/lib/api-error";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
+import Image from '@/components/ui/backend-image';
 import { motion } from "framer-motion";
 import { Sparkles, CheckCircle2, ShieldCheck, QrCode, ArrowRight, Loader2, Clock, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";

@@ -1,4 +1,5 @@
 import bundleAnalyzer from '@next/bundle-analyzer'
+import { IMAGE_HOSTS } from './config/image-hosts.mjs'
 
 const withBundleAnalyzer = bundleAnalyzer({
   enabled: process.env.ANALYZE === 'true',
@@ -28,15 +29,16 @@ const nextConfig = {
     ignoreBuildErrors: false,
   },
   images: {
-    remotePatterns: [
-      { protocol: 'https', hostname: 'res.cloudinary.com' },
-      { protocol: 'https', hostname: 'harglimpublish-backend.onrender.com' },
-      { protocol: 'https', hostname: 'lh3.googleusercontent.com' },
-    ],
+    remotePatterns: IMAGE_HOSTS.map((hostname) => ({ protocol: 'https', hostname })),
   },
   devIndicators: false,
   async redirects() {
     return [
+      { source: '/author/add-book', destination: '/author/manuscripts/new', permanent: true },
+      { source: '/author/book-performance', destination: '/author/analytics#performance', permanent: true },
+      { source: '/author/royalty-settlements', destination: '/author/royalties#settlements', permanent: true },
+      { source: '/categories/:slug', destination: '/books?category=:slug', permanent: true },
+      { source: '/categories', destination: '/books', permanent: true },
       // Same page as /reset-password: invitation emails may say "set password".
       { source: '/set-password/:token', destination: '/reset-password/:token', permanent: false },
       { source: '/set-password', destination: '/reset-password', permanent: false },

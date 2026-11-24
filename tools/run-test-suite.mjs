@@ -35,12 +35,13 @@ function redactArtifacts(directory) {
 }
 
 const steps = [
-  { name: 'unit', cli: 'vitest/vitest.mjs', args: ['run', '--pool=threads', '--maxWorkers=1'] },
+  { name: 'unit', cli: 'vitest/vitest.mjs', args: ['run', '--pool=forks', '--maxWorkers=1'] },
   { name: 'lint', cli: 'eslint/bin/eslint.js', args: ['.', '--format', 'json'] },
   { name: 'build', cli: 'next/dist/bin/next', args: ['build'] },
   { name: 'e2e', cli: '@playwright/test/cli.js', args: ['test'], env: { PLAYWRIGHT_SERVER_MODE: 'production' } },
 ];
 const retryFailed = process.argv.includes('--retry-failed');
+const rerun = new Set((process.argv.find((arg) => arg.startsWith('--rerun='))?.slice('--rerun='.length) ?? '').split(',').filter(Boolean));
 const previous = retryFailed ? JSON.parse(readFileSync(resolve(outputDir, 'summary.json'), 'utf8')) : [];
 const results = [];
 
@@ -55,7 +56,7 @@ saveResults();
 
 for (const step of steps) {
   const passed = previous.find((result) => result.name === step.name && result.status === 'passed');
-  if (passed) {
+  if (passed && !rerun.has(step.name)) {
     console.log(`Keeping previous successful ${step.name} result (--retry-failed).`);
     results.push(passed);
     saveResults();

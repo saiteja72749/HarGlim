@@ -1,10 +1,10 @@
 'use client';
 
-import { describeApiError, record } from "@/lib/api-error";
+import { describeApiError, publicApiMessage, record } from "@/lib/api-error";
 
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import api from '@/lib/api';
+import api, { getPublic, invalidateApiCache } from '@/lib/api';
 import { useAuthStore } from '@/store/auth-store';
 import { notifyLiveChange, onLiveChange } from '@/lib/live-sync';
 import { PAGE_SECTION_KEYS, type PageSectionKey } from '@/lib/page-content';
@@ -407,20 +407,24 @@ export function invalidJsonField(content: Partial<SiteContent>): { key: keyof Si
   return null;
 }
 
-async function fetchBackendContent(): Promise<Record<string, unknown>> {
-  const res = await api.get('/content', { cache: 'no-store' });
+async function fetchBackendContent(readback = false): Promise<Record<string, unknown>> {
+  const res = readback
+    ? await api.get('/content', { cache: 'no-store', publicRead: true })
+    : await getPublic('/content');
   const apiData = res?.data?.data || res?.data;
   if (!apiData || typeof apiData !== 'object' || Array.isArray(apiData)) throw new Error('The backend returned invalid site content.');
   return apiData;
 }
 
-export function SiteContentProvider({ children }: { children: React.ReactNode }) {
-  const [content, setContent] = useState<SiteContent>(defaultSiteContent);
-  const [loading, setLoading] = useState(true);
+export function SiteContentProvider({ children, initialContent = null }: { children: React.ReactNode; initialContent?: Record<string, unknown> | null }) {
+  const [content, setContent] = useState<SiteContent>(() => initialContent
+    ? { ...defaultSiteContent, ...fromBackendContent(initialContent) }
+    : defaultSiteContent);
+  const [loading, setLoading] = useState(!initialContent);
   const [error, setError] = useState<string | null>(null);
 
   // The last GET /content document, so a save keeps backend-only fields (siteName, seo, ...).
-  const backendDocRef = useRef<unknown>(null);
+  const backendDocRef = useRef<unknown>(initialContent);
 
   /** Only confirmed backend documents enter shared content state. */
   const applyBackendContent = useCallback((apiData: unknown): SiteContent => {
@@ -438,16 +442,19 @@ export function SiteContentProvider({ children }: { children: React.ReactNode })
         setError(null);
       } catch (err) {
         console.error('Error fetching global site content:', describeApiError(err));
-        setError('Website information could not be loaded. Please retry.');
+        setError(publicApiMessage(err, 'Website information could not be loaded. Please retry.'));
       } finally {
         setLoading(false);
       }
   }, [applyBackendContent]);
 
   useEffect(() => {
-    refreshContent();
-    return onLiveChange('site-content', refreshContent);
-  }, [refreshContent]);
+    if (!initialContent) void refreshContent();
+    return onLiveChange('site-content', (reason) => {
+      if (reason === 'change') invalidateApiCache('/content');
+      void refreshContent();
+    }, 60_000);
+  }, [initialContent, refreshContent]);
 
   /**
    * Saves to the backend, then reads GET /content back so the site (and the admin editor) shows
@@ -461,11 +468,9 @@ export function SiteContentProvider({ children }: { children: React.ReactNode })
     const updated = { ...content, ...newFields };
     const payload = toBackendPayload(updated, adminDocument);
     await api.put('/admin/content', payload);
-    notifyLiveChange('site-content');
-
     try {
       const [stored, adminReadback] = await Promise.all([
-        fetchBackendContent(), api.get('/admin/content', { cache: 'no-store' }),
+        fetchBackendContent(true), api.get('/admin/content', { cache: 'no-store' }),
       ]);
       const savedAdminDocument: unknown = adminReadback.data?.data ?? adminReadback.data;
       verifyPreservedContent(payload, savedAdminDocument);
@@ -477,6 +482,8 @@ export function SiteContentProvider({ children }: { children: React.ReactNode })
     } catch {
       setError('Changes were sent, but the saved website information could not be verified. Please retry.');
       return { stored: content, notSaved: Object.keys(newFields) as (keyof SiteContent)[], verified: false };
+    } finally {
+      notifyLiveChange('site-content', false);
     }
   };
 

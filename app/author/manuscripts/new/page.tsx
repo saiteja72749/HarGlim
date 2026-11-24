@@ -2,7 +2,7 @@
 
 import { describeApiError } from "@/lib/api-error";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -31,16 +31,18 @@ import Link from "next/link";
 import api from "@/lib/api";
 import { fetchBackendCategories } from "@/lib/categories";
 import { useBookCategories } from "@/hooks/use-book-categories";
-import { fetchPublicPackages } from "@/lib/publish-packages";
+import { fetchPublicPackages, type PackageCard } from "@/lib/publish-packages";
 
-// Backend default upload limit (UPLOAD_MAX_BYTES) is 25MB.
-const MAX_MANUSCRIPT_BYTES = 25 * 1024 * 1024;
+import { manuscriptFileError, submitAuthorManuscript, uploadAuthorManuscript } from "@/lib/author-manuscript";
 
 export default function NewManuscriptPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
+  const pending = useRef(false);
+  const [needsReconciliation, setNeedsReconciliation] = useState(false);
+  const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [packages, setPackages] = useState<any[]>([]);
+  const [packages, setPackages] = useState<PackageCard[]>([]);
   const [selectedPackageId, setSelectedPackageId] = useState<string>("");
   const [loadingPackages, setLoadingPackages] = useState(true);
   const { categories, loading: categoriesLoading, error: categoryError, reload: reloadCategories } = useBookCategories(false);
@@ -64,15 +66,15 @@ export default function NewManuscriptPage() {
       setLoadingPackages(true);
       try {
         // Same packages, in the same order, as the Publish page.
-        const arr: any[] = await fetchPublicPackages();
+        const arr = await fetchPublicPackages();
         setPackages(arr);
         // The Publish page links here with ?packageId=<_id> for the card the author chose.
         const requested = new URLSearchParams(window.location.search).get("packageId");
         // Without a chosen card the author must pick: defaulting to the first package would
         // silently submit a package they never chose.
-        const preselected = arr.find((p: any) => (p._id || p.id) === requested) || (arr.length === 1 ? arr[0] : null);
+        const preselected = arr.find((p) => p._id === requested);
         if (preselected) {
-          setSelectedPackageId(preselected._id || preselected.id);
+          setSelectedPackageId(preselected._id || "");
         }
       } catch (err) {
         console.warn("Failed to load publish packages:", describeApiError(err));
@@ -92,16 +94,9 @@ export default function NewManuscriptPage() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      if (
-        !["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"].includes(
-          selectedFile.type
-        )
-      ) {
-        toast.error("Please upload a PDF or Word document");
-        return;
-      }
-      if (selectedFile.size > MAX_MANUSCRIPT_BYTES) {
-        toast.error("File size must be less than 25MB");
+      const problem = manuscriptFileError(selectedFile);
+      if (problem) {
+        toast.error(problem);
         return;
       }
       setFile(selectedFile);
@@ -111,20 +106,20 @@ export default function NewManuscriptPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (pending.current || needsReconciliation) return;
+    if (!packages.some((item) => item._id === selectedPackageId)) {
+      toast.error("Choose an available publishing package.");
+      return;
+    }
 
     if (!formData.title.trim() || !formData.category || categoryError || categoriesLoading || !formData.synopsis.trim()) {
       toast.error("Please fill in all required fields");
       return;
     }
 
-    const wordCount = Math.floor(Number(formData.estimatedWordCount));
-    if (!Number.isFinite(wordCount) || wordCount < 1) {
+    const wordCount = formData.estimatedWordCount.trim() ? Number(formData.estimatedWordCount) : undefined;
+    if (wordCount !== undefined && (!Number.isSafeInteger(wordCount) || wordCount < 1)) {
       toast.error("Please enter the manuscript's word count.");
-      return;
-    }
-
-    if (!selectedPackageId) {
-      toast.error("Please select a valid publishing package");
       return;
     }
 
@@ -138,7 +133,11 @@ export default function NewManuscriptPage() {
       return;
     }
 
+    pending.current = true;
+    setUploadPercent(null);
     setIsLoading(true);
+    let createdId = draftBookId;
+    let operation: "upload" | "create" | "submit" = "upload";
 
     // Documented author publishing flow (handover sections 39-45):
     //   upload document -> POST /authors/me/books (draft) -> POST /authors/me/books/{id}/submit
@@ -148,18 +147,7 @@ export default function NewManuscriptPage() {
       // 1. Upload manuscript (field name "document"; response data.url)
       let fileUrl = uploadedFileUrl;
       if (!fileUrl) {
-        const formDataUpload = new FormData();
-        formDataUpload.append("document", file);
-        const uploadRes = await api.post("/authors/me/uploads/document", formDataUpload).catch((err) => {
-          throw new Error(err?.response?.data?.message || "Failed to upload manuscript document file.");
-        });
-        fileUrl =
-          uploadRes?.data?.data?.url ||
-          uploadRes?.data?.url ||
-          uploadRes?.data?.data?.fileUrl ||
-          uploadRes?.data?.fileUrl ||
-          "";
-        if (!fileUrl) throw new Error("Upload finished but the server did not return a file URL.");
+        fileUrl = await uploadAuthorManuscript(file, setUploadPercent);
         setUploadedFileUrl(fileUrl);
       }
 
@@ -176,6 +164,7 @@ export default function NewManuscriptPage() {
         ].filter(Boolean);
         const description = [formData.synopsis.trim(), ...extraLines].join("\n\n");
 
+        operation = "create";
         const createRes = await api.post("/authors/me/books", {
           title: formData.title.trim(),
           description,
@@ -184,11 +173,13 @@ export default function NewManuscriptPage() {
         const created = createRes.data?.data?.book || createRes.data?.data || createRes.data?.book || createRes.data;
         bookId = created?._id || created?.id || null;
         if (!bookId) throw new Error("Draft was created but no book id was returned. Check Manuscripts before retrying.");
+        createdId = bookId;
         setDraftBookId(bookId);
       }
 
       // 3. Submit the draft for editorial review
-      await api.post(`/authors/me/books/${bookId}/submit`, {
+      operation = "submit";
+      await submitAuthorManuscript(bookId, {
         fileUrl,
         genre: category.name,
         wordCount,
@@ -199,10 +190,13 @@ export default function NewManuscriptPage() {
       router.push("/author/manuscripts");
     } catch (caughtError) {
       const error = describeApiError(caughtError);
-      console.error("Manuscript submission failed:", describeApiError(error));
       const message = error?.response?.data?.message || error?.message || "Failed to submit manuscript request.";
-      toast.error(draftBookId ? `${message} Your draft is saved. Press Submit again to retry.` : message);
+      const status = error.response?.status;
+      const ambiguous = operation !== "upload" && (!status || status >= 500 || status === 408 || status === 409);
+      setNeedsReconciliation(ambiguous);
+      toast.error(ambiguous ? "The submission could not be confirmed. Check Manuscripts before making another submission." : createdId ? `${message} Your draft was saved.` : message);
     } finally {
+      pending.current = false;
       setIsLoading(false);
     }
   };
@@ -216,7 +210,7 @@ export default function NewManuscriptPage() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} aria-busy={isLoading}>
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Main Form */}
           <div className="lg:col-span-2 space-y-6">
@@ -238,6 +232,7 @@ export default function NewManuscriptPage() {
                     </Label>
                     <Input
                       id="title"
+                      readOnly={Boolean(draftBookId) || isLoading}
                       name="title"
                       value={formData.title}
                       onChange={handleChange}
@@ -251,7 +246,7 @@ export default function NewManuscriptPage() {
                     </Label>
                     <Select
                       value={formData.category}
-                      disabled={categoriesLoading || categoryError}
+                      disabled={categoriesLoading || categoryError || Boolean(draftBookId) || isLoading}
                       onValueChange={(value) =>
                         setFormData({ ...formData, category: value })
                       }
@@ -286,7 +281,7 @@ export default function NewManuscriptPage() {
                       </SelectTrigger>
                       <SelectContent>
                         {packages.map((pkg) => (
-                          <SelectItem key={pkg._id || pkg.id} value={pkg._id || pkg.id}>
+                          <SelectItem key={pkg._id || ""} value={pkg._id || ""}>
                             {pkg.name} — ₹{Number(pkg.price || 0).toLocaleString("en-IN")}
                           </SelectItem>
                         ))}
@@ -294,7 +289,7 @@ export default function NewManuscriptPage() {
                     </Select>
                     {packages.length > 0 && selectedPackageId && (
                       <p className="text-xs text-muted-foreground">
-                        {packages.find((p) => (p._id || p.id) === selectedPackageId)?.description}
+                        {packages.find((p) => p._id === selectedPackageId)?.description}
                       </p>
                     )}
                   </div>
@@ -305,6 +300,7 @@ export default function NewManuscriptPage() {
                     </Label>
                     <Textarea
                       id="synopsis"
+                      readOnly={Boolean(draftBookId) || isLoading}
                       name="synopsis"
                       value={formData.synopsis}
                       onChange={handleChange}
@@ -329,7 +325,7 @@ export default function NewManuscriptPage() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="estimatedWordCount">
-                        Estimated Word Count <span className="text-destructive">*</span>
+                        Estimated word count (optional)
                       </Label>
                       <Input
                         id="estimatedWordCount"
@@ -459,8 +455,7 @@ export default function NewManuscriptPage() {
               <Alert>
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  Review typically takes 2-4 weeks. You&apos;ll receive email
-                  updates on your manuscript status.
+                  Check Manuscripts for your submission status and editorial feedback.
                 </AlertDescription>
               </Alert>
             </motion.div>
@@ -497,10 +492,12 @@ export default function NewManuscriptPage() {
                     </Label>
                   </div>
 
+                  {isLoading && uploadPercent !== null && <p role="status" className="text-sm">File upload {uploadPercent}%</p>}
+                  {needsReconciliation && <Link href="/author/manuscripts" className="inline-flex min-h-11 items-center underline">Check Manuscripts</Link>}
                   <Button
                     type="submit"
                     className="w-full gap-2"
-                    disabled={isLoading}
+                    disabled={isLoading || needsReconciliation}
                   >
                     {isLoading ? (
                       <Loader2 className="h-4 w-4 animate-spin" />

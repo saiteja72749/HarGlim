@@ -1,15 +1,5 @@
-import { Metadata } from 'next';
+import { pageMetadata } from '@/lib/page-metadata';
 
-export const metadata: Metadata = {
-  title: 'Publish With Us',
-  description: 'Join Harglim Publishers to publish your book. We offer professional editing, formatting, marketing, and distribution services for authors.',
-  alternates: { canonical: '/publish' },
-};
+export function generateMetadata() { return pageMetadata("/publish", "Publish with Us", false); }
 
-export default function PublishLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return <>{children}</>;
-}
+export default function Layout({ children }: { children: React.ReactNode }) { return children; }

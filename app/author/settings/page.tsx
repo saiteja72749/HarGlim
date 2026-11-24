@@ -2,7 +2,8 @@
 
 import { describeApiError, record } from "@/lib/api-error";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
@@ -16,7 +17,6 @@ import {
   Mail,
   ShieldCheck,
   BookOpen,
-  CheckCircle2,
   Building2,
   Lock,
 } from "lucide-react";
@@ -25,16 +25,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ErrorState } from "@/components/ui/error-state";
+import { authorSnapshot, payoutNotSaved } from "@/lib/author-settings-data";
 import { useHashSection } from "@/hooks/use-hash-section";
-
-// PUT /authors/{id}/payment-details is live but undocumented in the handover (verified:
-// it requires auth, while unknown /authors/* routes return 404). Set to false to hide
-// payout editing if the backend ever removes it.
-const PAYOUT_DETAILS_API_AVAILABLE = true;
 
 export default function AuthorSettingsPage() {
   const { user, setUser } = useAuthStore();
   const [loading, setLoading] = useState(false);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [profileReadError, setProfileReadError] = useState(false);
+  const [payoutReadError, setPayoutReadError] = useState(false);
+  const [authorReadError, setAuthorReadError] = useState(false);
+  const userId = user?._id || user?.id;
   useHashSection(!loading);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>("");
@@ -45,6 +47,9 @@ export default function AuthorSettingsPage() {
   const [isEditingPayment, setIsEditingPayment] = useState(false);
   // The backend only ever returns a masked account number ("**********7263").
   const [maskedAccount, setMaskedAccount] = useState("");
+  const [replacingAccount, setReplacingAccount] = useState(false);
+  const [publicAuthorId, setPublicAuthorId] = useState<string | null>(null);
+  const saving = useRef(false);
 
   // Author Profile Form & Saved state for cancellation
   const [profileForm, setProfileForm] = useState({
@@ -79,7 +84,7 @@ export default function AuthorSettingsPage() {
   });
 
   // Accepts the masked payout object returned by GET/PUT payment-details.
-  const applyPayoutDetails = (input: unknown) => {
+  const applyPayoutDetails = useCallback((input: unknown) => {
     const details = record(input);
     if (!details || typeof details !== "object") return;
     const payment = {
@@ -91,40 +96,44 @@ export default function AuthorSettingsPage() {
     };
     setPaymentForm(payment);
     setSavedPayment(payment);
-    setMaskedAccount(typeof details.accountNumberMasked === "string" ? details.accountNumberMasked : "");
-  };
+    const mask = typeof details.accountNumberMasked === "string" ? details.accountNumberMasked.trim() : "";
+    setMaskedAccount(/^[*xX\u2022-]+\d{1,4}$/.test(mask) ? mask : "");
+    setReplacingAccount(false);
+  }, []);
 
-  useEffect(() => {
-    // Fetch profile & payment details
-    const fetchSettings = async () => {
-      if (!user?._id && !user?.id) return;
-      try {
-        // Profile from the authenticated GET /users/me (the public author API no longer
-        // carries email); payout details from GET /authors/me/payment-details (masked).
-        const [meRes, payoutRes] = await Promise.all([
-          api.get("/users/me", { cache: "no-store" }).catch(() => null),
-          api.get("/authors/me/payment-details", { cache: "no-store" }).catch(() => null),
-        ]);
-        const me = meRes?.data?.data?.user || meRes?.data?.data || meRes?.data?.user || {};
-        const imgUrl = me.profilePicture || me.profileImage || user?.profileImage || "";
-        const initialProfile = {
-          name: me.name || user?.name || "",
-          email: me.email || user?.email || "",
-          bio: me.bio || "",
-          profileImage: imgUrl,
-        };
-        setProfileForm(initialProfile);
-        setSavedProfile(initialProfile);
-        setImagePreview(imgUrl);
-        setImgError(false);
-
-        applyPayoutDetails(payoutRes?.data?.data);
-      } catch (e) {
-        console.error("Failed to load author settings:", describeApiError(e));
+  const fetchSettings = useCallback(async () => {
+    if (!userId) return;
+    setSettingsLoading(true);
+    const [meResult, payoutResult, authorResult] = await Promise.allSettled([
+      api.get('/users/me', { cache: 'no-store' }),
+      api.get('/authors/me/payment-details', { cache: 'no-store' }),
+      api.get(`/authors/${userId}`, { cache: 'no-store' }),
+    ]);
+    setProfileReadError(meResult.status === 'rejected');
+    setPayoutReadError(payoutResult.status === 'rejected');
+    const author = authorResult.status === "fulfilled" ? record(authorResult.value.data?.data ?? authorResult.value.data) : {};
+    const authorMatches = (author._id ?? author.id) === userId;
+    setAuthorReadError(!authorMatches);
+    setPublicAuthorId(authorMatches ? userId : null);
+    if (meResult.status === 'fulfilled') {
+      const body = record(meResult.value.data?.data ?? meResult.value.data);
+      const me = record(body.user ?? body);
+      if ((me._id || me.id) !== userId) { setProfileReadError(true); }
+      else {
+        const snapshot = authorSnapshot(me, authorMatches ? author : {});
+        setProfileForm(snapshot); setSavedProfile(snapshot);
+        setImagePreview(snapshot.profileImage); setImgError(false);
       }
-    };
-    fetchSettings();
-  }, [user]);
+    }
+    if (payoutResult.status === 'fulfilled') {
+      const details: unknown = payoutResult.value.data?.data;
+      if (!details || typeof details !== 'object' || Array.isArray(details)) setPayoutReadError(true);
+      else applyPayoutDetails(details);
+    }
+    setSettingsLoading(false);
+  }, [userId, applyPayoutDetails]);
+
+  useEffect(() => { void fetchSettings(); }, [fetchSettings]);
 
   // Handle local image file selection
   const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -187,28 +196,27 @@ export default function AuthorSettingsPage() {
       }
 
       await api.put(`/authors/${authorId}`, payload);
-
-      if (user) {
-        setUser({
-          ...user,
-          name: profileForm.name,
-          profileImage: finalImage,
-        });
+      const [meResult, authorResult] = await Promise.all([
+        api.get('/users/me', { cache: 'no-store' }),
+        api.get(`/authors/${authorId}`, { cache: 'no-store' }),
+      ]);
+      const body = record(meResult.data?.data ?? meResult.data);
+      const me = record(body.user ?? body);
+      if ((me._id || me.id) !== authorId) throw new Error('Profile identity changed. Please sign in again.');
+      const snapshot = authorSnapshot(me, record(authorResult.data?.data ?? authorResult.data));
+      for (const field of ['name', 'bio', 'profilePicture']) {
+        const value = field === 'profilePicture' ? snapshot.profileImage : field === 'bio' ? snapshot.bio : snapshot.name;
+        if (payload[field] !== undefined && payload[field] !== value) throw new Error('The server did not retain the profile changes. Your edits remain here; please retry.');
       }
-
-      setSavedProfile({
-        name: profileForm.name,
-        email: profileForm.email,
-        bio: profileForm.bio,
-        profileImage: finalImage,
-      });
+      if (user) setUser({ ...user, name: typeof me.name === 'string' ? me.name : user.name, profileImage: typeof me.profilePicture === 'string' ? me.profilePicture : undefined, profilePicture: typeof me.profilePicture === 'string' ? me.profilePicture : undefined });
+      setProfileForm(snapshot); setSavedProfile(snapshot); setImagePreview(snapshot.profileImage);
       setImageFile(null);
       setIsEditingProfile(false);
 
       toast.success("Author profile updated successfully! 👤");
     } catch (caughtError) {
       const err = describeApiError(caughtError);
-      toast.error(err.response?.data?.message || "Failed to update profile.");
+      toast.error(err.response?.data?.message || err.message || "Failed to update profile.");
     } finally {
       setLoading(false);
     }
@@ -216,46 +224,46 @@ export default function AuthorSettingsPage() {
 
   const handleCancelPayment = () => {
     setPaymentForm(savedPayment);
+    setReplacingAccount(false);
     setIsEditingPayment(false);
   };
 
   const handleSavePayment = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const trimmed = Object.fromEntries(
-      Object.entries(paymentForm).map(([key, value]) => [key, value.trim()])
-    ) as typeof paymentForm;
-    const hasUpi = Boolean(trimmed.upiId);
-    const hasFullBank = Boolean(
-      trimmed.accountHolderName && trimmed.bankName && trimmed.accountNumber && trimmed.ifscCode
-    );
-    if (!hasUpi && !hasFullBank) {
-      toast.error(
-        maskedAccount && !trimmed.accountNumber
-          ? "Enter the account number again to save bank details, or add a UPI ID."
-          : "Provide either a UPI ID or complete bank details (holder name, bank, account number, IFSC)."
-      );
+    if (saving.current || payoutReadError || !userId) return;
+    const trimmed = Object.fromEntries(Object.entries(paymentForm).map(([key, value]) => [key, value.trim()])) as typeof paymentForm;
+    const paymentDetails = Object.fromEntries(Object.entries(trimmed).filter(([key, value]) =>
+      key === "accountNumber" ? replacingAccount && Boolean(value)
+        : value !== savedPayment[key as keyof typeof savedPayment].trim()
+    ));
+    if (!Object.keys(paymentDetails).length) {
+      toast.error("Change a payout field before saving.");
       return;
     }
-
+    if (replacingAccount && !/^\d{5,}$/.test(trimmed.accountNumber)) {
+      toast.error("Enter the new account number using digits.");
+      return;
+    }
+    saving.current = true;
     setLoading(true);
     try {
-      const authorId = user?._id || user?.id;
-      // Only filled fields are sent; the account number is sent only when re-entered.
-      const paymentDetails = Object.fromEntries(Object.entries(trimmed).filter(([, value]) => value));
+      const authorId = userId;
       await api.put(`/authors/${authorId}/payment-details`, { paymentDetails });
       const { data } = await api.get('/authors/me/payment-details', { cache: 'no-store' });
 
       // The response carries the masked record; the typed account number is dropped here.
       if (!data?.data || typeof data.data !== 'object') throw new Error('Saved payout details could not be verified. Reload before retrying.');
+      if (payoutNotSaved(paymentDetails, record(data.data)).length) throw new Error('The saved payout details could not be verified. Your edits remain here; please retry.');
       applyPayoutDetails(data.data);
       setIsEditingPayment(false);
 
-      toast.success(data?.message || "Payment and payout details saved securely");
+      toast.success("Payout details saved.");
     } catch (caughtError) {
       const err = describeApiError(caughtError);
-      toast.error(err.response?.data?.message || "Failed to save payment details.");
+      toast.error(err.response?.data?.message || err.message || "Failed to save payment details.");
     } finally {
+      saving.current = false;
       setLoading(false);
     }
   };
@@ -279,6 +287,8 @@ export default function AuthorSettingsPage() {
         </p>
       </div>
 
+      {settingsLoading && <p role="status" className="text-sm text-muted-foreground">Loading saved settings...</p>}
+      {(profileReadError || authorReadError) && <ErrorState title="Some profile details could not load" message="Please retry to retrieve your saved profile details." onRetry={fetchSettings} />}
       <div className="grid grid-cols-1 gap-8">
         {/* 1. Author Profile Card */}
         <Card id="profile" className="bg-white border border-[#E2E6DF] shadow-xs rounded-2xl overflow-hidden scroll-mt-20">
@@ -301,6 +311,7 @@ export default function AuthorSettingsPage() {
             {!isEditingProfile ? (
               <Button
                 type="button"
+                disabled={settingsLoading || profileReadError || authorReadError}
                 onClick={() => setIsEditingProfile(true)}
                 variant="outline"
                 className="border-[#D4AF37] text-[#0F3D3E] hover:bg-[#D4AF37]/10 font-serif font-bold text-xs h-9 px-4 rounded-xl gap-2 shadow-xs transition-colors shrink-0"
@@ -359,19 +370,20 @@ export default function AuthorSettingsPage() {
                       <h2 className="text-xl sm:text-2xl font-serif font-bold text-[#0F3D3E]">
                         {profileForm.name || "Unnamed Author"}
                       </h2>
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                        <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                        Verified Author
-                      </span>
+
                     </div>
 
-                    <p className="text-xs text-[#5C6E6E] flex items-center justify-center sm:justify-start gap-1.5">
+                    <p className="text-xs text-[#5C6E6E] flex items-center justify-center sm:justify-start gap-1.5 [overflow-wrap:anywhere]">
                       <Mail className="h-3.5 w-3.5 text-[#5C6E6E]" />
                       <span>{profileForm.email || user?.email || "No email available"}</span>
                     </p>
                   </div>
                 </div>
 
+                {publicAuthorId && <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" asChild><Link href={`/authors/${encodeURIComponent(publicAuthorId)}`}>Preview public profile and books</Link></Button>
+                  <Button variant="ghost" asChild><Link href="/author/books">My Books</Link></Button>
+                </div>}
                 {/* Bio Block */}
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
@@ -562,15 +574,16 @@ export default function AuthorSettingsPage() {
                 <p className="text-xs text-[#5C6E6E]">
                   {isEditingPayment
                     ? "Update your bank or UPI details for royalty disbursements."
-                    : "Royalties are paid by manual bank/UPI transfer after each settlement."}
+                    : "Review the payout details saved for your royalty settlements."}
                 </p>
               </div>
             </div>
 
-            {/* Toggle Edit Button: hidden until the backend exposes a payout-details endpoint. */}
-            {!PAYOUT_DETAILS_API_AVAILABLE ? null : !isEditingPayment ? (
+            {/* Payout actions use the actual loaded resource state. */}
+            {!isEditingPayment ? (
               <Button
                 type="button"
+                disabled={settingsLoading || payoutReadError}
                 onClick={() => setIsEditingPayment(true)}
                 variant="outline"
                 className="border-[#D4AF37] text-[#0F3D3E] hover:bg-[#D4AF37]/10 font-serif font-bold text-xs h-9 px-4 rounded-xl gap-2 shadow-xs transition-colors shrink-0"
@@ -592,20 +605,12 @@ export default function AuthorSettingsPage() {
           </CardHeader>
 
           <CardContent className="p-6">
-            {!PAYOUT_DETAILS_API_AVAILABLE && (
-              <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-900">
-                Payout details can&apos;t be saved online yet. Please send your account holder name, bank name,
-                account number, IFSC and/or UPI ID to the Harglim team from the{" "}
-                <a href="/contact" className="underline font-semibold">contact page</a>. Settlements are paid manually to
-                these details.
-              </div>
-            )}
-            {!isEditingPayment ? (
+            {settingsLoading ? <p role="status">Loading payout details...</p> : payoutReadError ? <ErrorState title="Payout details could not load" message="Retry before editing your saved payout details." onRetry={fetchSettings} /> : !isEditingPayment ? (
               /* ================= READ-ONLY VIEW MODE ================= */
               <div className="space-y-6">
                 {hasPaymentDetails ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* Account Holder Name */}
+                    {/* Account holder name/}
                     <div className="p-4 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF] space-y-1">
                       <span className="text-[11px] font-bold uppercase tracking-wider text-[#5C6E6E] flex items-center gap-1.5">
                         <User className="h-3.5 w-3.5 text-[#D4AF37]" />
@@ -616,7 +621,7 @@ export default function AuthorSettingsPage() {
                       </p>
                     </div>
 
-                    {/* Bank Name */}
+                    {/* Bank name */}
                     <div className="p-4 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF] space-y-1">
                       <span className="text-[11px] font-bold uppercase tracking-wider text-[#5C6E6E] flex items-center gap-1.5">
                         <Building2 className="h-3.5 w-3.5 text-[#D4AF37]" />
@@ -638,7 +643,7 @@ export default function AuthorSettingsPage() {
                       </p>
                     </div>
 
-                    {/* IFSC Code */}
+                    {/* IFSC code/}
                     <div className="p-4 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF] space-y-1">
                       <span className="text-[11px] font-bold uppercase tracking-wider text-[#5C6E6E] flex items-center gap-1.5">
                         <ShieldCheck className="h-3.5 w-3.5 text-[#D4AF37]" />
@@ -675,7 +680,8 @@ export default function AuthorSettingsPage() {
                     </div>
                     <Button
                       type="button"
-                      onClick={() => setIsEditingPayment(true)}
+                      disabled={settingsLoading || payoutReadError}
+                onClick={() => setIsEditingPayment(true)}
                       className="bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] border border-[#D4AF37]/50 font-serif font-bold text-xs h-9 px-4 rounded-xl gap-2 shadow-xs"
                     >
                       <Pencil className="h-3.5 w-3.5" />
@@ -701,7 +707,7 @@ export default function AuthorSettingsPage() {
                       htmlFor="accountHolderName"
                       className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]"
                     >
-                      Account Holder Name *
+                      Account holder name
                     </Label>
                     <Input
                       id="accountHolderName"
@@ -722,7 +728,7 @@ export default function AuthorSettingsPage() {
                       htmlFor="bankName"
                       className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]"
                     >
-                      Bank Name *
+                      Bank name
                     </Label>
                     <Input
                       id="bankName"
@@ -742,22 +748,21 @@ export default function AuthorSettingsPage() {
                       htmlFor="accountNumber"
                       className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]"
                     >
-                      Account Number {maskedAccount ? "" : "*"}
+                      Account number
                     </Label>
-                    <Input
-                      id="accountNumber"
-                      type="password"
-                      autoComplete="off"
-                      placeholder={maskedAccount ? `Saved: ${maskedAccount}. Re-enter to change` : "Enter bank account number"}
-                      value={paymentForm.accountNumber}
-                      onChange={(e) =>
-                        setPaymentForm({
-                          ...paymentForm,
-                          accountNumber: e.target.value,
-                        })
-                      }
-                      className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs font-mono font-bold"
-                    />
+                    {replacingAccount ? (
+                      <Input id="accountNumber" type="password" inputMode="numeric" autoComplete="off"
+                        placeholder="Enter the new account number" value={paymentForm.accountNumber}
+                        onChange={(event) => setPaymentForm({ ...paymentForm, accountNumber: event.target.value })}
+                        className="min-h-11" />
+                    ) : (
+                      <div className="space-y-2">
+                        {maskedAccount && <p className="text-sm font-mono">{maskedAccount}</p>}
+                        <Button id="accountNumber" type="button" variant="outline" onClick={() => setReplacingAccount(true)}>
+                          {maskedAccount ? "Replace account number" : "Add account number"}
+                        </Button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-1.5">
@@ -765,7 +770,7 @@ export default function AuthorSettingsPage() {
                       htmlFor="ifscCode"
                       className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]"
                     >
-                      IFSC Code *
+                      IFSC code
                     </Label>
                     <Input
                       id="ifscCode"

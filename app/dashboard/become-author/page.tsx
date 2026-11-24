@@ -2,7 +2,7 @@
 
 import { describeApiError } from "@/lib/api-error";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   PenTool,
@@ -26,11 +26,14 @@ import { useAuthStore } from "@/store/auth-store";
 import toast from "react-hot-toast";
 import api, { bootstrapUserContext } from "@/lib/api";
 import { useRouter } from "next/navigation";
+import { ErrorState } from "@/components/ui/error-state";
 
 export default function BecomeAuthorPage() {
   const { user } = useAuthStore();
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const pending = useRef(false);
+  const [statusError, setStatusError] = useState(false);
   const [applicationStatus, setApplicationStatus] = useState<"none" | "pending" | "approved" | "rejected">("none");
   const [rejectionReason, setRejectionReason] = useState<string>("");
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
@@ -56,12 +59,14 @@ export default function BecomeAuthorPage() {
   }, [user]);
 
   // Check backend application status
-  const checkStatus = async () => {
+  const checkStatus = useCallback(async () => {
     setIsLoadingStatus(true);
+    setStatusError(false);
     try {
       const res = await api.get("/users/me/author-application", { cache: "no-store" });
       const data = res.data;
-      const app = data?.data || data?.application || (Array.isArray(data) ? data[0] : data);
+      const payload = data?.data ?? data;
+      const app = Array.isArray(payload) ? payload[0] : payload?.application ?? payload;
       if (app && (app.status || app.state)) {
         const rawStatus = (app.status || app.state || "").toLowerCase();
         if (rawStatus === "approved" || rawStatus === "accepted") {
@@ -76,28 +81,34 @@ export default function BecomeAuthorPage() {
             ? "rejected"
             : rawStatus === "pending"
             ? "pending"
-            : "none"
+            : rawStatus === "submitted" ? "pending" : "none"
         );
         if (app.rejectionReason || app.adminNotes || app.reason || app.feedback) {
           setRejectionReason(app.rejectionReason || app.adminNotes || app.reason || app.feedback);
         }
       }
-    } catch {
-      setApplicationStatus("none");
+    } catch (cause) {
+      if (describeApiError(cause).response?.status === 404) setApplicationStatus("none");
+      else setStatusError(true);
     } finally {
       setIsLoadingStatus(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     checkStatus();
-  }, []);
+  }, [checkStatus]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (pending.current || statusError || isLoadingStatus || user?.role !== "reader" || applicationStatus === "pending" || applicationStatus === "approved") return;
 
     if (!formData.fullName.trim() || !formData.email.trim() || !formData.phone.trim()) {
       toast.error("Please fill in your Full Name, Email Address, and Phone Number.");
+      return;
+    }
+    if (!/^\+?\d{7,15}$/.test(formData.phone.trim().replace(/[\s()-]/g, ""))) {
+      toast.error("Enter a valid phone number with its country code if applicable.");
       return;
     }
 
@@ -114,10 +125,11 @@ export default function BecomeAuthorPage() {
       }
     }
 
+    pending.current = true;
     setIsSubmitting(true);
 
     const payload: Record<string, string> = {
-      penName: (formData.penName || formData.fullName).trim(),
+      penName: formData.penName.trim() || formData.fullName.trim(),
       fullName: formData.fullName.trim(),
       email: formData.email.trim(),
       phone: formData.phone.trim(),
@@ -127,14 +139,17 @@ export default function BecomeAuthorPage() {
     if (portfolioUrl) payload.portfolioUrl = portfolioUrl;
 
     try {
-      await api.post("/author-applications", payload);
+      const { data } = await api.post("/author-applications", payload);
+      if (data?.success === false || data?.status === "error") throw new Error("Application was not accepted.");
 
       toast.success("Author application submitted successfully!");
       setApplicationStatus("pending");
     } catch (caughtError) {
       const error = describeApiError(caughtError);
       toast.error(error.response?.data?.message || "Failed to submit application.");
+      if (!error.response?.status || error.response.status >= 500 || error.response.status === 409) await checkStatus();
     } finally {
+      pending.current = false;
       setIsSubmitting(false);
     }
   };
@@ -145,6 +160,10 @@ export default function BecomeAuthorPage() {
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#0F3D3E]"></div>
       </div>
     );
+  }
+
+  if (statusError && user?.role !== "author") {
+    return <ErrorState title="Application status unavailable" message="Check your current application before submitting a new one." onRetry={checkStatus} />;
   }
 
   // STATE 3: APPROVED (Already Author)
@@ -159,20 +178,21 @@ export default function BecomeAuthorPage() {
             AUTHOR ACCESS GRANTED
           </Badge>
           <h1 className="text-3xl font-serif font-bold text-[#0F3D3E]">
-            You are a Published Author!
+            Your author application was approved
           </h1>
           <p className="text-[#5C6E6E] text-sm max-w-md mx-auto leading-relaxed">
-            Congratulations! Your Harglim Author Account is active. You have full access to manuscript submission, royalty analytics, and editorial tools.
+            Open your author account to see the publishing tools available to you.
           </p>
         </div>
         <Button
           onClick={async () => {
             await bootstrapUserContext();
-            router.push("/author");
+            const packageId = new URLSearchParams(window.location.search).get("packageId");
+            router.push(packageId ? `/author/manuscripts/new?packageId=${encodeURIComponent(packageId)}` : "/author");
           }}
           className="bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] font-serif font-bold h-12 px-8 shadow-sm gap-2"
         >
-          <span>Go to Author Dashboard</span>
+          <span>Continue as an author</span>
           <ArrowRight className="h-4 w-4 text-[#D4AF37]" />
         </Button>
       </div>

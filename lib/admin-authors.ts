@@ -14,7 +14,7 @@ export function announceInvite(user: { email?: string; invited?: boolean; emailS
   if (user.emailSent === false) {
     toast.error(`The invitation email to ${user.email} could not be sent. Use Resend Invite in Users & Accounts.`, { duration: 8000 });
   } else if (user.emailSent === true) {
-    toast.success(`Invitation sent to ${user.email}. The set-password link is valid for 7 days.`, { duration: 6000 });
+    toast.success(`Invitation sent to ${user.email}. Use the set-password link in the email.`, { duration: 6000 });
   }
 }
 

@@ -3,21 +3,13 @@ import { describeApiError } from "@/lib/api-error";
 
 
 import { useState, useEffect, useCallback } from "react";
-import Image from "next/image";
+import Image from '@/components/ui/backend-image';
 import Link from "next/link";
-import { motion } from "framer-motion";
 import {
   BookOpen,
-  ShoppingBag,
-  Heart,
-  CreditCard,
-  User,
-  PenTool,
   ArrowRight,
-  Sparkles,
   Package,
   Clock,
-  Compass,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,6 +26,7 @@ import {
   getFulfilmentStage,
   getOrderTotal,
   getPaymentState,
+  indexPaymentsByOrder,
 } from "@/lib/order-status";
 
 // Unpaid orders show their payment state; paid orders show where the parcel is.
@@ -58,6 +51,7 @@ export default function DashboardPage() {
     ? { href: "/dashboard/become-author", title: "Application Rejected", subtitle: "Reapply to publish" }
     : { href: "/dashboard/become-author", title: "Become Author", subtitle: "Publish your work" };
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
+  const [pendingOrder, setPendingOrder] = useState<any>(null);
   const [recommendedBooks, setRecommendedBooks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -69,19 +63,23 @@ export default function DashboardPage() {
     setError(false);
 
     try {
-      const [ordersRes, booksRes] = await Promise.allSettled([
+      const [ordersRes, booksRes, paymentsRes] = await Promise.allSettled([
         api.get(`/users/${userId}/orders`, { params: { limit: 20 }, cache: "no-store" }),
         api.get(`/books?limit=4`),
+        api.get(`/users/${userId}/payments`, { params: { limit: 100 }, cache: "no-store" }),
       ]);
 
       if (ordersRes.status === "rejected") throw ordersRes.reason;
-      if (booksRes.status === "rejected") throw booksRes.reason;
+
       if (ordersRes.status === "fulfilled") {
         // Sort client-side: the backend's sort param isn't guaranteed.
         const list = extractList(ordersRes.value.data, "orders").sort(
           (a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
         );
         setRecentOrders(list.slice(0, 3));
+        const payments = paymentsRes.status === "fulfilled" ? indexPaymentsByOrder(extractList(paymentsRes.value.data, "payments")) : null;
+        setPendingOrder(payments ? list.find((order) => (order._id || order.id) && getFulfilmentStage(order) !== "cancelled" &&
+          getPaymentState(order, payments.get(String(order._id || order.id))) === "awaiting_payment") ?? null : null);
       }
 
       if (booksRes.status === "fulfilled") {
@@ -126,155 +124,20 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* 2. Main Large Action Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Browse Books (PRIMARY CARD - Subtle Gold Accent) */}
-        <motion.div
-          whileHover={{ y: -4 }}
-          transition={{ duration: 0.2 }}
-        >
-          <Card className="h-full bg-white border-2 border-[#D4AF37]/40 shadow-sm hover:shadow-md hover:border-[#D4AF37] transition-all rounded-2xl relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-[#D4AF37]/15 to-transparent rounded-bl-full pointer-events-none" />
-            <CardContent className="p-6 sm:p-8 flex flex-col justify-between h-full space-y-6">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#0F3D3E] text-[#D4AF37] shadow-sm">
-                    <Compass className="h-6 w-6" />
-                  </div>
-                  <Badge className="bg-[#D4AF37]/15 text-[#0F3D3E] border-[#D4AF37]/40 font-semibold px-2.5 py-0.5 text-xs">
-                    Primary Action
-                  </Badge>
-                </div>
-                <div>
-                  <h3 className="text-2xl font-serif font-bold text-[#0F3D3E]">
-                    Browse Books
-                  </h3>
-                  <p className="text-[#5C6E6E] text-sm mt-1.5 leading-relaxed">
-                    Explore our curated literary collection, new releases, and rare publishing releases.
-                  </p>
-                </div>
-              </div>
-              <Button
-                asChild
-                className="w-full bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] border border-[#D4AF37]/40 font-medium h-11 shadow-sm gap-2 text-sm"
-              >
-                <Link href="/books">
-                  <span>Explore Book Store</span>
-                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        {/* My Orders Card */}
-        <motion.div
-          whileHover={{ y: -4 }}
-          transition={{ duration: 0.2 }}
-        >
-          <Card className="h-full bg-white border border-[#E2E6DF] shadow-sm hover:shadow-md hover:border-[#0F3D3E]/30 transition-all rounded-2xl relative overflow-hidden group">
-            <CardContent className="p-6 sm:p-8 flex flex-col justify-between h-full space-y-6">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#F0F2ED] text-[#0F3D3E]">
-                    <ShoppingBag className="h-6 w-6" />
-                  </div>
-                </div>
-                <div>
-                  <h3 className="text-2xl font-serif font-bold text-[#0F3D3E]">
-                    My Orders
-                  </h3>
-                  <p className="text-[#5C6E6E] text-sm mt-1.5 leading-relaxed">
-                    Track your active shipments, submit UTR payment verification, and view past invoices.
-                  </p>
-                </div>
-              </div>
-              <Button
-                asChild
-                variant="outline"
-                className="w-full border-[#0F3D3E]/20 text-[#0F3D3E] hover:bg-[#F0F2ED] font-medium h-11 shadow-xs gap-2 text-sm"
-              >
-                <Link href="/dashboard/orders">
-                  <span>Track & Manage Orders</span>
-                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
-        </motion.div>
+      <div className="flex flex-wrap gap-2">
+        <Button asChild><Link href="/books">Browse Books <ArrowRight className="size-4" /></Link></Button>
+        <Button variant="outline" asChild><Link href="/dashboard/orders">My Orders</Link></Button>
+        <Button variant="outline" asChild><Link href="/dashboard/wishlist">Wishlist</Link></Button>
+        <Button variant="outline" asChild><Link href="/dashboard/profile">Profile</Link></Button>
+        {(isApprovedAuthor || user?.role === "reader") && <Button variant="outline" asChild><Link href={authorCard.href}>{authorCard.title}</Link></Button>}
       </div>
-
-      {/* 3. Secondary Actions Grid */}
-      <div>
-        <h2 className="text-xs font-bold uppercase tracking-wider text-[#5C6E6E] mb-4">
-          Quick Access Services
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Wishlist */}
-          <Link href="/dashboard/wishlist">
-            <Card className="bg-white border border-[#E2E6DF] hover:border-[#0F3D3E]/40 hover:shadow-md transition-all rounded-xl cursor-pointer group">
-              <CardContent className="p-5 flex items-center gap-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-rose-50 text-rose-600 group-hover:scale-105 transition-transform">
-                  <Heart className="h-5 w-5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-serif font-bold text-sm text-[#0F3D3E]">Wishlist</h4>
-                  <p className="text-xs text-[#5C6E6E] truncate">Saved favorites</p>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-
-          {/* Become Author / application status / Author Dashboard (Gold Accent for Emphasis) */}
-          <Link href={authorCard.href}>
-            <Card className="bg-white border-2 border-[#D4AF37]/50 hover:border-[#D4AF37] hover:shadow-md transition-all rounded-xl cursor-pointer group relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-2 h-full bg-[#D4AF37]" />
-              <CardContent className="p-5 flex items-center gap-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#D4AF37]/15 text-[#0F3D3E] group-hover:scale-105 transition-transform">
-                  <PenTool className="h-5 w-5 text-[#0F3D3E]" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1">
-                    <h4 className="font-serif font-bold text-sm text-[#0F3D3E]">{authorCard.title}</h4>
-                    <Sparkles className="h-3 w-3 text-[#D4AF37]" />
-                  </div>
-                  <p className="text-xs text-[#5C6E6E] truncate">{authorCard.subtitle}</p>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-
-          {/* Profile */}
-          <Link href="/dashboard/profile">
-            <Card className="bg-white border border-[#E2E6DF] hover:border-[#0F3D3E]/40 hover:shadow-md transition-all rounded-xl cursor-pointer group">
-              <CardContent className="p-5 flex items-center gap-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#F0F2ED] text-[#0F3D3E] group-hover:scale-105 transition-transform">
-                  <User className="h-5 w-5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-serif font-bold text-sm text-[#0F3D3E]">Profile</h4>
-                  <p className="text-xs text-[#5C6E6E] truncate">Account settings</p>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-
-          {/* Payment History */}
-          <Link href="/dashboard/payments">
-            <Card className="bg-white border border-[#E2E6DF] hover:border-[#0F3D3E]/40 hover:shadow-md transition-all rounded-xl cursor-pointer group">
-              <CardContent className="p-5 flex items-center gap-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 group-hover:scale-105 transition-transform">
-                  <CreditCard className="h-5 w-5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-serif font-bold text-sm text-[#0F3D3E]">Payment History</h4>
-                  <p className="text-xs text-[#5C6E6E] truncate">Invoices & UTR records</p>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-        </div>
-      </div>
+      {pendingOrder && (
+        <section className="space-y-2 rounded-xl border border-secondary bg-secondary/10 p-4" aria-labelledby="pending-payment">
+          <h2 id="pending-payment" className="font-serif text-lg font-semibold">Complete your payment</h2>
+          {pendingOrder.orderNumber && <p className="text-sm">Order {pendingOrder.orderNumber} is awaiting payment.</p>}
+          <Button asChild><Link href={`/dashboard/orders?orderId=${encodeURIComponent(pendingOrder._id || pendingOrder.id)}`}>View payment instructions</Link></Button>
+        </section>
+      )}
 
       {/* 4. Recent Orders & Recommended Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -304,7 +167,7 @@ export default function DashboardPage() {
                   return (
                     <div
                       key={orderId}
-                      className="flex items-center justify-between p-3.5 rounded-xl border border-[#E2E6DF] bg-white hover:bg-[#F8F9F7] transition-colors"
+                      className="flex flex-wrap items-center justify-between gap-2 p-3.5 rounded-xl border border-[#E2E6DF] bg-white hover:bg-[#F8F9F7] transition-colors"
                     >
                       <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#F0F2ED] text-[#0F3D3E]">
@@ -350,7 +213,7 @@ export default function DashboardPage() {
         <Card className="bg-white border border-[#E2E6DF] shadow-sm rounded-2xl overflow-hidden">
           <CardHeader className="p-5 sm:p-6 bg-[#F8F9F7] border-b border-[#E2E6DF] flex flex-row items-center justify-between">
             <CardTitle className="text-lg font-serif font-bold text-[#0F3D3E]">
-              Recommended for You
+              Browse the Catalog
             </CardTitle>
             <Button variant="ghost" size="sm" asChild className="text-xs font-semibold text-[#0F3D3E]">
               <Link href="/books" className="gap-1">
@@ -396,7 +259,7 @@ export default function DashboardPage() {
             ) : (
               <div className="text-center py-8 space-y-3">
                 <BookOpen className="h-10 w-10 text-[#5C6E6E]/40 mx-auto" />
-                <p className="text-sm font-medium text-[#0F3D3E]">No recommendations loaded</p>
+                <p className="text-sm font-medium text-[#0F3D3E]">Books unavailable</p>
                 <Button asChild size="sm" variant="outline">
                   <Link href="/books">Browse All Books</Link>
                 </Button>

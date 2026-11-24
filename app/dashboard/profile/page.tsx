@@ -2,19 +2,18 @@
 
 import { describeApiError } from "@/lib/api-error";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   User,
   Mail,
   Phone,
   MapPin,
-  Camera,
+  Pencil,
   Save,
   Loader2,
   Calendar,
   ShoppingBag,
-  ShieldCheck,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -37,6 +36,8 @@ import {
 export default function ProfilePage() {
   const { user, setUser } = useAuthStore();
   const [isLoading, setIsLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const pending = useRef(false);
   const [isFetching, setIsFetching] = useState(true);
   const [error, setError] = useState(false);
   const [totalOrders, setTotalOrders] = useState<number | null>(null);
@@ -52,6 +53,16 @@ export default function ProfilePage() {
     state: "",
     pincode: "",
   });
+
+  const [original, setOriginal] = useState(formData);
+  const profileChanged = formData.name.trim() !== original.name.trim() || formData.bio.trim() !== original.bio.trim();
+  const addressChanged = (["phone", "address", "city", "state", "pincode"] as const).some(
+    (key) => formData[key].trim() !== original[key].trim()
+  );
+  const addressValid = !addressChanged || Boolean(formData.address.trim() && formData.city.trim() && formData.pincode.trim());
+  const phoneValid = !formData.phone.trim() || /^\+?\d{7,15}$/.test(formData.phone.replace(/[\s()-]/g, ""));
+  const pinValid = !addressChanged || !/^(india|in)$/i.test(getDefaultAddress(savedAddresses)?.country || "India") || /^[1-9]\d{5}$/.test(formData.pincode.trim());
+  const canSave = Boolean(formData.name.trim() && addressValid && phoneValid && pinValid && (profileChanged || addressChanged));
 
   const fetchProfile = useCallback(async () => {
     setIsFetching(true);
@@ -77,7 +88,7 @@ export default function ProfilePage() {
       if (res.status === "fulfilled") {
         const userData = res.value.data?.data?.user || res.value.data?.data || res.value.data?.user || res.value.data;
         if (userData) {
-          setFormData({
+          const values = {
             name: userData.name || user?.name || "",
             email: userData.email || user?.email || "",
             phone: saved?.phone || userData.phone || "",
@@ -86,7 +97,9 @@ export default function ProfilePage() {
             city: saved?.city || userData.city || "",
             state: saved?.state || userData.state || "",
             pincode: saved?.postalCode || userData.pincode || "",
-          });
+          };
+          setOriginal(values);
+          setFormData(values);
         }
       } else if (user) {
         setFormData((prev) => ({
@@ -120,53 +133,64 @@ export default function ProfilePage() {
   };
 
   const handleReset = () => {
-    fetchProfile();
-    toast.success("Changes reset to original profile details.");
+    setFormData(original);
+    setEditing(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const userId = user?._id || user?.id;
-
-    if (!formData.name.trim()) {
-      toast.error("Please enter your name.");
-      return;
-    }
-
+    if (!editing || pending.current || !canSave || !userId) return;
+    pending.current = true;
     setIsLoading(true);
+    let partial = false;
     try {
-      // Backend UserUpdateRequest only accepts name, bio and profilePicture.
-      await api.put(`/users/${userId}`, { name: formData.name.trim(), bio: formData.bio });
-      if (user) setUser({ ...user, name: formData.name.trim() });
-
-      // An address is saved only when the backend's required fields are present.
-      const hasAddress = formData.address.trim() && formData.city.trim() && formData.pincode.trim();
-      const defaultAddress = getDefaultAddress(savedAddresses);
-      const nextAddresses = hasAddress
-        ? withDefaultAddress(savedAddresses, {
-            _id: defaultAddress?._id,
-            label: defaultAddress?.label || "Home",
-            fullName: formData.name,
-            email: formData.email,
-            phone: formData.phone,
-            addressLine1: formData.address,
-            addressLine2: defaultAddress?.addressLine2,
-            city: formData.city,
-            state: formData.state,
-            postalCode: formData.pincode,
-            country: defaultAddress?.country || "India",
-          })
-        : null;
-      if (nextAddresses) setSavedAddresses(await saveAddresses(nextAddresses));
-
-      toast.success(
-        nextAddresses ? "Profile and default delivery address saved. Checkout will use this address." : "Profile saved."
-      );
-    } catch (caughtError) {
-      const err = describeApiError(caughtError);
-      console.error("Failed to update profile", describeApiError(err));
-      toast.error(err.response?.data?.message || "Failed to update profile. Please try again.");
+      if (profileChanged) {
+        const name = formData.name.trim();
+        const bio = formData.bio.trim();
+        await api.put(`/users/${userId}`, { name, bio });
+        const { data } = await api.get("/users/me", { cache: "no-store" });
+        const result = data?.data?.user || data?.data || data?.user || data;
+        if (result?.name !== name || (result?.bio || "") !== bio) throw new Error("Profile changes could not be verified.");
+        setOriginal((previous) => ({ ...previous, name, bio }));
+        partial = true;
+      }
+      if (addressChanged) {
+        const current = await fetchSavedAddresses();
+        const saved = getDefaultAddress(current);
+        const shipping = {
+          _id: saved?._id,
+          label: saved?.label || "Home",
+          fullName: formData.name.trim(),
+          email: formData.email,
+          phone: formData.phone.trim(),
+          addressLine1: formData.address.trim(),
+          addressLine2: saved?.addressLine2,
+          city: formData.city.trim(),
+          state: formData.state.trim(),
+          postalCode: formData.pincode.trim(),
+          country: saved?.country || "India",
+        };
+        const next = withDefaultAddress(current, shipping);
+        const confirmed = next ? await saveAddresses(next) : current;
+        const result = getDefaultAddress(confirmed);
+        if (!result || result.addressLine1 !== shipping.addressLine1 || result.city !== shipping.city ||
+          (result.state || "") !== shipping.state || result.postalCode !== shipping.postalCode || (result.phone || "") !== shipping.phone) {
+          throw new Error("Default delivery address could not be verified.");
+        }
+        setSavedAddresses(confirmed);
+      }
+      setOriginal(formData);
+      setEditing(false);
+      if (user && profileChanged) setUser({ ...user, name: formData.name.trim() });
+      toast.success("Profile changes saved.");
+    } catch (cause) {
+      const failure = describeApiError(cause);
+      toast.error(partial
+        ? "Your personal details were saved. Your delivery address could not be confirmed. Try saving the address again."
+        : failure.response?.data?.message || failure.message);
     } finally {
+      pending.current = false;
       setIsLoading(false);
     }
   };
@@ -193,7 +217,7 @@ export default function ProfilePage() {
 
   const joinedYear = (user as any)?.createdAt
     ? new Date((user as any).createdAt).getFullYear()
-    : new Date().getFullYear();
+    : null;
 
   return (
     <div className="space-y-8 max-w-6xl mx-auto pb-12">
@@ -208,30 +232,7 @@ export default function ProfilePage() {
           </p>
         </div>
 
-        {/* Primary Action CTA (Header Quick Bar) */}
-        <div className="flex items-center gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={handleReset}
-            className="border-[#E2E6DF] text-[#0F3D3E] hover:bg-[#F0F2ED] h-11 px-5 rounded-xl text-xs font-medium"
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={handleSubmit}
-            disabled={isLoading}
-            className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-medium h-11 px-6 rounded-xl shadow-xs text-xs gap-2"
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4 text-[#D4AF37]" />
-            )}
-            <span>Save Changes</span>
-          </Button>
-        </div>
+        {!editing && <Button type="button" variant="outline" onClick={() => setEditing(true)}><Pencil aria-hidden="true" />Edit profile</Button>}
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-8">
@@ -242,7 +243,7 @@ export default function ProfilePage() {
             animate={{ opacity: 1, y: 0 }}
             className="lg:col-span-1"
           >
-            <Card className="bg-white border border-[#E2E6DF] shadow-sm hover:shadow-md transition-all rounded-2xl overflow-hidden sticky top-24">
+            <Card className="bg-white border border-[#E2E6DF] shadow-sm hover:shadow-md transition-all rounded-2xl overflow-hidden ">
               <div className="h-24 bg-gradient-to-r from-[#0F3D3E] to-[#174C4D] relative">
                 <div className="absolute top-2 right-2">
                   <Badge className="bg-[#D4AF37] text-[#0F3D3E] font-bold text-[10px] uppercase tracking-wider shadow-xs">
@@ -256,21 +257,15 @@ export default function ProfilePage() {
                   <div className="h-24 w-24 rounded-2xl bg-[#0F3D3E] border-4 border-white text-white flex items-center justify-center font-serif font-bold text-3xl shadow-md">
                     {formData.name ? formData.name.charAt(0).toUpperCase() : "R"}
                   </div>
-                  <Button
-                    type="button"
-                    size="icon"
-                    className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full bg-[#D4AF37] text-[#0F3D3E] shadow-sm hover:scale-105 transition-transform"
-                  >
-                    <Camera className="h-3.5 w-3.5" />
-                  </Button>
+
                 </div>
 
                 <div>
                   <h3 className="font-serif font-bold text-xl text-[#0F3D3E]">
-                    {formData.name || "Reader Name"}
+                    {formData.name}
                   </h3>
                   <p className="text-xs text-[#5C6E6E] font-sans mt-0.5 truncate max-w-[200px]">
-                    {formData.email || "reader@harglim.com"}
+                    {formData.email}
                   </p>
                 </div>
 
@@ -282,7 +277,7 @@ export default function ProfilePage() {
                       Joined
                     </p>
                     <p className="font-serif font-bold text-sm text-[#0F3D3E] mt-1">
-                      {joinedYear}
+                      {joinedYear ?? "Unavailable"}
                     </p>
                   </div>
                   <div className="p-3 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF] text-center">
@@ -296,15 +291,6 @@ export default function ProfilePage() {
                   </div>
                 </div>
 
-                <div className="w-full pt-2">
-                  <div className="p-3 rounded-xl bg-[#D4AF37]/10 border border-[#D4AF37]/30 text-left flex items-center gap-3">
-                    <ShieldCheck className="h-5 w-5 text-[#0F3D3E] shrink-0" />
-                    <div>
-                      <p className="text-xs font-bold text-[#0F3D3E]">Verified Account</p>
-                      <p className="text-[11px] text-[#5C6E6E]">Harglim Reader Privileges Active</p>
-                    </div>
-                  </div>
-                </div>
               </CardContent>
             </Card>
           </motion.div>
@@ -334,6 +320,7 @@ export default function ProfilePage() {
                         id="name"
                         name="name"
                         value={formData.name}
+                        readOnly={!editing || isLoading}
                         onChange={handleChange}
                         className="bg-white border-[#E2E6DF] rounded-xl h-11 focus:ring-2 focus:ring-[#D4AF37]/50 focus:border-[#0F3D3E] text-sm"
                         placeholder="Your full legal name"
@@ -350,7 +337,7 @@ export default function ProfilePage() {
                           name="email"
                           type="email"
                           value={formData.email}
-                          onChange={handleChange}
+                          readOnly
                           className="pl-10 bg-white border-[#E2E6DF] rounded-xl h-11 focus:ring-2 focus:ring-[#D4AF37]/50 focus:border-[#0F3D3E] text-sm"
                           placeholder="your.email@example.com"
                         />
@@ -367,7 +354,9 @@ export default function ProfilePage() {
                       <Input
                         id="phone"
                         name="phone"
+                        type="tel"
                         value={formData.phone}
+                        readOnly={!editing || isLoading}
                         onChange={handleChange}
                         className="pl-10 bg-white border-[#E2E6DF] rounded-xl h-11 focus:ring-2 focus:ring-[#D4AF37]/50 focus:border-[#0F3D3E] text-sm"
                         placeholder="e.g. +91 9876543210"
@@ -383,7 +372,8 @@ export default function ProfilePage() {
                       id="bio"
                       name="bio"
                       value={formData.bio}
-                      onChange={handleChange}
+                      readOnly={!editing || isLoading}
+                        onChange={handleChange}
                       rows={3}
                       className="bg-white border-[#E2E6DF] rounded-xl focus:ring-2 focus:ring-[#D4AF37]/50 focus:border-[#0F3D3E] text-sm p-3"
                       placeholder="Share a brief intro or your favorite book genres..."
@@ -415,7 +405,8 @@ export default function ProfilePage() {
                       id="address"
                       name="address"
                       value={formData.address}
-                      onChange={handleChange}
+                      readOnly={!editing || isLoading}
+                        onChange={handleChange}
                       className="bg-white border-[#E2E6DF] rounded-xl h-11 focus:ring-2 focus:ring-[#D4AF37]/50 focus:border-[#0F3D3E] text-sm"
                       placeholder="e.g. House No. 42, Green Park Avenue"
                     />
@@ -430,6 +421,7 @@ export default function ProfilePage() {
                         id="city"
                         name="city"
                         value={formData.city}
+                        readOnly={!editing || isLoading}
                         onChange={handleChange}
                         className="bg-white border-[#E2E6DF] rounded-xl h-11 focus:ring-2 focus:ring-[#D4AF37]/50 focus:border-[#0F3D3E] text-sm"
                         placeholder="e.g. New Delhi"
@@ -443,6 +435,7 @@ export default function ProfilePage() {
                         id="state"
                         name="state"
                         value={formData.state}
+                        readOnly={!editing || isLoading}
                         onChange={handleChange}
                         className="bg-white border-[#E2E6DF] rounded-xl h-11 focus:ring-2 focus:ring-[#D4AF37]/50 focus:border-[#0F3D3E] text-sm"
                         placeholder="e.g. Delhi"
@@ -456,6 +449,7 @@ export default function ProfilePage() {
                         id="pincode"
                         name="pincode"
                         value={formData.pincode}
+                        readOnly={!editing || isLoading}
                         onChange={handleChange}
                         className="bg-white border-[#E2E6DF] rounded-xl h-11 focus:ring-2 focus:ring-[#D4AF37]/50 focus:border-[#0F3D3E] text-sm font-mono"
                         placeholder="e.g. 110001"
@@ -467,18 +461,23 @@ export default function ProfilePage() {
             </motion.div>
 
             {/* Bottom Save Action Bar */}
-            <div className="flex items-center justify-end gap-3 pt-4 border-t border-[#E2E6DF]">
+            {editing && <>
+              {!addressValid && <p className="text-sm text-muted-foreground">Enter the street, city, and postal code to update your delivery address.</p>}
+              {!phoneValid && <p className="text-sm text-red-700">Enter a valid phone number.</p>}
+              {!pinValid && addressValid && <p className="text-sm text-red-700">Enter a valid six-digit PIN code for India.</p>}
+              <div className="flex flex-wrap items-center justify-end gap-3 border-t pt-4">
               <Button
                 type="button"
                 variant="outline"
                 onClick={handleReset}
+                disabled={isLoading}
                 className="border-[#E2E6DF] text-[#0F3D3E] hover:bg-[#F0F2ED] h-11 px-6 rounded-xl text-xs font-medium"
               >
                 Cancel
               </Button>
               <Button
                 type="submit"
-                disabled={isLoading}
+                disabled={isLoading || !canSave}
                 className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-medium h-11 px-8 rounded-xl shadow-xs text-xs gap-2"
               >
                 {isLoading ? (
@@ -486,9 +485,9 @@ export default function ProfilePage() {
                 ) : (
                   <Save className="h-4 w-4 text-[#D4AF37]" />
                 )}
-                <span>Save Profile Changes</span>
+                <span>Save changes</span>
               </Button>
-            </div>
+            </div></>}
           </div>
         </div>
       </form>

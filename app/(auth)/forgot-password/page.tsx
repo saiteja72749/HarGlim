@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Mail, ArrowLeft, CheckCircle2, KeyRound } from "lucide-react";
-import Image from "next/image";
+import Image from '@/components/ui/backend-image';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

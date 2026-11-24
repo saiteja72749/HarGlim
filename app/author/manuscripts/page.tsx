@@ -2,10 +2,9 @@
 
 import { describeApiError } from "@/lib/api-error";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import api from "@/lib/api";
-import { extractList } from "@/lib/tracking";
 import { motion } from "framer-motion";
 import {
   FileText,
@@ -27,7 +26,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Progress } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -56,7 +54,10 @@ import {
 } from "@/components/ui/dialog";
 import { getSafeExternalUrl } from "@/lib/utils";
 import toast from "react-hot-toast";
+import { ErrorState } from "@/components/ui/error-state";
 import { getAuthorBookStage, type AuthorBookStage as Stage } from "@/lib/author-book-status";
+import { fetchPublicPackages } from "@/lib/publish-packages";
+import { submitAuthorManuscript, uploadAuthorManuscript } from "@/lib/author-manuscript";
 import { fetchAuthorBooks } from "@/lib/author-books";
 
 /**
@@ -64,14 +65,14 @@ import { fetchAuthorBooks } from "@/lib/author-books";
  *   draft (no request) -> SUBMITTED (PENDING) -> UNDER_REVIEW -> CHANGES_REQUESTED / REJECTED -> PUBLISHED
  */
 
-const STAGES: Record<Stage, { label: string; progress: number; tone: string; icon: typeof Clock }> = {
-  draft: { label: "Draft", progress: 10, tone: "bg-muted text-muted-foreground", icon: Edit2 },
-  submitted: { label: "Submitted", progress: 35, tone: "bg-blue-500/10 text-blue-700", icon: Clock },
-  under_review: { label: "Under Review", progress: 65, tone: "bg-amber-500/10 text-amber-700", icon: Clock },
-  changes_requested: { label: "Changes Requested", progress: 50, tone: "bg-orange-500/10 text-orange-700", icon: AlertCircle },
-  rejected: { label: "Rejected", progress: 100, tone: "bg-red-500/10 text-red-700", icon: AlertCircle },
-  published: { label: "Published", progress: 100, tone: "bg-emerald-500/10 text-emerald-700", icon: CheckCircle },
-  archived: { label: "Archived", progress: 100, tone: "bg-muted text-muted-foreground", icon: FileText },
+const STAGES: Record<Stage, { label: string; tone: string; icon: typeof Clock }> = {
+  draft: { label: "Draft", tone: "bg-muted text-muted-foreground", icon: Edit2 },
+  submitted: { label: "Submitted", tone: "bg-blue-500/10 text-blue-700", icon: Clock },
+  under_review: { label: "Under Review", tone: "bg-amber-500/10 text-amber-700", icon: Clock },
+  changes_requested: { label: "Changes Requested", tone: "bg-orange-500/10 text-orange-700", icon: AlertCircle },
+  rejected: { label: "Rejected", tone: "bg-red-500/10 text-red-700", icon: AlertCircle },
+  published: { label: "Published", tone: "bg-emerald-500/10 text-emerald-700", icon: CheckCircle },
+  archived: { label: "Archived", tone: "bg-muted text-muted-foreground", icon: FileText },
 };
 
 const getRequest = (m: any) => m.publishRequest || m.latestPublishRequest || m.submission || m.review || {};
@@ -85,11 +86,12 @@ const toItem = (m: any) => {
     slug: m.slug,
     title: m.title || "Untitled Manuscript",
     // category can be a populated object; never render it directly.
-    category: text(request.genre) || text(m.genre) || text(m.category) || "General",
+    category: text(request.genre) || text(m.genre) || text(m.category) || "Category unavailable",
     wordCount: Number(request.wordCount || m.wordCount || 0) || 0,
     fileUrl: getSafeExternalUrl(request.fileUrl || m.fileUrl || m.manuscriptUrl || ""),
     packageId: String(request.package?._id || request.package || request.packageId || ""),
-    date: m.submittedAt || request.createdAt || m.updatedAt || m.createdAt || null,
+    submittedAt: m.submittedAt || request.createdAt || null,
+    updatedAt: request.updatedAt || m.updatedAt || null,
     stage: getAuthorBookStage(m),
     // Only plain text is rendered; a populated/object field here would crash React (error #31).
     feedback:
@@ -107,15 +109,18 @@ export default function ManuscriptsPage() {
   const [statusFilter, setStatusFilter] = useState<"all" | Stage>("all");
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
+  const [listPage, setListPage] = useState(1);
+  const [loadError, setLoadError] = useState(false);
   const [submitTarget, setSubmitTarget] = useState<Item | null>(null);
 
   const fetchManuscripts = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       setItems((await fetchAuthorBooks()).map(toItem));
     } catch (err) {
       console.warn("Failed to fetch manuscripts from API:", describeApiError(err));
-      toast.error("Could not load your manuscripts. Please refresh.");
+      setLoadError(true);
       setItems([]);
     } finally {
       setLoading(false);
@@ -132,6 +137,10 @@ export default function ManuscriptsPage() {
     return matchesSearch && matchesStatus;
   });
 
+  const pageSize = 12;
+  const totalPages = Math.max(1, Math.ceil(filteredManuscripts.length / pageSize));
+  const visiblePage = Math.min(listPage, totalPages);
+  const visibleManuscripts = filteredManuscripts.slice((visiblePage - 1) * pageSize, visiblePage * pageSize);
   const countOf = (...stages: Stage[]) => items.filter((m) => stages.includes(m.stage)).length;
 
   const handleDelete = async (id: string) => {
@@ -180,11 +189,11 @@ export default function ManuscriptsPage() {
               <Input
                 placeholder="Search manuscripts..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => { setListPage(1); setSearchQuery(e.target.value); }}
                 className="pl-9"
               />
             </div>
-            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "all" | Stage)}>
+            <Select value={statusFilter} onValueChange={(v) => { setListPage(1); setStatusFilter(v as "all" | Stage); }}>
               <SelectTrigger className="w-full sm:w-52">
                 <Filter className="mr-2 h-4 w-4" />
                 <SelectValue placeholder="Filter by status" />
@@ -209,7 +218,7 @@ export default function ManuscriptsPage() {
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          filteredManuscripts.map((manuscript, index) => {
+          visibleManuscripts.map((manuscript, index) => {
             const stage = STAGES[manuscript.stage];
             const StatusIcon = stage.icon;
             const canSubmit = manuscript.stage === "draft" || manuscript.stage === "changes_requested";
@@ -227,7 +236,7 @@ export default function ManuscriptsPage() {
                       <div className="flex-1 space-y-3 min-w-0">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <h3 className="font-semibold text-lg truncate">{manuscript.title}</h3>
+                            <h3 className="font-semibold text-lg [overflow-wrap:anywhere]">{manuscript.title}</h3>
                             <div className="flex items-center gap-2 mt-1 flex-wrap">
                               <Badge variant="outline">{manuscript.category}</Badge>
                               {manuscript.wordCount > 0 && (
@@ -243,13 +252,9 @@ export default function ManuscriptsPage() {
                           </Badge>
                         </div>
 
-                        <div>
-                          <div className="flex items-center justify-between text-sm mb-1">
-                            <span className="text-muted-foreground">Review Progress</span>
-                            <span className="font-medium">{stage.progress}%</span>
-                          </div>
-                          <Progress value={stage.progress} className="h-2" />
-                        </div>
+                        {["changes_requested", "rejected"].includes(manuscript.stage) && (
+                          <p className="text-sm font-medium text-amber-800">Action required</p>
+                        )}
 
                         {manuscript.feedback && (
                           <div className="rounded-lg bg-muted/50 p-3">
@@ -264,11 +269,10 @@ export default function ManuscriptsPage() {
                           </p>
                         )}
 
-                        {manuscript.date && (
-                          <p className="text-sm text-muted-foreground">
-                            Last updated {new Date(manuscript.date).toLocaleDateString("en-IN")}
-                          </p>
-                        )}
+                        <dl className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground">
+                          {manuscript.submittedAt && <div><dt className="inline font-medium">Submitted </dt><dd className="inline">{new Date(manuscript.submittedAt).toLocaleDateString("en-IN")}</dd></div>}
+                          {manuscript.updatedAt && <div><dt className="inline font-medium">Last updated </dt><dd className="inline">{new Date(manuscript.updatedAt).toLocaleDateString("en-IN")}</dd></div>}
+                        </dl>
                       </div>
 
                       {/* Actions */}
@@ -332,7 +336,8 @@ export default function ManuscriptsPage() {
           })
         )}
 
-        {!loading && filteredManuscripts.length === 0 && (
+        {!loading && loadError && <ErrorState title="Manuscripts could not load" onRetry={fetchManuscripts} />}
+        {!loading && !loadError && filteredManuscripts.length === 0 && (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-12">
               <FileText className="h-12 w-12 text-muted-foreground mb-4" />
@@ -349,6 +354,12 @@ export default function ManuscriptsPage() {
           </Card>
         )}
       </div>
+
+      {totalPages > 1 && <nav aria-label="Manuscript pages" className="flex flex-wrap items-center justify-center gap-3">
+        <Button variant="outline" disabled={visiblePage <= 1} onClick={() => setListPage(visiblePage - 1)}>Previous</Button>
+        <span className="text-sm">Page {visiblePage} of {totalPages}</span>
+        <Button variant="outline" disabled={visiblePage >= totalPages} onClick={() => setListPage(visiblePage + 1)}>Next</Button>
+      </nav>}
 
       <SubmitForReviewDialog
         item={submitTarget}
@@ -393,29 +404,30 @@ function SubmitForReviewDialog({
   const [wordCount, setWordCount] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const pending = useRef(false);
+  const [uploadPercent, setUploadPercent] = useState<number | null>(null);
 
   useEffect(() => {
     if (!item) return;
     setWordCount(item.wordCount ? String(item.wordCount) : "");
     setFile(null);
-    api
-      .get("/publish-packages")
-      .then(({ data }) => {
-        const list = extractList(data, "packages").filter((p: any) => p.isActive !== false);
+    fetchPublicPackages()
+      .then((list) => {
         setPackages(list);
-        setPackageId(String(item.packageId || list[0]?._id || ""));
+        setPackageId(list.some((p) => p._id === item.packageId) ? item.packageId : "");
       })
       .catch(() => setPackages([]));
   }, [item]);
 
   const handleSubmit = async () => {
     if (!item) return;
-    const words = Math.floor(Number(wordCount));
-    if (!Number.isFinite(words) || words < 1) {
+    if (pending.current) return;
+    const words = wordCount.trim() ? Number(wordCount) : undefined;
+    if (words !== undefined && (!Number.isSafeInteger(words) || words < 1)) {
       toast.error("Please enter the word count.");
       return;
     }
-    if (!packageId) {
+    if (!packages.some((entry) => entry._id === packageId)) {
       toast.error("Please choose a publishing package.");
       return;
     }
@@ -424,18 +436,12 @@ function SubmitForReviewDialog({
       return;
     }
 
+    pending.current = true;
     setSubmitting(true);
+    setUploadPercent(null);
     try {
-      let fileUrl = item.fileUrl || "";
-      if (file) {
-        const form = new FormData();
-        form.append("document", file);
-        const { data } = await api.post("/authors/me/uploads/document", form);
-        fileUrl = data?.data?.url || data?.url || data?.data?.fileUrl || "";
-        if (!fileUrl) throw new Error("Upload finished but no file URL was returned.");
-      }
-
-      await api.post(`/authors/me/books/${item.id}/submit`, {
+      const fileUrl = file ? await uploadAuthorManuscript(file, setUploadPercent) : item.fileUrl;
+      await submitAuthorManuscript(item.id, {
         fileUrl,
         genre: item.category,
         wordCount: words,
@@ -447,13 +453,14 @@ function SubmitForReviewDialog({
       const err = describeApiError(caughtError);
       toast.error(err?.response?.data?.message || err?.message || "Could not submit for review.");
     } finally {
+      pending.current = false;
       setSubmitting(false);
     }
   };
 
   return (
     <Dialog open={Boolean(item)} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" aria-busy={submitting}>
         <DialogHeader>
           <DialogTitle>{item?.stage === "changes_requested" ? "Revise & Resubmit" : "Submit for Review"}</DialogTitle>
           <DialogDescription>
@@ -518,6 +525,7 @@ function SubmitForReviewDialog({
           </div>
         </div>
 
+        {submitting && uploadPercent !== null && <p role="status" className="text-sm">File upload {uploadPercent}%</p>}
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={submitting}>
             Cancel

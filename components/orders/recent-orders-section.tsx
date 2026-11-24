@@ -3,7 +3,7 @@ import { describeApiError } from "@/lib/api-error";
 
 
 import { useEffect, useState } from "react";
-import Image from "next/image";
+import Image from '@/components/ui/backend-image';
 import Link from "next/link";
 import { Package, Truck, Clock, CheckCircle2, ChevronRight, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";

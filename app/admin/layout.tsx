@@ -30,7 +30,7 @@ import {
   Feather,
   PackageCheck,
 } from "lucide-react";
-import Image from "next/image";
+import Image from '@/components/ui/backend-image';
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth-store";
@@ -225,13 +225,14 @@ export default function AdminLayout({
         </aside>
 
         {/* Main Content Area */}
-        <div className="lg:pl-64 flex-1 flex flex-col min-h-screen">
+        <div className="lg:pl-64 min-w-0 flex-1 flex flex-col min-h-screen">
           {/* Top Admin Header Bar */}
           <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-[#E2E6DF] bg-white px-4 sm:px-8 shadow-xs">
             <div className="flex items-center gap-3">
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="Open admin navigation"
                 onClick={() => setSidebarOpen(true)}
                 className="text-[#0F3D3E] lg:hidden"
               >
@@ -263,7 +264,7 @@ export default function AdminLayout({
           </header>
 
           {/* Main Workspace View */}
-          <main className="p-4 sm:p-6 lg:p-8 flex-1 max-w-7xl w-full mx-auto">{children}</main>
+          <div className="min-w-0 p-4 sm:p-6 lg:p-8 flex-1 max-w-7xl w-full mx-auto">{children}</div>
         </div>
       </div>
     </AuthGuard>

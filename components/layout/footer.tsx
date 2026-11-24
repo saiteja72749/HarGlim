@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
+import Image from '@/components/ui/backend-image';
 import logo from "@/public/logo.png";
 import { usePathname } from "next/navigation";
 import {
@@ -14,19 +14,18 @@ import {
   MapPin,
 } from "lucide-react";
 import { getSafeExternalUrl } from "@/lib/utils";
+import { readSection } from "@/lib/page-content";
 
 const footerLinks = {
   company: [
     { label: "About Us", href: "/about" },
-    { label: "Our Team", href: "/about#team" },
     { label: "Careers", href: "/careers" },
     { label: "Contact", href: "/contact" },
   ],
   forReaders: [
     { label: "Browse Books", href: "/books" },
-    { label: "Categories", href: "/categories" },
-    { label: "Bestsellers", href: "/books?sort=bestseller" },
-    { label: "New Releases", href: "/books?sort=new" },
+    { label: "Bestsellers", href: "/books?tag=bestseller" },
+    { label: "New Releases", href: "/books?tag=newRelease" },
   ],
   forAuthors: [
     { label: "Publish with Us", href: "/publish" },
@@ -49,6 +48,8 @@ import { useSiteContent } from "@/context/site-content-context";
 export function Footer() {
   const pathname = usePathname();
   const { content } = useSiteContent();
+  const companyLinks = [...footerLinks.company];
+  if (readSection(content, "aboutTeamJson").length) companyLinks.splice(1, 0, { label: "Our Team", href: "/about#team" });
 
   const dynamicSocial = [
     { icon: Facebook, href: content.socialFacebook, label: "Facebook" },
@@ -57,17 +58,17 @@ export function Footer() {
     { icon: Linkedin, href: content.socialLinkedin, label: "LinkedIn" },
   ].filter((social) => getSafeExternalUrl(social.href));
   
-  // Only keep footer ("bottom details") for the home page screen
-  if (pathname !== "/") return null;
+  const privatePage = pathname?.startsWith('/admin') || pathname === '/author' || pathname?.startsWith('/author/') || pathname?.startsWith('/dashboard') || pathname?.startsWith('/checkout') || ['/login', '/register', '/forgot-password'].includes(pathname ?? '') || pathname?.startsWith('/reset-password');
+  if (privatePage) return null;
 
   return (
-    <footer className="bg-black text-white">
+    <footer className="min-w-0 bg-[#0F3D3E] text-white [overflow-wrap:anywhere]">
       {/* Main Footer */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-8">
           {/* Brand */}
           <div className="col-span-2 md:col-span-3 lg:col-span-2">
-            <Link href="/" className="flex items-center gap-2 mb-4">
+            <Link href="/" className="flex min-w-0 flex-wrap items-center gap-2 mb-4">
               <Image
                 src={logo}
                 alt="Harglim Publishers"
@@ -102,7 +103,7 @@ export function Footer() {
           <div>
             <h4 className="font-semibold mb-4">Company</h4>
             <ul className="space-y-2">
-              {footerLinks.company.map((link) => (
+              {companyLinks.map((link) => (
                 <li key={link.href}>
                   <Link
                     href={link.href}

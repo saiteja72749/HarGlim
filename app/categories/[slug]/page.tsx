@@ -7,7 +7,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { ChevronRight, BookOpen } from 'lucide-react';
-import { BookCard } from '@/components/books/book-card';
+import { CompactBookCard } from '@/components/books/book-card';
 import {
   Select,
   SelectContent,
@@ -41,7 +41,6 @@ export default function CategoryDetailPage() {
         let sortParam = "newest";
         if (sortBy === "price-low") sortParam = "price_asc";
         else if (sortBy === "price-high") sortParam = "price_desc";
-        else if (sortBy === "rating") sortParam = "rating";
         else if (sortBy === "bestseller") sortParam = "bestseller";
 
         const [catRes, booksRes] = await Promise.all([
@@ -147,7 +146,6 @@ export default function CategoryDetailPage() {
             <SelectContent>
               <SelectItem value="newest">Newest</SelectItem>
               <SelectItem value="bestseller">Bestsellers</SelectItem>
-              <SelectItem value="rating">Top Rated</SelectItem>
               <SelectItem value="price-low">Price: Low to High</SelectItem>
               <SelectItem value="price-high">Price: High to Low</SelectItem>
             </SelectContent>
@@ -162,7 +160,7 @@ export default function CategoryDetailPage() {
           className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6"
         >
           {books.map((book) => (
-            <BookCard key={book._id} book={book} />
+            <CompactBookCard key={book._id} book={book} />
           ))}
         </motion.div>
         {pages > 1 && <div className="flex items-center justify-center gap-4 mt-8">

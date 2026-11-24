@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { cache } from 'react';
 
 /** The backend answered 404: the record does not exist. */
 export const MISSING = 'missing' as const;
@@ -11,7 +12,7 @@ export const notFoundMetadata: Metadata = { title: { absolute: 'Page Not Found |
  * Returns MISSING on a backend 404 so the layout can call notFound() before anything streams,
  * and null on network or server errors so the page still renders and loads the data itself.
  */
-export async function fetchRecord<T = Record<string, unknown>>(path: string): Promise<T | null | typeof MISSING> {
+const readRecord = cache(async (path: string): Promise<Record<string, unknown> | null | typeof MISSING> => {
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
   const res = await fetch(`${API_URL}${path}`, { next: { revalidate: 300, tags: path === '/content' ? ['public-content'] : undefined }, signal: AbortSignal.timeout(15_000) }).catch(() => null);
   if (res?.status === 404) return MISSING;
@@ -19,8 +20,12 @@ export async function fetchRecord<T = Record<string, unknown>>(path: string): Pr
   try {
     const data = await res.json();
     const value: unknown = data?.data ?? data;
-    return value && typeof value === "object" && !Array.isArray(value) ? value as T : null;
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
   } catch {
     return null;
   }
+});
+
+export async function fetchRecord<T = Record<string, unknown>>(path: string): Promise<T | null | typeof MISSING> {
+  return await readRecord(path) as T | null | typeof MISSING;
 }

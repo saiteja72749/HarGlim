@@ -1,16 +1,5 @@
-import type { Metadata } from 'next';
+import { pageMetadata } from '@/lib/page-metadata';
 
-export const metadata: Metadata = {
-  title: 'Search Books',
-  description: 'Search books and authors in the Harglim Publishers catalog.',
-  robots: {
-    index: false,
-    follow: true,
-  },
-};
+export function generateMetadata() { return pageMetadata("/search", "Search Books", true); }
 
-export default function SearchLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
-  return children;
-}
+export default function Layout({ children }: { children: React.ReactNode }) { return children; }

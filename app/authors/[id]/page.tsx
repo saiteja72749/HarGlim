@@ -5,7 +5,7 @@ import { describeApiError } from "@/lib/api-error";
 import { useState, useEffect , useCallback} from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import Image from 'next/image';
+import Image from '@/components/ui/backend-image';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   BookOpen,
@@ -15,22 +15,20 @@ import {
   Linkedin,
   Facebook,
   Globe,
-  Star,
   Award,
   Share2,
   Sparkles,
   Search,
   Book as BookIcon,
-  MessageSquare,
   ArrowRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { BookCard } from '@/components/books/book-card';
+import { CompactBookCard } from '@/components/books/book-card';
 import { ErrorState } from '@/components/ui/error-state';
 import type { Author, Book } from '@/types';
-import api from '@/lib/api';
+import { getPublic } from '@/lib/api';
 import toast from 'react-hot-toast';
 import { getSafeExternalUrl } from '@/lib/utils';
 
@@ -58,8 +56,8 @@ export default function AuthorDetailPage() {
     try {
       // Public profile (_id, name, profilePicture, bio) and the author's own book list.
       const [authorRes, booksRes] = await Promise.all([
-        api.get(`/authors/${params.id}`).catch(() => null),
-        api.get(`/authors/${params.id}/books`, { params: { limit: 100 } }).catch(() => null),
+        getPublic(`/authors/${encodeURIComponent(String(params.id))}`).catch(() => null),
+        getPublic(`/authors/${encodeURIComponent(String(params.id))}/books`, { params: { limit: 100 } }).catch(() => null),
       ]);
       const extracted = authorRes?.data?.data || authorRes?.data;
       const authorData: Author | null =
@@ -97,16 +95,6 @@ export default function AuthorDetailPage() {
 
   // Helper calculation for author stats
   const totalBooksCount = author?.bookCount || books.length || 0;
-  const avgRating =
-    books.length > 0
-      ? (
-          books.reduce((acc, b) => acc + (b.rating || 0), 0) / books.length
-        ).toFixed(1)
-      : '0.0';
-  const totalReviewsCount = books.reduce(
-    (acc, b) => acc + (b.totalReviews || 0),
-    0
-  );
   const categoriesList = Array.from(
     new Set(
       books
@@ -265,7 +253,7 @@ export default function AuthorDetailPage() {
       {/* 2. STATS HIGHLIGHT BAR */}
       {/* ------------------------------------------------------------------ */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 relative z-20">
-        <div className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xl grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+        <div className="bg-white border border-[#E2E6DF] rounded-2xl p-6 shadow-xl grid grid-cols-2 gap-6 text-center">
           <div className="space-y-1">
             <div className="flex items-center justify-center gap-1.5 text-[#D4AF37]">
               <BookOpen className="h-5 w-5" />
@@ -278,29 +266,6 @@ export default function AuthorDetailPage() {
             </p>
           </div>
 
-          <div className="space-y-1 border-l border-[#E2E6DF]">
-            <div className="flex items-center justify-center gap-1.5 text-[#D4AF37]">
-              <Star className="h-5 w-5 fill-[#D4AF37]" />
-              <span className="text-2xl font-serif font-bold text-[#0F3D3E]">
-                {avgRating}
-              </span>
-            </div>
-            <p className="text-xs text-[#5C6E6E] font-medium uppercase tracking-wider">
-              Average Rating
-            </p>
-          </div>
-
-          <div className="space-y-1 border-l border-[#E2E6DF]">
-            <div className="flex items-center justify-center gap-1.5 text-[#D4AF37]">
-              <MessageSquare className="h-5 w-5" />
-              <span className="text-2xl font-serif font-bold text-[#0F3D3E]">
-                {totalReviewsCount}
-              </span>
-            </div>
-            <p className="text-xs text-[#5C6E6E] font-medium uppercase tracking-wider">
-              Reader Reviews
-            </p>
-          </div>
 
           <div className="space-y-1 border-l border-[#E2E6DF]">
             <div className="flex items-center justify-center gap-1.5 text-[#D4AF37]">
@@ -413,7 +378,7 @@ export default function AuthorDetailPage() {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                   {filteredBooks.map((book) => (
-                    <BookCard key={book._id} book={book} />
+                    <CompactBookCard key={book._id} book={book} />
                   ))}
                 </div>
               )}
