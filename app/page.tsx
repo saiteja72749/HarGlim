@@ -568,16 +568,16 @@ export default function Home() {
       {/* ------------------------------------------------------------------ */}
       {/* BOTTOM CTA BANNER (Admin → Site Content → Home: Bottom Banner) */}
       {/* ------------------------------------------------------------------ */}
-      <section className="py-16 sm:py-20 bg-gradient-to-b from-[#0B2E2F] via-[#0F3D3E] to-[#082223] text-white">
+      <section aria-labelledby="home-publish-heading" className="py-16 sm:py-20 bg-gradient-to-b from-[#0B2E2F] via-[#0F3D3E] to-[#082223] text-white">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-5">
-          <h2 className="text-3xl sm:text-4xl font-serif font-bold">{content.homeCtaHeading}</h2>
-          <p className="text-sm sm:text-base text-white/80 leading-relaxed">{content.homeCtaSubtitle}</p>
+          <h2 id="home-publish-heading" className="text-3xl sm:text-4xl font-serif font-bold">{content.homeCtaHeading?.trim() || "Ready to publish your book?"}</h2>
+          <p className="text-sm sm:text-base text-white/80 leading-relaxed">{content.homeCtaSubtitle?.trim() || "Explore our publishing packages and find out how to submit your manuscript."}</p>
           <Button
               size="lg"
-              className="bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold h-14 px-8 rounded-full gap-2 text-base"
-             asChild><Link href="/publish" className="inline-block pt-2">
-              <span>{content.homeCtaButtonText}</span>
-              <ArrowRight className="h-4 w-4" />
+              className="bg-[#D4AF37] hover:bg-[#C29F2F] text-[#0F3D3E] font-serif font-bold min-h-14 h-auto px-6 sm:px-8 py-3 rounded-full gap-2 text-base whitespace-normal"
+             asChild><Link href="/publish">
+              <span>{content.homeCtaButtonText?.trim() || "Publish with Us"}</span>
+              <ArrowRight aria-hidden="true" className="h-4 w-4" />
             </Link></Button>
         </div>
       </section>

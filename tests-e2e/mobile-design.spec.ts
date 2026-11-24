@@ -97,7 +97,7 @@ test('a live book detail page fits all requested viewports', async ({ page }) =>
   }
 });
 
-test('the homepage shelf loads live books and scrolls on demand', async ({ page, context }) => {
+test('the homepage carousel advances and keeps arrows and swipe available', async ({ page, context }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const response = page.waitForResponse((item) => {
     const url = new URL(item.url());
@@ -123,9 +123,27 @@ test('the homepage shelf loads live books and scrolls on demand', async ({ page,
   await page.setViewportSize({ width: 1280, height: 900 });
   const next = page.getByRole('button', { name: 'Next books', exact: true });
   if (await shelf.evaluate((node) => node.scrollWidth > node.clientWidth)) {
+    await shelf.scrollIntoViewIfNeeded();
+    const visibleSlides = await shelf.evaluate((node) => {
+      const viewport = node.getBoundingClientRect();
+      return [...node.children].filter((slide) => {
+        const box = slide.getBoundingClientRect();
+        return box.left >= viewport.left - 1 && box.right <= viewport.right + 1;
+      }).length;
+    });
+    expect(visibleSlides).toBe(3);
+    const previous = page.getByRole('button', { name: 'Previous books', exact: true });
+    const shelfBox = (await shelf.boundingBox())!;
+    expect((await previous.boundingBox())!.x).toBeLessThan(shelfBox.x);
+    expect((await next.boundingBox())!.x).toBeGreaterThan(shelfBox.x + shelfBox.width);
+    await page.mouse.move(0, 0);
+    await expect.poll(() => shelf.evaluate((node) => node.scrollLeft), { timeout: 10_000 }).toBeGreaterThan(4);
+    await page.getByRole('button', { name: 'Pause book carousel' }).click();
+    await expect(page.getByRole('button', { name: 'Resume book carousel' })).toBeVisible();
+    await shelf.evaluate((node) => { node.scrollLeft = 0; });
     await next.click();
     await expect.poll(() => shelf.evaluate((node) => node.scrollLeft)).toBeGreaterThan(0);
-    await page.getByRole('button', { name: 'Previous books', exact: true }).click();
+    await previous.click();
     await expect.poll(() => shelf.evaluate((node) => node.scrollLeft)).toBeLessThan(2);
   }
   await page.setViewportSize({ width: 390, height: 844 });
@@ -143,6 +161,10 @@ test('the homepage shelf loads live books and scrolls on demand', async ({ page,
     await expect.poll(() => shelf.evaluate((node) => node.scrollLeft)).toBeGreaterThan(0);
     await session.detach();
   }
+  const publishBanner = page.getByRole('region', { name: /publish/i });
+  await expect(publishBanner.getByRole('heading')).toHaveText(/\S/);
+  await expect(publishBanner.getByRole('link')).toHaveText(/\S/);
+  await expect(publishBanner.getByRole('link')).toHaveAttribute('href', '/publish');
 });
 
 test('reduced motion keeps route content visible without a long transition', async ({ page }) => {
