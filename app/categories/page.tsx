@@ -253,7 +253,7 @@ export default function CategoriesPage() {
                       <div className="relative aspect-[16/10] overflow-hidden bg-[#0F3D3E]">
                         <Image
                           src={bgImg}
-                          onError={(e: any) => { if (e?.target) e.target.src = "/logo.png"; }}
+                          onError={(event) => { event.currentTarget.src = "/logo.png"; }}
                           alt={category.name}
                           fill
                           sizes="(max-width: 768px) 100vw, 50vw"

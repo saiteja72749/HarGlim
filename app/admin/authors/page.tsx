@@ -1,4 +1,5 @@
 "use client";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 
@@ -34,9 +35,26 @@ import {
 } from "@/components/ui/table";
 import Link from "next/link";
 
+type AuthorSummary = {
+  _id: string;
+  id?: string;
+  name?: string;
+  email?: string;
+  createdAt?: string;
+  isActive?: boolean;
+  status?: string;
+};
+type AuthorDetail = {
+  application?: { status?: string };
+  author?: AuthorSummary;
+  bookCounts?: { published?: number; total?: number; drafts?: number };
+  entitlement?: { source?: string; status?: string };
+  publishRequestCount?: number;
+};
+
 export default function AdminAuthorsPage() {
   const paidAccessEnabled = isPaidAuthorDashboardEnabled(useAuthStore((state) => state.userContext));
-  const [authors, setAuthors] = useState<any[]>([]);
+  const [authors, setAuthors] = useState<AuthorSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -45,7 +63,7 @@ export default function AdminAuthorsPage() {
 
   // Detail Drawer State (GET /api/admin/authors/:authorId)
   const [selectedAuthorId, setSelectedAuthorId] = useState<string | null>(null);
-  const [authorDetail, setAuthorDetail] = useState<any | null>(null);
+  const [authorDetail, setAuthorDetail] = useState<AuthorDetail | null>(null);
   const [authorSales, setAuthorSales] = useState<AuthorDashboardSummary | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
@@ -54,7 +72,7 @@ export default function AdminAuthorsPage() {
     setLoading(true);
     setError(false);
     try {
-      const params: any = { role: "author", page, limit: 20 };
+      const params: Record<string, string | number> = { role: "author", page, limit: 20 };
       if (searchQuery.trim()) params.search = searchQuery.trim();
 
       const { data } = await api.get("/admin/users", { params });
@@ -76,13 +94,12 @@ export default function AdminAuthorsPage() {
     }
   }, [page, searchQuery]);
 
-  useEffect(() => {
-    fetchAuthors();
-  }, [fetchAuthors]);
+  useEffect(() => scheduleRequest(fetchAuthors), [fetchAuthors]);
 
   // Open Author Detail Drawer
-  const openAuthorDetail = async (author: any) => {
+  const openAuthorDetail = async (author: AuthorSummary) => {
     const aId = author._id || author.id;
+    if (!aId) return;
     setSelectedAuthorId(aId);
     setLoadingDetail(true);
     setAuthorDetail(null);
@@ -198,6 +215,7 @@ export default function AdminAuthorsPage() {
               ) : (
                 filteredAuthors.map((author) => {
                   const authorId = author._id || author.id;
+                  if (!authorId) return null;
                   const isActive = author.isActive !== false && author.status !== "Suspended";
 
                   return (

@@ -1,5 +1,6 @@
 "use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback } from "react";
@@ -25,8 +26,23 @@ import {
 } from "@/components/ui/table";
 import toast from "react-hot-toast";
 
+type NotificationRecord = {
+  _id: string;
+  id?: string;
+  status?: string;
+  subject?: string;
+  title?: string;
+  type?: string;
+  templateId?: string;
+  channel?: string;
+  recipient?: string;
+  email?: string;
+  phone?: string;
+  createdAt?: string;
+};
+
 export default function AdminNotificationsPage() {
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [retryingId, setRetryingId] = useState<string | null>(null);
@@ -34,7 +50,7 @@ export default function AdminNotificationsPage() {
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
     try {
-      let res: any;
+      let res;
       if (searchQuery.trim()) {
         res = await api.get("/admin/notifications/search", { params: { q: searchQuery.trim() } });
       } else {
@@ -51,9 +67,7 @@ export default function AdminNotificationsPage() {
     }
   }, [searchQuery]);
 
-  useEffect(() => {
-    fetchNotifications();
-  }, [fetchNotifications]);
+  useEffect(() => scheduleRequest(fetchNotifications), [fetchNotifications]);
 
   // Retry notification: POST /api/admin/notifications/:id/retry
   const handleRetry = async (notificationId: string) => {
@@ -143,6 +157,7 @@ export default function AdminNotificationsPage() {
               ) : (
                 filteredNotifications.map((notif) => {
                   const nId = notif._id || notif.id;
+                  if (!nId) return null;
                   const isSuccess = notif.status === "DELIVERED" || notif.status === "SENT";
                   const isFailed = notif.status === "FAILED" || notif.status === "ERROR";
 

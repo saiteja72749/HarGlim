@@ -1,8 +1,11 @@
 "use client";
 
+import type { AuthorAccessPlan, AuthorAccessPurchase } from "@/types/author-api";
+import { scheduleRequest } from "@/lib/schedule-request";
+import { getPayableAmount, getPaymentQr, normalizeUtr } from "@/lib/checkout-payment";
 import { describeApiError } from "@/lib/api-error";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from '@/components/ui/backend-image';
 import { motion } from "framer-motion";
@@ -52,54 +55,58 @@ function PaidDashboardAccessPurchase() {
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);
-  const [accessState, setAccessState] = useState<any>(null);
-  const [activePlan, setActivePlan] = useState<any>(null);
-  const [purchase, setPurchase] = useState<any>(null);
+  const [accessState, setAccessState] = useState<{ state?: string } | null>(null);
+  const [activePlan, setActivePlan] = useState<AuthorAccessPlan | null>(null);
+  const [purchase, setPurchase] = useState<AuthorAccessPurchase | null>(null);
 
   const [purchasing, setPurchasing] = useState(false);
+  const pending = useRef(false);
+  const [loadError, setLoadError] = useState(false);
+  const [failedQr, setFailedQr] = useState("");
+  const planAmount = getPayableAmount(null, activePlan);
+  const purchaseAmount = getPayableAmount(null, purchase);
+  const qr = getPaymentQr(purchase?.qrMetadata?.qrCodeUrl || purchase?.qrMetadata?.qrCodeDataUrl || purchase?.qrCodeDataUrl);
   const [utr, setUtr] = useState("");
   const [verifying, setVerifying] = useState(false);
 
   // 1. Load current author access state & plans
-  const loadAccessState = async () => {
+  const loadAccessState = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const { data } = await api.get("/authors/me/dashboard-access");
       const resData = data.data || data;
 
       setAccessState(resData);
-      setActivePlan(resData.activePlan || {
-        name: "Author Analytics Pro Plan",
-        amount: 2999,
-        currency: "INR",
-        description: "Lifetime analytics & royalty tracking access",
-      });
+      setActivePlan(resData.activePlan || null);
 
       if (resData.purchase) {
         setPurchase(resData.purchase);
       }
     } catch (caughtError) {
       const err = describeApiError(caughtError);
-      console.warn("Failed to load dashboard access status:", describeApiError(err));
+      console.warn("Failed to load dashboard access status:", err);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    loadAccessState();
   }, []);
+
+  useEffect(() => scheduleRequest(loadAccessState), [loadAccessState]);
 
   // 2. Trigger purchase creation
   const handleInitiatePurchase = async () => {
+    if (pending.current || loadError || !planAmount || purchase) return;
+    pending.current = true;
     setPurchasing(true);
     try {
       const { data } = await api.post("/authors/me/dashboard-access/purchase");
       const purchaseData = data.data || data;
 
+      if (data?.success === false || !(purchaseData?._id || purchaseData?.id)) throw new Error("Purchase reference missing.");
       setPurchase(purchaseData);
       toast.success("Payment intent created! Please complete UPI payment.");
-      loadAccessState();
+      await loadAccessState();
     } catch (caughtError) {
       const err = describeApiError(caughtError);
       if (err.response?.status === 409 && err.response?.data?.error === "AUTHOR_DASHBOARD_PAID_ACCESS_DISABLED") {
@@ -111,6 +118,7 @@ function PaidDashboardAccessPurchase() {
       }
       toast.error(err.response?.data?.message || "Failed to initiate purchase.");
     } finally {
+      pending.current = false;
       setPurchasing(false);
     }
   };
@@ -119,9 +127,10 @@ function PaidDashboardAccessPurchase() {
   const handleVerifyUtr = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const cleanUtr = utr.trim().toUpperCase();
-    if (!cleanUtr || cleanUtr.length < 6) {
-      toast.error("Please enter a valid UTR number (at least 6 characters).");
+    if (pending.current || loadError || !purchaseAmount) return;
+    const cleanUtr = normalizeUtr(utr);
+    if (!cleanUtr) {
+      toast.error("Enter the UTR using 6?64 letters, digits or hyphens.");
       return;
     }
 
@@ -131,19 +140,22 @@ function PaidDashboardAccessPurchase() {
       return;
     }
 
+    pending.current = true;
     setVerifying(true);
     try {
-      await api.put(`/authors/me/dashboard-access/purchases/${purchaseId}/verify-payment`, {
+      const { data } = await api.put(`/authors/me/dashboard-access/purchases/${purchaseId}/verify-payment`, {
         utr: cleanUtr,
       });
 
+      if (data?.success === false || data?.status === "error") throw new Error("The reference was not accepted.");
       toast.success("UTR submitted! Admin will verify your payment shortly.");
       setUtr("");
-      loadAccessState();
+      await loadAccessState();
     } catch (caughtError) {
       const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to submit UTR reference.");
     } finally {
+      pending.current = false;
       setVerifying(false);
     }
   };
@@ -155,6 +167,10 @@ function PaidDashboardAccessPurchase() {
         <p className="text-sm text-muted-foreground">Checking author dashboard access state...</p>
       </div>
     );
+  }
+
+  if (loadError) {
+    return <div className="space-y-4 p-6"><p role="alert">Author access details could not be loaded.</p><Button onClick={loadAccessState}>Try again</Button></div>;
   }
 
   const isAlreadyActive = accessState?.state === "ACTIVE";
@@ -227,9 +243,9 @@ function PaidDashboardAccessPurchase() {
 
             <div className="flex items-baseline gap-1.5">
               <span className="text-3xl font-extrabold text-foreground">
-                ₹{activePlan?.amount || 2999}
+                {planAmount === null ? "Price unavailable" : `₹${planAmount.toLocaleString("en-IN")}`}
               </span>
-              <span className="text-xs text-muted-foreground">INR (inclusive of taxes)</span>
+              {planAmount !== null && activePlan?.currency && <span className="text-xs text-muted-foreground">{activePlan.currency}</span>}
             </div>
 
             <div className="space-y-3 pt-2 text-sm text-muted-foreground border-t border-border/80">
@@ -254,7 +270,7 @@ function PaidDashboardAccessPurchase() {
             {!purchase && (
               <Button
                 onClick={handleInitiatePurchase}
-                disabled={purchasing}
+                disabled={purchasing || planAmount === null}
                 className="w-full h-11 font-medium shadow-md"
               >
                 {purchasing ? (
@@ -286,24 +302,23 @@ function PaidDashboardAccessPurchase() {
 
               {/* QR Image preview */}
               <div className="flex flex-col items-center justify-center p-4 bg-muted/50 rounded-xl border border-border text-center space-y-3">
-                {purchase?.qrMetadata?.qrCodeUrl || purchase?.qrMetadata?.qrCodeDataUrl || purchase?.qrCodeDataUrl ? (
+                {qr && failedQr !== qr ? (
                   <Image
-                    src={purchase?.qrMetadata?.qrCodeUrl || purchase?.qrMetadata?.qrCodeDataUrl || purchase?.qrCodeDataUrl}
+                    src={qr}
+                    unoptimized
+                    onError={() => setFailedQr(qr)}
                     alt="UPI QR Code"
                     width={176}
                     height={176}
                     className="w-44 h-44 object-contain rounded-lg bg-white p-2 border"
                   />
                 ) : (
-                  <div className="w-44 h-44 bg-white rounded-lg p-3 border flex flex-col items-center justify-center text-center">
-                    <QrCode className="h-20 w-20 text-slate-800 mb-1" />
-                    <span className="text-[10px] text-slate-600 font-mono">paytmqr123456789</span>
-                  </div>
+                  <p role="status" className="text-sm">The payment QR code is unavailable.</p>
                 )}
 
                 <div className="text-xs space-y-0.5">
-                  <p className="font-semibold text-foreground">UPI ID: {purchase?.qrMetadata?.upiId || "harglim@upi"}</p>
-                  <p className="text-muted-foreground font-mono text-[11px]">Amount: ₹{purchase?.amount || activePlan?.amount || 2999}</p>
+                  {purchase.qrMetadata?.upiId && <p className="font-semibold text-foreground">UPI ID: {purchase.qrMetadata.upiId}</p>}
+                  <p className="text-muted-foreground">{purchaseAmount === null ? "Payable amount unavailable" : `Amount ₹${purchaseAmount.toLocaleString("en-IN")}`}</p>
                 </div>
               </div>
 
@@ -316,7 +331,9 @@ function PaidDashboardAccessPurchase() {
                   <Input
                     id="utr"
                     type="text"
-                    placeholder="e.g. 423910293847"
+                    maxLength={64}
+                    autoCapitalize="characters"
+                    spellCheck={false}
                     className="h-11 bg-background"
                     value={utr}
                     onChange={(e) => setUtr(e.target.value)}
@@ -327,7 +344,7 @@ function PaidDashboardAccessPurchase() {
                   </p>
                 </div>
 
-                <Button type="submit" disabled={verifying} className="w-full h-11 font-medium">
+                <Button type="submit" disabled={verifying || purchaseAmount === null} className="w-full h-11 font-medium">
                   {verifying ? (
                     <span className="flex items-center gap-2">
                       <Loader2 className="h-4 w-4 animate-spin" />

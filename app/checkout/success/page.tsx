@@ -1,5 +1,6 @@
 "use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import Link from "next/link";
 import { CheckCircle2, ArrowRight, Copy, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -46,7 +47,7 @@ function SuccessContent() {
     } catch { setError(true); setOrder(null); }
     finally { setLoading(false); }
   }, [recordId, userId]);
-  useEffect(() => { void loadOrder(); }, [loadOrder]);
+  useEffect(() => scheduleRequest(loadOrder), [loadOrder]);
 
   const copyToClipboard = async (text: string) => {
     try { await navigator.clipboard.writeText(text); toast.success('Copied to clipboard!'); }

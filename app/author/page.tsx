@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -48,8 +49,9 @@ function StudioOverview() {
     setLoading(false);
   }, []);
 
+  useEffect(() => scheduleRequest(refresh), [refresh]);
+
   useEffect(() => {
-    void refresh();
     return onLiveChange("author-data", refresh);
   }, [refresh]);
 

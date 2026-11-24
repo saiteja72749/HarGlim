@@ -1,5 +1,6 @@
 "use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback } from "react";
@@ -70,8 +71,9 @@ export default function AdminCategoriesPage() {
     }
   }, []);
 
+  useEffect(() => scheduleRequest(fetchCategories), [fetchCategories]);
+
   useEffect(() => {
-    void fetchCategories();
     return onLiveChange("categories", () => void fetchCategories());
   }, [fetchCategories]);
 

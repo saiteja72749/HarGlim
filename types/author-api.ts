@@ -58,3 +58,26 @@ export interface AuthorAnalytics extends AuthorMetrics {
   timeSeries?: AnalyticsPoint[];
   data?: AnalyticsPoint[];
 }
+
+export interface AuthorAccessPlan {
+  _id?: string;
+  id?: string;
+  name?: string;
+  amount?: number;
+  currency?: string;
+  description?: string;
+  status?: string;
+}
+
+export interface AuthorAccessPurchase {
+  _id?: string;
+  id?: string;
+  userId?: string;
+  user?: { name?: string };
+  amount?: number;
+  status?: string;
+  createdAt?: string;
+  utr?: string;
+  qrCodeDataUrl?: string;
+  qrMetadata?: { qrCodeDataUrl?: string; qrCodeUrl?: string; upiId?: string };
+}

@@ -1,9 +1,10 @@
 "use client";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 
 import type { RoyaltyLine, RoyaltySettlement } from "@/types/royalty-api";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
 import { Download, FileText, RefreshCw, Layers, Eye } from "lucide-react";
 import {
@@ -42,17 +43,18 @@ function AuthorRoyaltiesContent() {
   const [loading, setLoading] = useState(true);
   // "/author/royalties#settlements" (sidebar: Royalty Settlements) opens the settlements tab.
   const hash = useHashSection(!loading);
-  const [activeTab, setActiveTab] = useState("sales");
-  useEffect(() => {
-    setActiveTab(hash === "settlements" || hash === "statements" ? hash : "sales");
-  }, [hash]);
+  const [tabSelection, setTabSelection] = useState<{ hash: string; tab: string }>();
+  const activeTab = tabSelection?.hash === hash
+    ? tabSelection.tab
+    : hash === "settlements" || hash === "statements" ? hash : "sales";
   const [payoutSummary, setPayoutSummary] = useState<Record<string, unknown>>({});
   const [summaryData, setSummaryData] = useState<RoyaltyHistory | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [openSettlementId, setOpenSettlementId] = useState<string | null>(null);
+  const closeSettlement = useCallback(() => setOpenSettlementId(null), []);
 
-  const fetchRoyalties = async () => {
+  const fetchRoyalties = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
@@ -89,14 +91,10 @@ function AuthorRoyaltiesContent() {
       setLoading(false);
       setLoadedOnce(true);
     }
-  };
-
-  useEffect(() => {
-    fetchRoyalties();
-    // Coming back to the tab reloads, so new royalties and settlements show without a refresh.
-    return onLiveChange("author-data", fetchRoyalties);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
+  useEffect(() => scheduleRequest(fetchRoyalties), [fetchRoyalties]);
+  useEffect(() => onLiveChange("author-data", fetchRoyalties), [fetchRoyalties]);
 
   // The server's total (accruedKnown); never summed in the browser.
   const totalEarnings = summaryData?.totalRoyalty;
@@ -195,7 +193,7 @@ function AuthorRoyaltiesContent() {
       </dl>
 
       {/* 3. Detailed Tabs: Per-Sale Royalties vs Payout Settlements */}
-      <Tabs id="settlements" value={activeTab} onValueChange={setActiveTab} className="space-y-4 scroll-mt-20">
+      <Tabs id="settlements" value={activeTab} onValueChange={(tab) => setTabSelection({ hash, tab })} className="space-y-4 scroll-mt-20">
         <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-xl bg-muted p-1">
           <TabsTrigger value="sales" className="min-h-11 flex-none whitespace-normal rounded-lg text-sm font-medium">
             Sales & Earnings ({royaltyEntries.length})
@@ -383,7 +381,7 @@ function AuthorRoyaltiesContent() {
         </TabsContent>
       </Tabs>
 
-      <SettlementDetailDialog settlementId={openSettlementId} onClose={() => setOpenSettlementId(null)} />
+      {openSettlementId && <SettlementDetailDialog key={openSettlementId} settlementId={openSettlementId} onClose={closeSettlement} />}
     </div>
   );
 }
@@ -429,21 +427,23 @@ const getSettlementStatus = (s: RoyaltySettlement) => {
 
 /** GET /authors/me/royalty-settlements/{id}: books/orders included, total, payout transaction. */
 function SettlementDetailDialog({ settlementId, onClose }: { settlementId: string | null; onClose: () => void }) {
-  const [detail, setDetail] = useState<RoyaltySettlement | null>(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [result, setResult] = useState<{ id: string; settlement: RoyaltySettlement }>();
+  const detail = result?.id === settlementId ? result.settlement : null;
 
   useEffect(() => {
     if (!settlementId) return;
-    setLoadingDetail(true);
-    setDetail(null);
+    const controller = new AbortController();
     api
-      .get(`/authors/me/royalty-settlements/${settlementId}`, { cache: "no-store" })
-      .then(({ data }) => setDetail(data?.data?.settlement || data?.data || data))
-      .catch((err) => {
-        toast.error(err?.response?.data?.message || "Could not load settlement details.");
-        onClose();
+      .get(`/authors/me/royalty-settlements/${settlementId}`, { cache: "no-store", signal: controller.signal })
+      .then(({ data }) => {
+        if (!controller.signal.aborted) setResult({ id: settlementId, settlement: data?.data?.settlement || data?.data || data });
       })
-      .finally(() => setLoadingDetail(false));
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        toast.error(describeApiError(err).response?.data.message || "Could not load settlement details.");
+        onClose();
+      });
+    return () => controller.abort();
   }, [settlementId, onClose]);
 
   const lines: RoyaltyLine[] = detail?.items || detail?.lines || detail?.sourceLines || detail?.royalties || [];
@@ -461,7 +461,7 @@ function SettlementDetailDialog({ settlementId, onClose }: { settlementId: strin
           </DialogDescription>
         </DialogHeader>
 
-        {loadingDetail || !detail ? (
+        {!detail ? (
           <div className="flex justify-center py-10">
             <RefreshCw className="h-6 w-6 animate-spin text-[#0F3D3E]" />
           </div>

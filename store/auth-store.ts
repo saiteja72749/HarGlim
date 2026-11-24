@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware';
 import { Role, UserContextData } from '@/types';
 import { record } from '@/lib/api-error';
 
@@ -13,6 +13,7 @@ export interface User {
   profilePicture?: string;
   bio?: string;
   emailVerified?: boolean;
+  createdAt?: string;
   isActive?: boolean;
 }
 
@@ -43,7 +44,7 @@ interface AuthState {
   logout: (options?: { redirectToHome?: boolean; revoke?: boolean }) => void;
 }
 
-export const useAuthStore = create<AuthState>()(
+export const createAuthStore = (getStorage: () => StateStorage = () => window.localStorage) => create<AuthState>()(
   persist(
     (set, get): AuthState => ({
       user: null,
@@ -99,8 +100,8 @@ export const useAuthStore = create<AuthState>()(
       logout: (options) => {
         const finish = () => {
           if (typeof window !== 'undefined') {
-            localStorage.removeItem('cart-storage');
-            localStorage.removeItem('harglim_shared_royalties');
+            window.localStorage.removeItem('cart-storage');
+            window.localStorage.removeItem('harglim_shared_royalties');
           }
           set({
             user: null,
@@ -145,7 +146,7 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'auth-storage',
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(getStorage),
         merge: (persisted, current) => {
           const data = record(persisted), cached = record(data.user);
           const id = typeof cached._id === 'string' ? cached._id : typeof cached.id === 'string' ? cached.id : '';
@@ -179,3 +180,5 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
+
+export const useAuthStore = createAuthStore();

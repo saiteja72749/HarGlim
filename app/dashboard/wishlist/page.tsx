@@ -1,4 +1,5 @@
 "use client";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 
@@ -18,9 +19,11 @@ import toast from "react-hot-toast";
 import api from "@/lib/api";
 import { extractList } from "@/lib/tracking";
 import { useEffect } from "react";
+type WishlistBook = Book & { cover?: string };
+
 export default function WishlistPage() {
   const { user } = useAuthStore();
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<WishlistBook[]>([]);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -35,12 +38,12 @@ export default function WishlistPage() {
     setError(false);
     try {
       const { data } = await api.get(`/users/${userId}/wishlist`, { params: { limit: 100 }, cache: "no-store" });
-      const wishlistData = extractList(data, "wishlist");
+      const wishlistData = extractList<WishlistBook & { book?: WishlistBook | string }>(data, "wishlist");
       // Entries may be books or { book: {...} } join rows; DELETE needs the *book* id.
       setItems(
         wishlistData
-          .map((entry: any) => (entry?.book && typeof entry.book === "object" ? { ...entry.book } : entry))
-          .filter((book: any) => book && (book._id || book.id))
+          .map((entry) => (entry?.book && typeof entry.book === "object" ? { ...entry.book } : entry))
+          .filter((book) => book && (book._id || book.id))
       );
     } catch (err) {
       console.error("Failed to fetch wishlist:", describeApiError(err));
@@ -50,9 +53,7 @@ export default function WishlistPage() {
     }
   }, [user]);
 
-  useEffect(() => {
-    fetchWishlist();
-  }, [fetchWishlist]);
+  useEffect(() => scheduleRequest(fetchWishlist), [fetchWishlist]);
 
   const removeFromWishlist = async (id: string) => {
     if ((!user?._id && !user?.id) || pendingRemovals.current.has(id)) return;
@@ -72,7 +73,7 @@ export default function WishlistPage() {
     }
   };
 
-  const handleAddToCart = (item: any) => {
+  const handleAddToCart = (item: WishlistBook) => {
     const available = typeof item.stock === "number" ? item.stock - Number(item.reservedStock || 0) : 1;
     if (available <= 0) {
       toast.error("Item is out of stock");
@@ -81,7 +82,7 @@ export default function WishlistPage() {
     // Keep the full book (slug, mrp, stock) so the cart links and prices stay correct.
     const bookToAdd = {
       ...item,
-      _id: (item._id || item.id).toString(),
+      _id: item._id || item.id || "",
       author: typeof item.author === "object" ? item.author : { name: item.author },
       price: item.price ?? item.mrp,
       coverImage: item.coverImage || item.cover,
@@ -150,13 +151,13 @@ export default function WishlistPage() {
                 <Card className="overflow-hidden group">
                   <div className="relative aspect-[2/3]">
                     <Image
-                      src={item.coverImage || item.cover}
+                      src={item.coverImage || item.cover || "/placeholder-book.svg"}
                       alt={item.title}
                       fill
                       sizes="(min-width: 1280px) 22vw, (min-width: 640px) 45vw, 90vw"
                       className="object-cover transition-transform group-hover:scale-105"
                     />
-                    {item.stock <= 0 && (
+                    {typeof item.stock === "number" && item.stock <= 0 && (
                       <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
                         <Badge variant="secondary">Out of Stock</Badge>
                       </div>
@@ -167,8 +168,8 @@ export default function WishlistPage() {
                       size="icon"
                       className="absolute top-2 right-2 bg-background/80 hover:bg-background text-destructive"
                       aria-label={`Remove ${item.title} from wishlist`}
-                      disabled={removing.includes(item._id || item.id)}
-                      onClick={() => removeFromWishlist(item._id || item.id)}
+                      disabled={removing.includes(item._id || item.id || "")}
+                      onClick={() => removeFromWishlist(item._id || item.id || "")}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -177,7 +178,7 @@ export default function WishlistPage() {
                     <Badge variant="outline" className="mb-2">
                       {typeof item.category === 'object' ? item.category?.name : item.category}
                     </Badge>
-                    <Link href={`/books/${item.slug || item.id}`}>
+                    <Link href={`/books/${item.slug || item._id || item.id}`}>
                       <h3 className="font-semibold hover:text-primary transition-colors line-clamp-1">
                         {item.title}
                       </h3>
@@ -188,7 +189,7 @@ export default function WishlistPage() {
                     </div>
                     <Button
                       className="w-full mt-3 gap-2"
-                      disabled={item.stock <= 0}
+                      disabled={typeof item.stock === "number" && item.stock <= 0}
                       onClick={() => handleAddToCart(item)}
                     >
                       <ShoppingCart className="h-4 w-4" />
@@ -201,13 +202,13 @@ export default function WishlistPage() {
                   <CardContent className="flex gap-4 p-4">
                     <div className="relative w-20 h-28 flex-shrink-0">
                       <Image
-                        src={item.coverImage || item.cover}
+                        src={item.coverImage || item.cover || "/placeholder-book.svg"}
                         alt={item.title}
                         fill
                         sizes="80px"
                         className="object-cover rounded"
                       />
-                      {item.stock <= 0 && (
+                      {typeof item.stock === "number" && item.stock <= 0 && (
                         <div className="absolute inset-0 bg-background/80 flex items-center justify-center rounded">
                           <span className="text-xs font-medium">Out of Stock</span>
                         </div>
@@ -219,7 +220,7 @@ export default function WishlistPage() {
                           <Badge variant="outline" className="mb-1">
                             {typeof item.category === 'object' ? item.category?.name : item.category}
                           </Badge>
-                          <Link href={`/books/${item.slug || item.id}`}>
+                          <Link href={`/books/${item.slug || item._id || item.id}`}>
                             <h3 className="font-semibold hover:text-primary transition-colors">
                               {item.title}
                             </h3>
@@ -231,8 +232,8 @@ export default function WishlistPage() {
                           size="icon"
                           className="text-destructive"
                           aria-label={`Remove ${item.title} from wishlist`}
-                      disabled={removing.includes(item._id || item.id)}
-                      onClick={() => removeFromWishlist(item._id || item.id)}
+                      disabled={removing.includes(item._id || item.id || "")}
+                      onClick={() => removeFromWishlist(item._id || item.id || "")}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -244,7 +245,7 @@ export default function WishlistPage() {
                         <Button
                           size="sm"
                           className="gap-2"
-                          disabled={item.stock <= 0}
+                          disabled={typeof item.stock === "number" && item.stock <= 0}
                           onClick={() => handleAddToCart(item)}
                         >
                           <ShoppingCart className="h-4 w-4" />

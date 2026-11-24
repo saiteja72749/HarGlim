@@ -1,4 +1,7 @@
 "use client";
+import { populated } from "@/lib/order-status";
+import type { InvoiceRecord, OrderRecord } from "@/types/commerce-api";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 
@@ -28,18 +31,18 @@ import {
 import toast from "react-hot-toast";
 
 export default function AdminInvoicesPage() {
-  const [invoices, setInvoices] = useState<any[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
   // Detail Modal State
-  const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
+  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRecord | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const fetchInvoices = useCallback(async () => {
     setLoading(true);
     try {
-      let res: any;
+      let res;
       if (searchQuery.trim()) {
         res = await api.get("/admin/invoices/search", { params: { q: searchQuery.trim() } });
       } else {
@@ -52,12 +55,12 @@ export default function AdminInvoicesPage() {
       if (items.length === 0) {
         const ordersRes = await api.get("/admin/orders", { params: { limit: 50 } }).catch(() => null);
         const orderList = ordersRes?.data?.data?.orders || (Array.isArray(ordersRes?.data?.data) ? ordersRes.data.data : []) || [];
-        items = orderList.map((ord: any) => ({
+        items = orderList.map((ord: OrderRecord) => ({
           _id: ord._id || ord.id,
           invoiceNumber: `INV-${(ord.orderNumber || ord._id || "1000").toString().slice(-6)}`,
           orderNumber: ord.orderNumber || ord._id,
-          customerName: ord.shippingAddress?.fullName || ord.shippingAddress?.name || ord.user?.name || "Customer",
-          customerEmail: ord.shippingAddress?.email || ord.user?.email || "N/A",
+          customerName: ord.shippingAddress?.fullName || ord.shippingAddress?.name || populated(ord.user)?.name || "Customer",
+          customerEmail: ord.shippingAddress?.email || populated(ord.user)?.email || "N/A",
           totalAmount: ord.totalPrice ?? ord.totalAmount ?? ord.amount ?? 0,
           paymentStatus: ord.paymentStatus || (ord.isPaid ? "PAID" : "PENDING"),
           createdAt: ord.createdAt || new Date().toISOString(),
@@ -74,12 +77,11 @@ export default function AdminInvoicesPage() {
     }
   }, [searchQuery]);
 
-  useEffect(() => {
-    fetchInvoices();
-  }, [fetchInvoices]);
+  useEffect(() => scheduleRequest(fetchInvoices), [fetchInvoices]);
 
-  const handleDownloadInvoice = async (invoice: any) => {
+  const handleDownloadInvoice = async (invoice: InvoiceRecord) => {
     const invId = invoice._id || invoice.id;
+    if (!invId) return;
     setDownloadingId(invId);
     try {
       // First attempt backend PDF stream: GET /api/admin/invoices/:id/download
@@ -174,6 +176,7 @@ export default function AdminInvoicesPage() {
               ) : (
                 invoices.map((inv) => {
                   const invId = inv._id || inv.id;
+                  if (!invId) return null;
                   const isPaid = inv.paymentStatus === "PAID" || inv.paymentStatus === "VERIFIED";
 
                   return (
@@ -279,7 +282,7 @@ export default function AdminInvoicesPage() {
                 <div className="text-right">
                   <p className="text-[#5C6E6E]">Date:</p>
                   <p className="font-medium text-[#0F3D3E]">
-                    {new Date(selectedInvoice.createdAt).toLocaleDateString()}
+                    {selectedInvoice.createdAt ? new Date(selectedInvoice.createdAt).toLocaleDateString() : "Unavailable"}
                   </p>
                   <Badge className="bg-emerald-500/15 text-emerald-800 text-[10px] mt-1">
                     {selectedInvoice.paymentStatus || "PAID"}
@@ -291,9 +294,9 @@ export default function AdminInvoicesPage() {
               <div className="space-y-2">
                 <p className="font-bold uppercase tracking-wider text-[#5C6E6E]">Itemized Details</p>
                 <div className="space-y-1.5">
-                  {(selectedInvoice.items || []).map((item: any, i: number) => (
+                  {(selectedInvoice.items || []).map((item, i) => (
                     <div key={i} className="flex justify-between p-2 rounded-lg bg-[#F8F9F7]">
-                      <span>{item.book?.title || item.title || "Book Item"} (×{item.quantity || 1})</span>
+                      <span>{populated(item.book)?.title || item.title || "Book Item"} (×{item.quantity || 1})</span>
                       <span className="font-bold text-[#0F3D3E]">₹{Number(item.price || 0).toLocaleString()}</span>
                     </div>
                   ))}

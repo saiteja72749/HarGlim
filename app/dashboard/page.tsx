@@ -1,4 +1,7 @@
 "use client";
+import type { Book } from "@/types";
+import type { OrderRecord } from "@/types/commerce-api";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 
@@ -30,7 +33,7 @@ import {
 } from "@/lib/order-status";
 
 // Unpaid orders show their payment state; paid orders show where the parcel is.
-const getStatusBadge = (order: any) => {
+const getStatusBadge = (order: OrderRecord) => {
   const payment = getPaymentState(order);
   const meta =
     payment === "paid" || getFulfilmentStage(order) === "cancelled"
@@ -50,9 +53,9 @@ export default function DashboardPage() {
     : applicationState === "rejected"
     ? { href: "/dashboard/become-author", title: "Application Rejected", subtitle: "Reapply to publish" }
     : { href: "/dashboard/become-author", title: "Become Author", subtitle: "Publish your work" };
-  const [recentOrders, setRecentOrders] = useState<any[]>([]);
-  const [pendingOrder, setPendingOrder] = useState<any>(null);
-  const [recommendedBooks, setRecommendedBooks] = useState<any[]>([]);
+  const [recentOrders, setRecentOrders] = useState<OrderRecord[]>([]);
+  const [pendingOrder, setPendingOrder] = useState<OrderRecord | null>(null);
+  const [recommendedBooks, setRecommendedBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -73,8 +76,8 @@ export default function DashboardPage() {
 
       if (ordersRes.status === "fulfilled") {
         // Sort client-side: the backend's sort param isn't guaranteed.
-        const list = extractList(ordersRes.value.data, "orders").sort(
-          (a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        const list = extractList<OrderRecord>(ordersRes.value.data, "orders").sort(
+          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
         );
         setRecentOrders(list.slice(0, 3));
         const payments = paymentsRes.status === "fulfilled" ? indexPaymentsByOrder(extractList(paymentsRes.value.data, "payments")) : null;
@@ -94,9 +97,7 @@ export default function DashboardPage() {
     }
   }, [user]);
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, [fetchDashboardData]);
+  useEffect(() => scheduleRequest(fetchDashboardData), [fetchDashboardData]);
 
   if (error) {
     return (
@@ -135,7 +136,7 @@ export default function DashboardPage() {
         <section className="space-y-2 rounded-xl border border-secondary bg-secondary/10 p-4" aria-labelledby="pending-payment">
           <h2 id="pending-payment" className="font-serif text-lg font-semibold">Complete your payment</h2>
           {pendingOrder.orderNumber && <p className="text-sm">Order {pendingOrder.orderNumber} is awaiting payment.</p>}
-          <Button asChild><Link href={`/dashboard/orders?orderId=${encodeURIComponent(pendingOrder._id || pendingOrder.id)}`}>View payment instructions</Link></Button>
+          <Button asChild><Link href={`/dashboard/orders?orderId=${encodeURIComponent(pendingOrder._id || pendingOrder.id || "")}`}>View payment instructions</Link></Button>
         </section>
       )}
 
@@ -161,7 +162,7 @@ export default function DashboardPage() {
               </div>
             ) : recentOrders.length > 0 ? (
               <div className="space-y-3">
-                {recentOrders.map((order: any) => {
+                {recentOrders.map((order: OrderRecord) => {
                   const orderId = order.orderNumber || order._id || order.id;
 
                   return (
@@ -229,7 +230,7 @@ export default function DashboardPage() {
               </div>
             ) : recommendedBooks.length > 0 ? (
               <div className="space-y-3">
-                {recommendedBooks.map((book: any) => (
+                {recommendedBooks.map((book) => (
                   <Link
                     key={book._id || book.id}
                     href={`/books/${book.slug || book._id || book.id}`}

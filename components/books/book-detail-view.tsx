@@ -1,5 +1,6 @@
 "use client";
 
+import type { OrderRecord } from "@/types/commerce-api";
 import { describeApiError, publicApiMessage, publicRetryAt } from "@/lib/api-error";
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -52,7 +53,7 @@ export function BookDetailView({ initialBook }: { initialBook: Book | null }) {
   const bookPath = `/books/${slug}`;
 
   const [book, setBook] = useState<Book | null>(initialBook);
-  const [existingOrder, setExistingOrder] = useState<any | null>(null);
+  const [orderMatch, setOrderMatch] = useState<{ userId: string; bookId: string; order: OrderRecord }>();
   const [loading, setLoading] = useState(!initialBook);
   const bookLoaded = useRef(Boolean(initialBook));
   const [error, setError] = useState<unknown>(null);
@@ -111,8 +112,8 @@ export function BookDetailView({ initialBook }: { initialBook: Book | null }) {
 
   const bookId = book?._id || book?.id;
   const bookSlug = book?.slug;
+  const existingOrder = orderMatch?.userId === userId && orderMatch?.bookId === bookId ? orderMatch?.order : undefined;
   useEffect(() => {
-    setExistingOrder(null);
     if (!userId || !bookId) return;
     const controller = new AbortController();
     api.get(`/users/${userId}/orders`, { params: { limit: 100 }, signal: controller.signal, cache: 'no-store' })
@@ -120,9 +121,10 @@ export function BookDetailView({ initialBook }: { initialBook: Book | null }) {
         if (controller.signal.aborted) return;
         const orders = data?.data?.orders || data?.orders || data?.data || data;
         if (Array.isArray(orders)) {
-          setExistingOrder(orders.find((order) => order.items?.some(({ book: item }: { book: Book | string }) =>
+          const match = (orders as OrderRecord[]).find((order) => order.items?.some(({ book: item }) =>
             typeof item === "string" ? item === bookId : item?._id === bookId || item?.id === bookId || (bookSlug && item?.slug === bookSlug)
-          )) ?? null);
+          ));
+          setOrderMatch(match ? { userId, bookId, order: match } : undefined);
         }
       })
       .catch((error) => {
@@ -663,8 +665,9 @@ function RelatedBooks({ bookPath }: { bookPath: string }) {
   const section = useRef<HTMLElement>(null);
   const [nearViewport, setNearViewport] = useState(false);
   const [books, setBooks] = useState<Book[]>([]);
-  const [error, setError] = useState<unknown>(null);
+  const [failure, setFailure] = useState<{ path: string; attempt: number; error: unknown }>();
   const [attempt, setAttempt] = useState(0);
+  const error = failure?.path === bookPath && failure.attempt === attempt ? failure.error : null;
 
   useEffect(() => {
     if (!section.current) return;
@@ -680,14 +683,13 @@ function RelatedBooks({ bookPath }: { bookPath: string }) {
   useEffect(() => {
     if (!nearViewport) return;
     const controller = new AbortController();
-    setError(null);
     getPublic(`${bookPath}/related`, { params: { limit: 4 }, signal: controller.signal })
       .then(({ data }) => {
         const items = data?.data?.books ?? data?.data ?? data?.books ?? data;
         if (!Array.isArray(items)) throw new Error('The related book list was incomplete.');
         if (!controller.signal.aborted) setBooks(uniqueBooks(items));
       })
-      .catch((error) => { if (!controller.signal.aborted) setError(error); });
+      .catch((error) => { if (!controller.signal.aborted) setFailure({ path: bookPath, attempt, error }); });
     const stop = onLiveChange('books', (reason) => {
       if (reason === 'change') {
         setAttempt((previous) => previous + 1);

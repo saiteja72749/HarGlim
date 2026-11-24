@@ -1,5 +1,6 @@
 "use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback } from "react";
@@ -33,8 +34,22 @@ const getStatusBadge = (status: string) => {
   }
 };
 
+type AuthorApplication = {
+  _id: string;
+  id?: string;
+  bio?: string;
+  email?: string;
+  experience?: string;
+  fullName?: string;
+  name?: string;
+  penName?: string;
+  phone?: string;
+  portfolioUrl?: string;
+  status: string;
+};
+
 export default function AdminAuthorApplicationsPage() {
-  const [applications, setApplications] = useState<any[]>([]);
+  const [applications, setApplications] = useState<AuthorApplication[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -46,7 +61,7 @@ export default function AdminAuthorApplicationsPage() {
     setLoading(true);
     setError(false);
     try {
-      const params: any = {};
+      const params: Record<string, string | number> = {};
       if (statusFilter !== "all") params.status = statusFilter;
       if (searchQuery.trim()) params.search = searchQuery.trim();
 
@@ -61,9 +76,7 @@ export default function AdminAuthorApplicationsPage() {
     }
   }, [searchQuery, statusFilter]);
 
-  useEffect(() => {
-    fetchApplications();
-  }, [fetchApplications]);
+  useEffect(() => scheduleRequest(fetchApplications), [fetchApplications]);
 
   const handleApprove = async (id: string) => {
     setProcessingId(id);
@@ -175,8 +188,9 @@ export default function AdminAuthorApplicationsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredApps.map((app: any, index: number) => {
-                    const id = app._id || app.id;
+                  {filteredApps.map((app, index) => {
+                    const id = app._id || app.id || "";
+                    if (!id) return null;
                     const status = (app.status || "pending").toLowerCase();
 
                     return (

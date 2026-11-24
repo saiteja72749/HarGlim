@@ -1,5 +1,7 @@
 "use client";
 
+import type { OrderRecord, OrderItem } from "@/types/commerce-api";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { Suspense, useCallback, useEffect, useState } from "react";
@@ -42,7 +44,7 @@ function TrackOrderContent() {
   const initial = (searchParams.get("orderNumber") || "").trim();
 
   const [input, setInput] = useState(initial);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<OrderRecord | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "found" | "notfound" | "error">("idle");
 
   const lookup = useCallback(async (orderNumber: string) => {
@@ -61,7 +63,7 @@ function TrackOrderContent() {
   }, []);
 
   useEffect(() => {
-    if (initial) lookup(initial);
+    if (initial) return scheduleRequest(() => lookup(initial));
   }, [initial, lookup]);
 
   const submit = (e: React.FormEvent) => {
@@ -77,7 +79,7 @@ function TrackOrderContent() {
   const history = result ? getTrackingHistory(result) : [];
   const shipmentStatus = result?.shipmentStatus ? normalizeShipmentStatus(result.shipmentStatus) : "";
   const delivered = ["DELIVERED", "COMPLETED"].includes(shipmentStatus) || String(result?.status).toUpperCase() === "DELIVERED";
-  const items: any[] = Array.isArray(result?.items) ? result.items : [];
+  const items: OrderItem[] = Array.isArray(result?.items) ? result.items : [];
 
   return (
     <div className="bg-[#F8F9F7] min-h-screen py-12 px-4">

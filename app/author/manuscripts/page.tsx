@@ -1,6 +1,8 @@
 "use client";
 
-import { describeApiError } from "@/lib/api-error";
+import type { AuthorBook } from "@/types/author-api";
+import { scheduleRequest } from "@/lib/schedule-request";
+import { describeApiError, record } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
@@ -56,7 +58,7 @@ import { getSafeExternalUrl } from "@/lib/utils";
 import toast from "react-hot-toast";
 import { ErrorState } from "@/components/ui/error-state";
 import { getAuthorBookStage, type AuthorBookStage as Stage } from "@/lib/author-book-status";
-import { fetchPublicPackages } from "@/lib/publish-packages";
+import { fetchPublicPackages, type PackageCard } from "@/lib/publish-packages";
 import { submitAuthorManuscript, uploadAuthorManuscript } from "@/lib/author-manuscript";
 import { fetchAuthorBooks } from "@/lib/author-books";
 
@@ -75,30 +77,34 @@ const STAGES: Record<Stage, { label: string; tone: string; icon: typeof Clock }>
   archived: { label: "Archived", tone: "bg-muted text-muted-foreground", icon: FileText },
 };
 
-const getRequest = (m: any) => m.publishRequest || m.latestPublishRequest || m.submission || m.review || {};
+const getRequest = (m: Record<string, unknown>) => record(m.publishRequest || m.latestPublishRequest || m.submission || m.review);
 
-const text = (value: any) => (typeof value === "string" ? value : value?.name || "");
+const text = (value: unknown) => {
+  const name = record(value).name;
+  return typeof value === "string" ? value : typeof name === "string" ? name : "";
+};
 
-const toItem = (m: any) => {
+const toItem = (book: AuthorBook) => {
+  const m = record(book);
   const request = getRequest(m);
   return {
     id: String(m._id || m.id),
-    slug: m.slug,
-    title: m.title || "Untitled Manuscript",
+    slug: book.slug,
+    title: book.title || "Untitled Manuscript",
     // category can be a populated object; never render it directly.
     category: text(request.genre) || text(m.genre) || text(m.category) || "Category unavailable",
     wordCount: Number(request.wordCount || m.wordCount || 0) || 0,
-    fileUrl: getSafeExternalUrl(request.fileUrl || m.fileUrl || m.manuscriptUrl || ""),
-    packageId: String(request.package?._id || request.package || request.packageId || ""),
-    submittedAt: m.submittedAt || request.createdAt || null,
-    updatedAt: request.updatedAt || m.updatedAt || null,
+    fileUrl: getSafeExternalUrl(text(request.fileUrl || m.fileUrl || m.manuscriptUrl)),
+    packageId: String(record(request.package)._id || request.package || request.packageId || ""),
+    submittedAt: book.submittedAt || text(request.createdAt) || null,
+    updatedAt: text(request.updatedAt) || book.updatedAt || null,
     stage: getAuthorBookStage(m),
     // Only plain text is rendered; a populated/object field here would crash React (error #31).
     feedback:
       [
         request.reason, request.adminNotes, request.editorialNotes, request.feedback,
         m.feedback, m.editorialNotes, m.rejectionReason,
-      ].find((v) => typeof v === "string" && v.trim()) || null,
+      ].find((v): v is string => typeof v === "string" && Boolean(v.trim())) || null,
   };
 };
 
@@ -127,9 +133,7 @@ export default function ManuscriptsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchManuscripts();
-  }, [fetchManuscripts]);
+  useEffect(() => scheduleRequest(fetchManuscripts), [fetchManuscripts]);
 
   const filteredManuscripts = items.filter((m) => {
     const matchesSearch = m.title.toLowerCase().includes(searchQuery.toLowerCase());
@@ -361,14 +365,15 @@ export default function ManuscriptsPage() {
         <Button variant="outline" disabled={visiblePage >= totalPages} onClick={() => setListPage(visiblePage + 1)}>Next</Button>
       </nav>}
 
-      <SubmitForReviewDialog
+      {submitTarget && <SubmitForReviewDialog
+        key={submitTarget.id}
         item={submitTarget}
         onClose={() => setSubmitTarget(null)}
         onSubmitted={() => {
           setSubmitTarget(null);
           fetchManuscripts();
         }}
-      />
+      />}
     </div>
   );
 }
@@ -395,28 +400,28 @@ function SubmitForReviewDialog({
   onClose,
   onSubmitted,
 }: {
-  item: Item | null;
+  item: Item;
   onClose: () => void;
   onSubmitted: () => void;
 }) {
-  const [packages, setPackages] = useState<any[]>([]);
+  const [packages, setPackages] = useState<PackageCard[]>([]);
   const [packageId, setPackageId] = useState("");
-  const [wordCount, setWordCount] = useState("");
+  const [wordCount, setWordCount] = useState(() => item.wordCount ? String(item.wordCount) : "");
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const pending = useRef(false);
   const [uploadPercent, setUploadPercent] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!item) return;
-    setWordCount(item.wordCount ? String(item.wordCount) : "");
-    setFile(null);
+    let active = true;
     fetchPublicPackages()
       .then((list) => {
+        if (!active) return;
         setPackages(list);
         setPackageId(list.some((p) => p._id === item.packageId) ? item.packageId : "");
       })
-      .catch(() => setPackages([]));
+      .catch(() => { if (active) setPackages([]); });
+    return () => { active = false; };
   }, [item]);
 
   const handleSubmit = async () => {
@@ -515,7 +520,7 @@ function SubmitForReviewDialog({
                 <SelectValue placeholder="Select a package" />
               </SelectTrigger>
               <SelectContent>
-                {packages.map((p) => (
+                {packages.map((p) => p._id && (
                   <SelectItem key={p._id} value={p._id}>
                     {p.name} — ₹{Number(p.price || 0).toLocaleString("en-IN")}
                   </SelectItem>

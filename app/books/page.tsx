@@ -1,4 +1,5 @@
 "use client";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError, publicApiMessage, publicRetryAt } from "@/lib/api-error";
 
 
@@ -102,8 +103,9 @@ function BooksContent({ initialQuery = '', initialCategory = '', initialTag = 'a
     }
   }, []);
 
+  useEffect(() => scheduleRequest(fetchCategories), [fetchCategories]);
+
   useEffect(() => {
-    void fetchCategories();
     const stopCategories = onLiveChange("categories", (reason) => void fetchCategories(reason === "change"), 60_000);
     const stopBooks = onLiveChange("books", () => {
       setReloadVersion((version) => version + 1);

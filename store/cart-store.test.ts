@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useCartStore, type Book } from './cart-store';
+import { createCartStore, type Book } from './cart-store';
+
+const useCartStore = createCartStore(() => localStorage);
 
 const makeBook = (overrides: Partial<Book> = {}): Book => ({
   _id: 'book-1',
@@ -78,7 +80,7 @@ describe('cart-store', () => {
 
   it('falls back to discountPrice or mrp when price is missing', () => {
     useCartStore.getState().addItem(
-      makeBook({ _id: 'book-1', price: undefined as any, discountPrice: 350 })
+      makeBook({ _id: 'book-1', price: undefined, discountPrice: 350 })
     );
     expect(useCartStore.getState().getSubtotal()).toBe(350);
   });

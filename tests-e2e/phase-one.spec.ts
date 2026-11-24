@@ -7,7 +7,7 @@ const reader = { _id: readerId, name: "Test Reader", email: "reader@example.inva
 const book = { _id: bookId, title: "Fixture book", slug: "fixture-book", price: 400, format: "paperback", stock: 5 };
 const viewportWidths = [320, 375, 390, 430, 768, 1024, 1280, 1440, 1920];
 
-async function mockReader(page: Page, options: { orderError?: boolean } = {}) {
+async function mockReader(page: Page, options: { orderError?: boolean; paidAccess?: boolean } = {}) {
   await page.addInitScript(({ reader, book }) => {
     if (!localStorage.getItem("auth-storage")) {
       localStorage.setItem("auth-storage", JSON.stringify({ state: { user: reader, token: "fixture-token", isAuthenticated: true }, version: 0 }));
@@ -34,6 +34,11 @@ async function mockReader(page: Page, options: { orderError?: boolean } = {}) {
     const json = (data: unknown, status = 200) => route.fulfill({ status, headers: corsHeaders, json: { success: status < 400, data } });
     if (pathname.endsWith("/users/me/context")) return json({
       user: savedReader, capabilities: { canPublish: false, canAccessAuthorDashboard: false, canAdminister: false },
+      features: { paidAuthorDashboardAccess: options.paidAccess === true },
+    });
+    if (pathname.endsWith("/authors/me/dashboard-access")) return json({
+      state: "NOT_PURCHASED",
+      purchase: { _id: "test-purchase", status: "PENDING" },
     });
     if (pathname.endsWith("/users/me/addresses")) {
       if (method === "PUT") requests.addresses++;
@@ -114,7 +119,24 @@ test("an ambiguous order result prompts reconciliation before another order", as
   await page.getByRole("button", { name: "Confirm Order" }).click();
   await expect(page.getByRole("main").getByRole("alert")).toContainText("Check My Orders");
   await expect(page.getByRole("button", { name: "Confirm Order" })).toHaveCount(0);
+  await page.evaluate(() => {
+    localStorage.setItem("cart-storage", JSON.stringify({ state: { items: [] }, version: 0 }));
+  });
+  await page.reload();
+  await expect(page.getByRole("link", { name: "Check My Orders" })).toHaveAttribute("href", "/dashboard/orders");
+  await expect(page.getByRole("main").getByRole("alert")).toContainText("Check My Orders");
   expect(requests.orders).toBe(1);
+});
+
+test("paid author access requires server payment details", async ({ page }) => {
+  const { requests } = await mockReader(page, { paidAccess: true });
+  await page.goto("/dashboard/purchase-access");
+  await expect(page.getByText("Price unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("The payment QR code is unavailable.")).toBeVisible();
+  await expect(page.getByText("Payable amount unavailable")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Submit UTR Reference" })).toBeDisabled();
+  await expect(page.getByText("harglim@upi")).toHaveCount(0);
+  expect(requests.utr).toBe(0);
 });
 
 test("keyboard site and reader menus dismiss and return focus", async ({ page }) => {

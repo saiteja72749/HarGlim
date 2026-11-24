@@ -1,4 +1,5 @@
 "use client";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { publishedNumber } from "@/lib/book-presentation";
 import { onLiveChange } from '@/lib/live-sync';
 import { describeApiError } from "@/lib/api-error";
@@ -51,9 +52,9 @@ export default function AuthorsPage() {
     } finally { if (!controller.signal.aborted) setLoading(false); }
   }, []);
   useEffect(() => {
-    void fetchAuthors();
+    const cancelInitial = scheduleRequest(fetchAuthors);
     const unsubscribe = onLiveChange('author-data', () => void fetchAuthors());
-    return () => { unsubscribe(); pending.current?.abort(); };
+    return () => { cancelInitial(); unsubscribe(); pending.current?.abort(); };
   }, [fetchAuthors]);
 
   const filteredAuthors = authors

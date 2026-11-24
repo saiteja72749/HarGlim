@@ -1,16 +1,35 @@
 "use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useEffectEvent, useState, useRef } from "react";
 import { useAuthStore } from "@/store/auth-store";
 import api, { bootstrapUserContext } from "@/lib/api";
 import toast from "react-hot-toast";
 import { Loader2 } from "lucide-react";
 
+type GoogleCredential = { credential?: string };
+type PromptStatus = {
+  isNotDisplayed(): boolean;
+  isSkippedMoment(): boolean;
+  getNotDisplayedReason(): string;
+};
+
+interface GoogleIdentity {
+  initialize(options: {
+    client_id: string;
+    callback: (response: GoogleCredential) => void;
+    auto_select: boolean;
+    cancel_on_tap_outside: boolean;
+  }): void;
+  renderButton(element: HTMLElement, options: { theme: "outline"; size: "large"; type: "standard"; width: string }): void;
+  prompt(listener: (notification: PromptStatus) => void): void;
+}
+
 declare global {
   interface Window {
-    google?: any;
+    google?: { accounts?: { id?: GoogleIdentity } };
   }
 }
 
@@ -53,31 +72,32 @@ export function GoogleLoginButton({
   useEffect(() => {
     if (typeof window === "undefined" || !clientId) return;
 
-    if (window.google?.accounts?.id) {
-      setIsSdkLoaded(true);
-      return;
-    }
+    if (window.google?.accounts?.id) return scheduleRequest(() => setIsSdkLoaded(true));
 
     const existingScript = document.getElementById("google-gsi-script");
-    if (existingScript) {
-      existingScript.addEventListener("load", () => setIsSdkLoaded(true));
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = "google-gsi-script";
-    script.src = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    script.defer = true;
-    script.onload = () => setIsSdkLoaded(true);
-    script.onerror = () => {
+    const script = existingScript || document.createElement("script");
+    const onLoad = () => setIsSdkLoaded(true);
+    const onError = () => {
+      script.remove();
       console.warn("Google Identity Services script failed to load from CDN.");
     };
-    document.body.appendChild(script);
+    script.addEventListener("load", onLoad);
+    script.addEventListener("error", onError);
+    if (!existingScript && script instanceof HTMLScriptElement) {
+      script.id = "google-gsi-script";
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      script.defer = true;
+      document.body.appendChild(script);
+    }
+    return () => {
+      script.removeEventListener("load", onLoad);
+      script.removeEventListener("error", onError);
+    };
   }, [clientId]);
 
   // 2. Callback triggered when user selects a Google Account
-  const handleGoogleCallback = async (response: { credential?: string }) => {
+  const handleGoogleCallback = useEffectEvent(async (response: GoogleCredential) => {
     if (!response || !response.credential) {
       toast.error("Google sign-in was cancelled or failed to produce credentials.");
       return;
@@ -172,16 +192,17 @@ export function GoogleLoginButton({
       setIsLoading(false);
       setStatusMessage(null);
     }
-  };
+  });
 
   // 3. Initialize GSI client once script is loaded
   useEffect(() => {
-    if (!clientId || !isSdkLoaded || !window.google?.accounts?.id) return;
+    const identity = window.google?.accounts?.id;
+    if (!clientId || !isSdkLoaded || !identity) return;
 
     try {
-      window.google.accounts.id.initialize({
+      identity.initialize({
         client_id: clientId,
-        callback: handleGoogleCallback,
+        callback: (response) => { void handleGoogleCallback(response); },
         auto_select: false,
         cancel_on_tap_outside: true,
       });
@@ -189,7 +210,7 @@ export function GoogleLoginButton({
       // Render native hidden GSI button for standard popup triggering
       if (googleBtnRef.current) {
         googleBtnRef.current.replaceChildren();
-        window.google.accounts.id.renderButton(googleBtnRef.current, {
+        identity.renderButton(googleBtnRef.current, {
           theme: "outline",
           size: "large",
           type: "standard",
@@ -217,7 +238,7 @@ export function GoogleLoginButton({
       }
 
       // 2. Or prompt Google One Tap / account chooser directly
-      window.google.accounts.id.prompt((notification: any) => {
+      window.google.accounts.id.prompt((notification) => {
         if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
           console.warn("GSI prompt skipped:", notification.getNotDisplayedReason());
         }

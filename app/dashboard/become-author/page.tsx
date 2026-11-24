@@ -1,5 +1,6 @@
 "use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -38,9 +39,9 @@ export default function BecomeAuthorPage() {
   const [rejectionReason, setRejectionReason] = useState<string>("");
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
 
-  const [formData, setFormData] = useState({
-    fullName: user?.name || "",
-    email: user?.email || "",
+  const [draft, setFormData] = useState({
+    fullName: undefined as string | undefined,
+    email: undefined as string | undefined,
     phone: "",
     penName: "",
     bio: "",
@@ -48,15 +49,7 @@ export default function BecomeAuthorPage() {
     experience: "",
   });
 
-  useEffect(() => {
-    if (user) {
-      setFormData((prev) => ({
-        ...prev,
-        fullName: prev.fullName || user.name || "",
-        email: prev.email || user.email || "",
-      }));
-    }
-  }, [user]);
+  const formData = { ...draft, fullName: draft.fullName ?? user?.name ?? "", email: draft.email ?? user?.email ?? "" };
 
   // Check backend application status
   const checkStatus = useCallback(async () => {
@@ -95,9 +88,7 @@ export default function BecomeAuthorPage() {
     }
   }, []);
 
-  useEffect(() => {
-    checkStatus();
-  }, [checkStatus]);
+  useEffect(() => scheduleRequest(checkStatus), [checkStatus]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

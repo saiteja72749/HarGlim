@@ -1,4 +1,6 @@
 "use client";
+import type { Book } from "@/types";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 
@@ -23,9 +25,12 @@ import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
 import { extractList } from "@/lib/tracking";
 
+type LibraryBook = Partial<Book> & { cover?: string; purchasedAt?: string; orderNumber?: string };
+type LibraryEntry = LibraryBook & { book?: LibraryBook | string; order?: { orderNumber?: string } };
+
 export default function LibraryPage() {
   const { user } = useAuthStore();
-  const [libraryBooks, setLibraryBooks] = useState<any[]>([]);
+  const [libraryBooks, setLibraryBooks] = useState<LibraryBook[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [formatFilter, setFormatFilter] = useState("all");
   const [loading, setLoading] = useState(true);
@@ -38,16 +43,17 @@ export default function LibraryPage() {
     setError(false);
     try {
       const { data } = await api.get(`/users/${userId}/library`, { params: { limit: 100 }, cache: "no-store" });
-      const booksData = extractList(data, "library").length ? extractList(data, "library") : extractList(data, "books");
+      const library = extractList<LibraryEntry>(data, "library");
+      const booksData = library.length ? library : extractList<LibraryEntry>(data, "books");
       // Entries may be books or { book, purchasedAt, order } rows.
       setLibraryBooks(
         booksData
-          .map((entry: any) =>
+          .map((entry) =>
             entry?.book && typeof entry.book === "object"
               ? { ...entry.book, purchasedAt: entry.purchasedAt || entry.createdAt, orderNumber: entry.order?.orderNumber || entry.orderNumber }
               : entry
           )
-          .filter((book: any) => book && (book._id || book.id || book.title))
+          .filter((book) => book && (book._id || book.id || book.title))
       );
     } catch (err) {
       console.error("Failed to fetch library:", describeApiError(err));
@@ -57,9 +63,7 @@ export default function LibraryPage() {
     }
   }, [user]);
 
-  useEffect(() => {
-    fetchLibrary();
-  }, [fetchLibrary]);
+  useEffect(() => scheduleRequest(fetchLibrary), [fetchLibrary]);
 
   const filteredBooks = libraryBooks.filter((book) => {
     const format = String(book.format || "").toLowerCase().replace(/[\s-]/g, "");
@@ -138,7 +142,7 @@ export default function LibraryPage() {
                 <div className="relative aspect-[2/3] bg-[#F8F9F7]">
                   <Image
                     src={book.coverImage || book.cover || "/placeholder-book.svg"}
-                    alt={book.title}
+                    alt={book.title || "Book cover"}
                     fill
                     sizes="(min-width: 1280px) 22vw, (min-width: 640px) 45vw, 90vw"
                     className="object-cover transition-transform group-hover:scale-105"

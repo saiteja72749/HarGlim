@@ -1,5 +1,6 @@
 "use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback } from "react";
@@ -46,7 +47,7 @@ import toast from "react-hot-toast";
 import Link from "next/link";
 import { getSafeExternalUrl } from "@/lib/utils";
 
-const getStatusColor = (status: any) => {
+const getStatusColor = (status: unknown) => {
   switch (String(status || "").toLowerCase()) {
     case "approved":
     case "published":
@@ -61,7 +62,7 @@ const getStatusColor = (status: any) => {
   }
 };
 
-const getStatusIcon = (status: any) => {
+const getStatusIcon = (status: unknown) => {
   switch (String(status || "").toLowerCase()) {
     case "approved":
     case "published":
@@ -76,8 +77,10 @@ const getStatusIcon = (status: any) => {
   }
 };
 
+type AdminManuscript = { _id: string; id?: string; author?: { name?: string }; authorName?: string; category?: string | { name?: string }; createdAt?: string; documentUrl?: string; fileUrl?: string; manuscriptUrl?: string; package?: { name?: string }; packageId?: string | { name?: string }; status?: string; submittedDate?: string; title?: string };
+
 export default function AdminManuscriptsPage() {
-  const [manuscripts, setManuscripts] = useState<any[]>([]);
+  const [manuscripts, setManuscripts] = useState<AdminManuscript[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -87,7 +90,7 @@ export default function AdminManuscriptsPage() {
     setLoading(true);
     setError(false);
     try {
-      const params: any = { limit: 100 };
+      const params: Record<string, string | number> = { limit: 100 };
       if (statusFilter !== "all") params.status = statusFilter;
       if (searchQuery.trim()) params.search = searchQuery.trim();
 
@@ -105,7 +108,7 @@ export default function AdminManuscriptsPage() {
         fetchedManuscripts = data.publishRequests;
       } else if (data && typeof data === 'object') {
         const arrayProp = Object.values(data).find(val => Array.isArray(val));
-        if (arrayProp) fetchedManuscripts = arrayProp as any[];
+        if (arrayProp) fetchedManuscripts = arrayProp as AdminManuscript[];
       }
       setManuscripts(fetchedManuscripts);
     } catch (err) {
@@ -116,12 +119,10 @@ export default function AdminManuscriptsPage() {
     }
   }, [searchQuery, statusFilter]);
 
-  useEffect(() => {
-    fetchManuscripts();
-  }, [fetchManuscripts]);
+  useEffect(() => scheduleRequest(fetchManuscripts), [fetchManuscripts]);
 
   const safeManuscripts = Array.isArray(manuscripts) ? manuscripts : [];
-  const filteredManuscripts = safeManuscripts.filter((manuscript: any) => {
+  const filteredManuscripts = safeManuscripts.filter((manuscript) => {
     const title = String(manuscript?.title || "");
     const author = String(manuscript?.authorName || manuscript?.author?.name || "");
     const matchesSearch =
@@ -236,11 +237,13 @@ export default function AdminManuscriptsPage() {
               </TableHeader>
               <TableBody>
                 {filteredManuscripts.length > 0 ? (
-                  filteredManuscripts.map((manuscript: any, index: number) => {
+                  filteredManuscripts.map((manuscript, index: number) => {
+                    const manuscriptId = manuscript._id || manuscript.id;
+                    if (!manuscriptId) return null;
                     const StatusIcon = getStatusIcon(manuscript.status);
                     return (
                       <motion.tr
-                        key={manuscript.id || manuscript._id}
+                        key={manuscript._id || manuscript.id}
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: index * 0.05 }}
@@ -261,7 +264,7 @@ export default function AdminManuscriptsPage() {
                           {manuscript.package?.name || (typeof manuscript.packageId === 'object' ? manuscript.packageId?.name : manuscript.packageId) || "None"}
                         </TableCell>
                         <TableCell>
-                          {(manuscript.createdAt || manuscript.submittedDate) ? new Date(manuscript.createdAt || manuscript.submittedDate).toLocaleDateString() : "Unavailable"}
+                          {(manuscript.createdAt || manuscript.submittedDate) ? new Date(manuscript.createdAt || manuscript.submittedDate || "").toLocaleDateString() : "Unavailable"}
                         </TableCell>
                         <TableCell>
                           <Badge className={`gap-1 ${getStatusColor(manuscript.status)}`}>
@@ -291,7 +294,7 @@ export default function AdminManuscriptsPage() {
                               )}
                               {manuscript.status === "pending" && (
                                 <DropdownMenuItem
-                                  onClick={() => updateStatus(manuscript.id || manuscript._id, "under_review")}
+                                  onClick={() => updateStatus(manuscriptId, "under_review")}
                                 >
                                   <Clock className="mr-2 h-4 w-4" />
                                   Mark Under Review
@@ -300,14 +303,14 @@ export default function AdminManuscriptsPage() {
                               {(manuscript.status === "pending" || manuscript.status === "under_review") && (
                                 <>
                                   <DropdownMenuItem
-                                    onClick={() => updateStatus(manuscript.id || manuscript._id, "approved")}
+                                    onClick={() => updateStatus(manuscriptId, "approved")}
                                   >
                                     <CheckCircle className="mr-2 h-4 w-4" />
                                     Approve Request
                                   </DropdownMenuItem>
                                   <DropdownMenuItem
                                     className="text-destructive"
-                                    onClick={() => updateStatus(manuscript.id || manuscript._id, "rejected")}
+                                    onClick={() => updateStatus(manuscriptId, "rejected")}
                                   >
                                     <XCircle className="mr-2 h-4 w-4" />
                                     Reject Request
@@ -316,7 +319,7 @@ export default function AdminManuscriptsPage() {
                               )}
                               {manuscript.status === "approved" && (
                                 <DropdownMenuItem asChild>
-                                  <Link href={`/admin/books/new?title=${encodeURIComponent(manuscript.title)}&author=${encodeURIComponent(manuscript.authorName || manuscript.author?.name || "")}`} prefetch={false}>
+                                  <Link href={`/admin/books/new?title=${encodeURIComponent(manuscript.title || "")}&author=${encodeURIComponent(manuscript.authorName || manuscript.author?.name || "")}`} prefetch={false}>
                                     <BookOpen className="mr-2 h-4 w-4" />
                                     Publish as Book
                                   </Link>

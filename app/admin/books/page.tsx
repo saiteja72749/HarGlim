@@ -1,5 +1,7 @@
 "use client";
 
+import type { AuthorBook } from "@/types/author-api";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback } from "react";
@@ -58,7 +60,7 @@ import {
 import toast from "react-hot-toast";
 
 
-const getStatusColor = (status: string, stock?: number) => {
+const getStatusColor = (status: string | undefined, stock?: number) => {
   if (stock !== undefined && Number(stock) === 0) return "bg-red-500/10 text-red-600";
   if (stock !== undefined && Number(stock) > 0 && Number(stock) <= 5) return "bg-amber-500/10 text-amber-600";
   switch (status?.toLowerCase()) {
@@ -77,7 +79,7 @@ const getStatusColor = (status: string, stock?: number) => {
   }
 };
 
-const getStatusLabel = (status: string, stock?: number) => {
+const getStatusLabel = (status: string | undefined, stock?: number) => {
   if (stock !== undefined && Number(stock) === 0) return "Out of Stock";
   if (stock !== undefined && Number(stock) > 0 && Number(stock) <= 5) return "Low Stock";
   if (!status) return "Active";
@@ -88,7 +90,7 @@ const getStatusLabel = (status: string, stock?: number) => {
 };
 
 export default function AdminBooksPage() {
-  const [books, setBooks] = useState<any[]>([]);
+  const [books, setBooks] = useState<(AuthorBook & { cover?: string })[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -99,7 +101,7 @@ export default function AdminBooksPage() {
     setLoading(true);
     setError(false);
     try {
-      const params: any = { limit: 100 };
+      const params: Record<string, string | number> = { limit: 100 };
       if (searchQuery.trim()) {
         params.search = searchQuery.trim();
         params.q = searchQuery.trim();
@@ -120,20 +122,18 @@ export default function AdminBooksPage() {
     }
   }, [categoryFilter, searchQuery, statusFilter]);
 
-  useEffect(() => {
-    fetchBooks();
-  }, [fetchBooks]);
+  useEffect(() => scheduleRequest(fetchBooks), [fetchBooks]);
 
-  const getCategoryName = (category: any) => 
+  const getCategoryName = (category: AuthorBook["category"]) =>
     typeof category === "object" && category !== null ? category.name : category;
 
-  const getAuthorName = (book: any) => {
+  const getAuthorName = (book: AuthorBook) => {
     return getBookAuthorInfo(book).name;
   };
 
-  const categories = Array.from(new Set(books.map((b: any) => getCategoryName(b.category)))).filter(Boolean);
+  const categories = Array.from(new Set(books.map((b) => getCategoryName(b.category)))).filter(Boolean);
 
-  const filteredBooks = books.filter((book: any) => {
+  const filteredBooks = books.filter((book: AuthorBook) => {
     const title = book.title || "";
     const author = getAuthorName(book);
     const matchesSearch =
@@ -256,7 +256,7 @@ export default function AdminBooksPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
-                {categories.map((cat: any) => {
+                {categories.map((cat) => {
                   const catString = String(cat);
                   return (
                     <SelectItem key={catString} value={catString}>
@@ -300,7 +300,7 @@ export default function AdminBooksPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredBooks.map((book: any, index: number) => (
+                {filteredBooks.map((book, index) => (
                   <motion.tr
                     key={book.id || book._id}
                     initial={{ opacity: 0 }}
@@ -311,7 +311,7 @@ export default function AdminBooksPage() {
                     <TableCell>
                       <div className="flex items-center gap-3">
                         <Image
-                          src={book.coverImage || book.cover}
+                          src={book.coverImage || book.cover || "/placeholder-book.svg"}
                           alt={book.title}
                           width={36}
                           height={48}

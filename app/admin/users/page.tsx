@@ -1,5 +1,6 @@
 "use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback } from "react";
@@ -78,8 +79,23 @@ const getRoleColor = (role: string) => {
   }
 };
 
+type AdminUser = {
+  _id: string;
+  id?: string;
+  createdAt?: string;
+  email?: string;
+  fullName?: string;
+  name?: string;
+  isActive?: boolean;
+  joinDate?: string;
+  orders?: number;
+  role?: string;
+  spent?: number;
+  status?: string;
+};
+
 export default function AdminUsersPage() {
-  const [users, setUsers] = useState<any[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -90,7 +106,7 @@ export default function AdminUsersPage() {
     setLoading(true);
     setError(false);
     try {
-      const params: any = { limit: 100 };
+      const params: Record<string, string | number> = { limit: 100 };
       if (searchQuery.trim()) params.search = searchQuery.trim();
       if (roleFilter !== "all") params.role = roleFilter.toLowerCase();
       if (statusFilter !== "all") {
@@ -108,11 +124,9 @@ export default function AdminUsersPage() {
     }
   }, [roleFilter, searchQuery, statusFilter]);
 
-  useEffect(() => {
-    fetchUsers();
-  }, [fetchUsers]);
+  useEffect(() => scheduleRequest(fetchUsers), [fetchUsers]);
 
-  const filteredUsers = users.filter((user: any) => {
+  const filteredUsers = users.filter((user) => {
     const name = user.name || user.fullName || "";
     const email = user.email || "";
     const matchesSearch =
@@ -200,7 +214,7 @@ export default function AdminUsersPage() {
   };
 
   // Edit & Delete State
-  const [editingUser, setEditingUser] = useState<any | null>(null);
+  const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
   const [editForm, setEditForm] = useState({
     name: "",
     email: "",
@@ -211,7 +225,7 @@ export default function AdminUsersPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Reset Password State (POST /api/admin/users/:id/reset-password)
-  const [resetPasswordUser, setResetPasswordUser] = useState<any | null>(null);
+  const [resetPasswordUser, setResetPasswordUser] = useState<AdminUser | null>(null);
   const [newPasswordInput, setNewPasswordInput] = useState("");
   const [isSubmittingReset, setIsSubmittingReset] = useState(false);
 
@@ -268,7 +282,7 @@ export default function AdminUsersPage() {
     }
   };
 
-  const openEditModal = (user: any) => {
+  const openEditModal = (user: AdminUser) => {
     setEditingUser(user);
     setEditForm({
       name: user.name || user.fullName || "",
@@ -381,7 +395,7 @@ export default function AdminUsersPage() {
               </div>
               <div>
                 <p className="text-2xl font-bold">
-                  {users.filter((u: any) => u.status !== "Suspended").length}
+                  {users.filter((u) => u.status !== "Suspended").length}
                 </p>
                 <p className="text-sm text-muted-foreground">Active</p>
               </div>
@@ -396,7 +410,7 @@ export default function AdminUsersPage() {
               </div>
               <div>
                 <p className="text-2xl font-bold">
-                  {users.filter((u: any) => u.role === "Author").length}
+                  {users.filter((u) => u.role === "Author").length}
                 </p>
                 <p className="text-sm text-muted-foreground">Authors</p>
               </div>
@@ -411,7 +425,7 @@ export default function AdminUsersPage() {
               </div>
               <div>
                 <p className="text-2xl font-bold">
-                  {users.filter((u: any) => u.status === "Suspended").length}
+                  {users.filter((u) => u.status === "Suspended").length}
                 </p>
                 <p className="text-sm text-muted-foreground">Suspended</p>
               </div>
@@ -477,7 +491,7 @@ export default function AdminUsersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredUsers.map((user: any, index: number) => {
+                {filteredUsers.map((user, index) => {
                   const status = user.status || "Active";
                   const role = user.role || "User";
                   return (
@@ -509,7 +523,7 @@ export default function AdminUsersPage() {
                         ₹{(user.spent || 0).toLocaleString()}
                       </TableCell>
                       <TableCell>
-                        {(user.createdAt || user.joinDate) ? new Date(user.createdAt || user.joinDate).toLocaleDateString() : "Unavailable"}
+                        {(user.createdAt || user.joinDate) ? new Date(user.createdAt || user.joinDate || "").toLocaleDateString() : "Unavailable"}
                       </TableCell>
                       <TableCell>
                         <Badge className={getStatusColor(status)}>
@@ -563,8 +577,8 @@ export default function AdminUsersPage() {
                             {String(role).toLowerCase() === "author" && (
                               <DropdownMenuItem
                                 onClick={() =>
-                                  resendAuthorInvite(user.id || user._id).catch((err: any) =>
-                                    toast.error(err?.response?.data?.message || "Could not resend the invitation.")
+                                  resendAuthorInvite(user.id || user._id).catch((err: unknown) =>
+                                    toast.error(describeApiError(err).response?.data.message || "Could not resend the invitation.")
                                   )
                                 }
                               >

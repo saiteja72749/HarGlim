@@ -1,5 +1,7 @@
 "use client";
 
+import type { Book } from "@/types";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
@@ -35,7 +37,7 @@ import { ManualRoyaltyTable } from "@/components/royalties/manual-royalty-table"
 type AuthorOption = { id: string; name: string; email: string };
 type BookOption = { id: string; title: string };
 
-const bookAuthorId = (book: any) => String((typeof book?.author === "object" ? book.author?._id : book?.author) || "");
+const bookAuthorId = (book: Book) => String((typeof book?.author === "object" ? book.author?._id : book?.author) || "");
 const formatDate = (value: string) =>
   value ? new Date(value).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "";
 
@@ -43,7 +45,8 @@ function ManualRoyaltiesPage() {
   const searchParams = useSearchParams();
   const [authors, setAuthors] = useState<AuthorOption[]>([]);
   const [authorId, setAuthorId] = useState(searchParams.get("authorId") || "");
-  const [books, setBooks] = useState<BookOption[]>([]);
+  const [bookOptions, setBookOptions] = useState<{ authorId: string; items: BookOption[] }>();
+  const books = bookOptions?.authorId === authorId ? bookOptions.items : [];
   const [rows, setRows] = useState<ManualRoyaltyRow[]>(() => [emptyRow()]);
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
@@ -61,7 +64,7 @@ function ManualRoyaltiesPage() {
       .then((res) => {
         const list = res?.data?.data?.users ?? res?.data?.data ?? [];
         setAuthors(
-          (Array.isArray(list) ? list : []).map((a: any) => ({
+          (Array.isArray(list) ? list : []).map((a: { _id?: string; id?: string; name?: string; fullName?: string; email?: string }) => ({
             id: String(a._id || a.id),
             name: a.name || a.email || "Author",
             email: a.email || "",
@@ -73,19 +76,19 @@ function ManualRoyaltiesPage() {
 
   // The selected author's books feed each row's book picker (titles can still be typed freely).
   useEffect(() => {
-    setBooks([]);
     if (!authorId) return;
+    const controller = new AbortController();
     api
-      .get("/admin/books", { params: { author: authorId, limit: 100 } })
+      .get("/admin/books", { params: { author: authorId, limit: 100 }, signal: controller.signal })
       .then(({ data }) => {
         const items = data?.data?.books || (Array.isArray(data?.data) ? data.data : []);
-        setBooks(
-          (Array.isArray(items) ? items : [])
-            .filter((b: any) => bookAuthorId(b) === authorId)
-            .map((b: any) => ({ id: String(b._id || b.id), title: b.title || "Untitled" }))
-        );
+        if (controller.signal.aborted) return;
+        setBookOptions({ authorId, items: (Array.isArray(items) ? items : [])
+            .filter((b: Book) => bookAuthorId(b) === authorId)
+            .map((b: Book) => ({ id: String(b._id || b.id), title: b.title || "Untitled" })) });
       })
-      .catch(() => setBooks([]));
+      .catch(() => { if (!controller.signal.aborted) setBookOptions({ authorId, items: [] }); });
+    return () => controller.abort();
   }, [authorId]);
 
   const loadStatements = useCallback(async () => {
@@ -101,9 +104,7 @@ function ManualRoyaltiesPage() {
     }
   }, [authorId]);
 
-  useEffect(() => {
-    loadStatements();
-  }, [loadStatements]);
+  useEffect(() => scheduleRequest(loadStatements), [loadStatements]);
 
   const updateRow = (key: string, patch: Partial<ManualRoyaltyRow>) =>
     setRows((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)));

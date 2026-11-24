@@ -1,4 +1,7 @@
 "use client";
+import { populated } from "@/lib/order-status";
+import type { OrderRecord } from "@/types/commerce-api";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 
@@ -21,8 +24,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
+type DashboardData = {
+  pendingPaymentsCount: number;
+  processingOrdersCount: number;
+  pendingAuthorsCount: number;
+  pendingPublishRequests: number;
+  activeAuthorsCount: number;
+  totalBooks: number;
+  recentOrders: OrderRecord[];
+  recentAuthors: { _id?: string; email?: string; fullName?: string; id?: string; penName?: string; status?: string }[];
+};
+
 export default function AdminDashboard() {
-  const [dashboardData, setDashboardData] = useState<any>(null);
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -55,9 +69,7 @@ export default function AdminDashboard() {
     }
   };
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
+  useEffect(() => scheduleRequest(fetchDashboardData), []);
 
   if (error) {
     return (
@@ -269,7 +281,7 @@ export default function AdminDashboard() {
           <CardContent className="p-5">
             {recentOrders.length > 0 ? (
               <div className="space-y-3">
-                {recentOrders.map((order: any) => {
+                {recentOrders.map((order) => {
                   const id = order.orderNumber || order._id || order.id;
                   const isPaid = Boolean(order.isPaid || order.paymentStatus === "VERIFIED");
                   return (
@@ -280,7 +292,7 @@ export default function AdminDashboard() {
                       <div>
                         <span className="font-mono font-bold text-[#0F3D3E]">{id}</span>
                         <p className="text-muted-foreground text-[11px]">
-                          {order.shippingAddress?.fullName || order.user?.name || "Customer"}
+                          {order.shippingAddress?.fullName || populated(order.user)?.name || "Customer"}
                         </p>
                       </div>
                       <div className="text-right">
@@ -324,7 +336,7 @@ export default function AdminDashboard() {
           <CardContent className="p-5">
             {recentAuthors.length > 0 ? (
               <div className="space-y-3">
-                {recentAuthors.map((author: any) => (
+                {recentAuthors.map((author) => (
                   <div
                     key={author._id || author.id}
                     className="flex items-center justify-between p-3 rounded-xl border border-[#E2E6DF] bg-white hover:bg-[#F8F9F7] transition-colors text-xs"

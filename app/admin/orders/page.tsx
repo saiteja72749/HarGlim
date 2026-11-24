@@ -1,9 +1,12 @@
 "use client";
 
+import { populated } from "@/lib/order-status";
+import { scheduleRequest } from "@/lib/schedule-request";
+import type { OrderRecord, OrderItem, ShipmentRecord } from "@/types/commerce-api";
 import { describeApiError } from "@/lib/api-error";
 import { cn, getSafeExternalUrl } from "@/lib/utils";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
 import { resolveCourierTrackingUrl } from "@/lib/couriers";
 import {
@@ -125,7 +128,7 @@ const getOrderStatusBadge = (status: string) => {
  * Money always comes from item.price (price paid per unit at purchase time), never the
  * book's current mrp, which can change after the order.
  */
-function OrderItemsCell({ items }: { items: any[] }) {
+function OrderItemsCell({ items }: { items: OrderItem[] }) {
   if (!Array.isArray(items) || items.length === 0) {
     return <span className="text-[11px] italic text-[#5C6E6E]">No items</span>;
   }
@@ -179,7 +182,7 @@ function OrderItemsCell({ items }: { items: any[] }) {
   );
 }
 
-const getCustomerAddress = (order: any) =>
+const getCustomerAddress = (order: OrderRecord) =>
   order?.orderFormData?.shippingAddress ||
   order?.customerSnapshot?.shippingAddress ||
   order?.checkoutSnapshot?.shippingAddress ||
@@ -191,7 +194,7 @@ const getCustomerAddress = (order: any) =>
   order?.billing_address ||
   {};
 
-const getCustomerPhone = (order: any) => {
+const getCustomerPhone = (order: OrderRecord) => {
   const addr = getCustomerAddress(order);
   return (
     addr.phone ||
@@ -219,7 +222,7 @@ const getCustomerPhone = (order: any) => {
   );
 };
 
-const getCustomerEmail = (order: any) => {
+const getCustomerEmail = (order: OrderRecord) => {
   const addr = getCustomerAddress(order);
   return (
     addr.email ||
@@ -236,7 +239,7 @@ const getCustomerEmail = (order: any) => {
   );
 };
 
-const getCustomerName = (order: any) => {
+const getCustomerName = (order: OrderRecord) => {
   const addr = getCustomerAddress(order);
   return (
     addr.fullName ||
@@ -255,7 +258,7 @@ const getCustomerName = (order: any) => {
 };
 
 export default function AdminOrdersPage() {
-  const [orders, setOrders] = useState<any[]>([]);
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -263,7 +266,7 @@ export default function AdminOrdersPage() {
 
   // Tracking Modal State
   const [trackingModalOpen, setTrackingModalOpen] = useState(false);
-  const [selectedOrderForTracking, setSelectedOrderForTracking] = useState<any>(null);
+  const [selectedOrderForTracking, setSelectedOrderForTracking] = useState<OrderRecord | null>(null);
   const [trackingNumberInput, setTrackingNumberInput] = useState("");
   const [courierInput, setCourierInput] = useState("India Post");
   const [trackingUrlInput, setTrackingUrlInput] = useState("");
@@ -272,10 +275,10 @@ export default function AdminOrdersPage() {
 
   // Customer Shipping Address Modal State
   const [addressModalOpen, setAddressModalOpen] = useState(false);
-  const [selectedOrderForAddress, setSelectedOrderForAddress] = useState<any>(null);
+  const [selectedOrderForAddress, setSelectedOrderForAddress] = useState<OrderRecord | null>(null);
   const [copiedAddress, setCopiedAddress] = useState(false);
 
-  const copyFullAddress = (order: any) => {
+  const copyFullAddress = (order: OrderRecord) => {
     if (!order) return;
     const addr = getCustomerAddress(order);
     const enteredEmail = getCustomerEmail(order);
@@ -306,11 +309,11 @@ export default function AdminOrdersPage() {
   }, [searchQuery]);
   const [totalOrders, setTotalOrders] = useState<number | null>(null);
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     setLoading(true);
     setError(false);
     try {
-      const params: any = { page: 1, limit: 100, sort: "-createdAt" };
+      const params: Record<string, string | number> = { page: 1, limit: 100, sort: "-createdAt" };
       if (statusFilter !== "all") params.status = statusFilter.toUpperCase();
       if (debouncedSearch) params.search = debouncedSearch;
 
@@ -340,12 +343,9 @@ export default function AdminOrdersPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchOrders();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, debouncedSearch]);
+
+  useEffect(() => scheduleRequest(fetchOrders), [fetchOrders]);
 
   // Action 1: Approve / Confirm Payment
   const handleApprovePayment = async (orderMongoId?: string, paymentMongoId?: string) => {
@@ -481,8 +481,8 @@ export default function AdminOrdersPage() {
       const shipmentRes = await api.get("/admin/shipments", {
         params: { order: orderMongoId, limit: 100 },
         cache: "no-store",
-      } as any);
-      const shipment = extractList(shipmentRes.data, "shipments").find((s: any) =>
+      });
+      const shipment = extractList<ShipmentRecord>(shipmentRes.data, "shipments").find((s) =>
         shipmentBelongsToOrder(s, selectedOrderForTracking)
       );
       // Admin shipment actions take shipment._id only (never orderNumber / shipmentId UUID / AWB).
@@ -559,7 +559,7 @@ export default function AdminOrdersPage() {
     const customer = getCustomerName(order).toLowerCase();
     const query = searchQuery.toLowerCase();
 
-    const books = (order.items || []).map((item: any) => (item.book?.title || "").toLowerCase()).join(" ");
+    const books = (order.items || []).map((item) => (populated(item.book)?.title || "").toLowerCase()).join(" ");
     const matchesSearch =
       orderNum.includes(query) || utrNum.includes(query) || customer.includes(query) || books.includes(query);
     const matchesStatus =
@@ -674,7 +674,7 @@ export default function AdminOrdersPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredOrders.map((order: any) => {
+                  {filteredOrders.map((order: OrderRecord) => {
                     const orderDisplayId = order.orderNumber || order._id || order.id;
                     const mongoOrderId = getMongoId(order._id) || getMongoId(order.id);
                     const paymentId = (
@@ -744,7 +744,7 @@ export default function AdminOrdersPage() {
 
                         {/* Books (every item, not just the first) */}
                         <TableCell className="align-top">
-                          <OrderItemsCell items={order.items} />
+                          <OrderItemsCell items={order.items || []} />
                         </TableCell>
 
                         {/* UTR Number */}
@@ -1035,14 +1035,14 @@ export default function AdminOrdersPage() {
                   <span>Books in Consignment ({selectedOrderForAddress.items?.length || 0})</span>
                 </span>
                 <div className="max-h-40 overflow-y-auto space-y-2 divide-y divide-[#E2E6DF]/60 border border-[#E2E6DF] rounded-xl p-3 bg-[#F8F9F7]/50 text-xs">
-                  {(selectedOrderForAddress.items || []).map((item: any, idx: number) => (
+                  {(selectedOrderForAddress.items || []).map((item, idx: number) => (
                     <div key={idx} className="flex items-center justify-between pt-2 first:pt-0">
                       <div className="pr-2">
                         <p className="font-serif font-bold text-[#0F3D3E] line-clamp-1">
-                          {item.book?.title ?? item.title ?? "Book no longer available"}
+                          {populated(item.book)?.title ?? item.title ?? "Book no longer available"}
                         </p>
                         <p className="text-[10px] text-[#5C6E6E]">
-                          Qty: <strong className="text-[#0F3D3E]">{item.quantity}</strong> {item.format ? `• ${item.format}` : (item.book?.format ? `• ${item.book.format}` : "")}
+                          Qty: <strong className="text-[#0F3D3E]">{item.quantity}</strong> {item.format ? `• ${item.format}` : (populated(item.book)?.format ? `• ${populated(item.book)?.format}` : "")}
                         </p>
                       </div>
                       <span className="font-mono font-bold text-[#0F3D3E] shrink-0">

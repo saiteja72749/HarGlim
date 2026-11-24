@@ -1,5 +1,6 @@
 "use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { useEffect, useState, useCallback } from "react";
@@ -26,9 +27,22 @@ type RoyaltyPaymentMethod =
   | "CHEQUE"
   | "OTHER";
 
+type SettlementAuthor = { _id: string; id?: string; name?: string; fullName?: string; email?: string };
+type SettlementPreview = {
+  periodStart?: string;
+  periodEnd?: string;
+  claims?: unknown[];
+  amount?: number;
+  totalAmount?: number;
+  totalRoyalty?: number;
+  totalClaims?: number;
+  totalSales?: number;
+};
+type Settlement = SettlementPreview & { _id: string; id?: string; settlementNumber?: string; author?: SettlementAuthor | string; status?: string };
+
 export default function AdminSettlementsPage() {
-  const [settlements, setSettlements] = useState<any[]>([]);
-  const [authors, setAuthors] = useState<any[]>([]);
+  const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const [authors, setAuthors] = useState<SettlementAuthor[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"settlements" | "preview">("settlements");
 
@@ -40,12 +54,12 @@ export default function AdminSettlementsPage() {
     return d.toISOString().split("T")[0];
   });
   const [toDate, setToDate] = useState(() => new Date().toISOString().split("T")[0]);
-  const [previewData, setPreviewData] = useState<any>(null);
+  const [previewData, setPreviewData] = useState<SettlementPreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [creatingBatch, setCreatingBatch] = useState(false);
 
   // Mark Paid Modal State
-  const [selectedSettlement, setSelectedSettlement] = useState<any>(null);
+  const [selectedSettlement, setSelectedSettlement] = useState<Settlement | null>(null);
   const [payoutForm, setPayoutForm] = useState<{
     paymentMethod: RoyaltyPaymentMethod;
     transactionReference: string;
@@ -91,8 +105,10 @@ export default function AdminSettlementsPage() {
         console.warn("Could not load authors list:", describeApiError(e));
       }
     };
-    loadAuthors();
-    loadSettlements();
+    return scheduleRequest(() => {
+      void loadAuthors();
+      void loadSettlements();
+    });
   }, [loadSettlements]);
 
   // Handle Settlement Batch Preview
@@ -150,6 +166,7 @@ export default function AdminSettlementsPage() {
 
   // Handle Approve Batch
   const handleApproveBatch = async (id: string) => {
+    if (!id) return;
     try {
       await api.post(`/admin/royalty-settlements/${id}/approve`, {
         payment_status: "approved",
@@ -195,6 +212,7 @@ export default function AdminSettlementsPage() {
 
   // Handle Cancel Batch
   const handleCancelBatch = async (id: string) => {
+    if (!id) return;
     const reason = prompt("Enter cancellation rationale:", "Cancelled by Admin");
     if (reason === null) return;
 
@@ -210,7 +228,7 @@ export default function AdminSettlementsPage() {
     }
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: string | undefined) => {
     switch (status?.toUpperCase()) {
       case "DRAFT":
         return <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20">Draft</Badge>;
@@ -221,7 +239,7 @@ export default function AdminSettlementsPage() {
       case "CANCELLED":
         return <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/20">Cancelled</Badge>;
       default:
-        return <Badge variant="outline">{status}</Badge>;
+        return <Badge variant="outline">{status || "Unavailable"}</Badge>;
     }
   };
 
@@ -280,7 +298,7 @@ export default function AdminSettlementsPage() {
                       </SelectTrigger>
                       <SelectContent>
                         {authors.map((a) => (
-                          <SelectItem key={a._id || a.id} value={a._id || a.id}>
+                          <SelectItem key={a._id || a.id || ""} value={a._id || a.id || ""}>
                             {a.name || a.fullName || a.email}
                           </SelectItem>
                         ))}
@@ -399,7 +417,7 @@ export default function AdminSettlementsPage() {
                           {item.settlementNumber || item._id || item.id}
                         </td>
                         <td className="py-3 px-4 font-medium">
-                          {item.author?.name || item.author?.fullName || item.author?.email || item.author || "Author"}
+                          {typeof item.author === "string" ? item.author : item.author?.name || item.author?.fullName || item.author?.email || "Author"}
                         </td>
                         <td className="py-3 px-4 text-xs text-muted-foreground">
                           {item.periodStart ? new Date(item.periodStart).toLocaleDateString() : "—"} to{" "}
@@ -411,7 +429,7 @@ export default function AdminSettlementsPage() {
                         <td className="py-3 px-4">{getStatusBadge(item.status)}</td>
                         <td className="py-3 px-4 text-right space-x-2">
                           {item.status === "DRAFT" && (
-                            <Button size="sm" onClick={() => handleApproveBatch(item._id || item.id)}>
+                            <Button size="sm" onClick={() => handleApproveBatch(item._id || item.id || "")}>
                               Approve
                             </Button>
                           )}
@@ -438,7 +456,7 @@ export default function AdminSettlementsPage() {
                               size="sm"
                               variant="outline"
                               className="text-destructive hover:bg-destructive/10"
-                              onClick={() => handleCancelBatch(item._id || item.id)}
+                              onClick={() => handleCancelBatch(item._id || item.id || "")}
                             >
                               Cancel
                             </Button>

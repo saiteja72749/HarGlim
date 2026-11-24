@@ -1,5 +1,7 @@
 "use client";
 
+import type { OrderRecord, PaymentRecord, InvoiceRecord } from "@/types/commerce-api";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { Suspense, useRef, useState, useEffect, useCallback } from "react";
@@ -59,18 +61,18 @@ import {
   FULFILMENT_META,
   PAYMENT_STATE_META,
   getFulfilmentStage,
-  getOrderTotal,
+  getOrderTotal, populated, relatedId,
   getPaymentState,
   indexPaymentsByOrder,
   type PaymentState,
 } from "@/lib/order-status";
 
-const getOrderStatusBadge = (order: any) => {
+const getOrderStatusBadge = (order: OrderRecord) => {
   const meta = FULFILMENT_META[getFulfilmentStage(order)];
   return <Badge className={`${meta.tone} font-semibold px-2.5 py-0.5`}>{meta.label}</Badge>;
 };
 
-const getOrderAddress = (order: any) =>
+const getOrderAddress = (order: OrderRecord) =>
   order?.orderFormData?.shippingAddress ||
   order?.customerSnapshot?.shippingAddress ||
   order?.checkoutSnapshot?.shippingAddress ||
@@ -80,7 +82,7 @@ const getOrderAddress = (order: any) =>
   order?.shipping_address ||
   null;
 
-const getOrderContact = (order: any) => {
+const getOrderContact = (order: OrderRecord) => {
   const shippingAddress = getOrderAddress(order) || {};
   return {
     name:
@@ -147,7 +149,7 @@ const getPaymentStatusBadge = (state: PaymentState) => {
 };
 
 // Filter values group backend states the way readers think about them.
-const ORDER_FILTERS: { value: string; label: string; match: (order: any, payment: PaymentState) => boolean }[] = [
+const ORDER_FILTERS: { value: string; label: string; match: (order: OrderRecord, payment: PaymentState) => boolean }[] = [
   { value: "all", label: "All Orders", match: () => true },
   { value: "awaiting", label: "Awaiting Payment", match: (_o, p) => p === "awaiting_payment" || p === "failed" },
   { value: "verifying", label: "Verification Pending", match: (_o, p) => p === "verification_pending" },
@@ -166,7 +168,7 @@ function OrdersContent() {
   const inFlightUtr = useRef(new Set<string>());
 
   const { user } = useAuthStore();
-  const [orders, setOrders] = useState<any[]>([]);
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -178,7 +180,7 @@ function OrdersContent() {
   const [submittingUtrMap, setSubmittingUtrMap] = useState<Record<string, boolean>>({});
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
   const [copiedAwbMap, setCopiedAwbMap] = useState<Record<string, boolean>>({});
-  const [paymentsByOrder, setPaymentsByOrder] = useState<Map<string, any>>(new Map());
+  const [paymentsByOrder, setPaymentsByOrder] = useState<Map<string, PaymentRecord>>(new Map());
   const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const copyAwbToClipboard = (orderId: string, awbText: string) => {
@@ -211,11 +213,11 @@ function OrdersContent() {
         throw ordersRes.reason;
       }
 
-      const list = extractList(ordersRes.value.data, "orders").sort(
-        (a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      const list = extractList<OrderRecord>(ordersRes.value.data, "orders").sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
       );
       const shipments = shipmentsRes.status === "fulfilled" ? extractList(shipmentsRes.value.data, "shipments") : [];
-      const payments = paymentsRes.status === "fulfilled" ? extractList(paymentsRes.value.data, "payments") : [];
+      const payments = paymentsRes.status === "fulfilled" ? extractList<PaymentRecord>(paymentsRes.value.data, "payments") : [];
       setPaymentsByOrder(indexPaymentsByOrder(payments));
       setOrders(mergeShipmentsIntoOrders(list, shipments));
     } catch (err) {
@@ -226,16 +228,14 @@ function OrdersContent() {
     }
   }, [user]);
 
-  useEffect(() => {
-    fetchOrders();
-  }, [fetchOrders]);
+  useEffect(() => scheduleRequest(fetchOrders), [fetchOrders]);
 
   // On expand: GET /orders/{_id}/tracking returns { shipment, trackingHistory }.
   // 404 just means the shipment isn't created yet (before payment verification + invoice).
   const [trackingByOrder, setTrackingByOrder] = useState<
     Record<string, { state: "loading" | "ready" | "none"; history: ReturnType<typeof getTrackingHistory> }>
   >({});
-  const loadOrderShipment = async (order: any) => {
+  const loadOrderShipment = async (order: OrderRecord) => {
     const orderMongoId = String(order._id || order.id || "");
     if (!orderMongoId || trackingByOrder[orderMongoId]?.state === "loading") return;
     setTrackingByOrder((prev) => ({ ...prev, [orderMongoId]: { state: "loading", history: prev[orderMongoId]?.history || [] } }));
@@ -299,19 +299,20 @@ function OrdersContent() {
     }
   };
 
-  const handleDownloadInvoice = async (order: any) => {
+  const handleDownloadInvoice = async (order: OrderRecord) => {
     const userId = user?._id || user?.id;
     const orderId = order._id || order.id;
+    if (!orderId) return;
     setDownloadingInvoiceId(orderId);
 
     try {
       const { data } = await api.get(`/users/${userId}/invoices`, { params: { limit: 100 } });
-      const invoices = extractList(data, "invoices");
+      const invoices = extractList<InvoiceRecord>(data, "invoices");
       const paymentId = typeof order.payment === "object" ? order.payment?._id : order.payment;
       const matchingInvoice = invoices.find(
-        (inv: any) =>
-          String(inv.order?._id || inv.order) === String(orderId) ||
-          (paymentId && String(inv.payment?._id || inv.payment) === String(paymentId))
+        (inv: InvoiceRecord) =>
+          relatedId(inv.order) === orderId ||
+          (paymentId && relatedId(inv.payment) === paymentId)
       );
 
       const invoiceId = matchingInvoice?._id || matchingInvoice?.id;
@@ -432,9 +433,10 @@ function OrdersContent() {
         <div className="space-y-6">
           {filteredOrders.map((order, index) => {
             const status = order.status || order.orderStatus || "PENDING";
-            const id = order.orderNumber || order._id || order.id;
+            const id = order.orderNumber || order._id || order.id || "";
             // API paths take the Mongo ObjectId, never the human-readable orderNumber.
             const orderMongoId = order._id || order.id;
+            if (!orderMongoId) return null;
             const isExpanded = expandedOrder === id;
             const paymentRecord = paymentsByOrder.get(String(orderMongoId));
             const paymentState = getPaymentState(order, paymentRecord);
@@ -502,9 +504,9 @@ function OrdersContent() {
                     {/* Order Book Preview Items */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                       <div className="flex flex-wrap items-center gap-3">
-                        {order.items?.map((item: any, i: number) => {
-                          const bookTitle = item.book?.title || "Book Item";
-                          const coverImage = item.book?.coverImage || "/placeholder-book.svg";
+                        {order.items?.map((item, i) => {
+                          const bookTitle = populated(item.book)?.title || "Book Item";
+                          const coverImage = populated(item.book)?.coverImage || "/placeholder-book.svg";
 
                           return (
                             <div key={item._id || i} className="relative group h-14 w-10">
@@ -757,10 +759,10 @@ function OrdersContent() {
                               Itemized Book Details ({order.items?.length || 0})
                             </h4>
                             <div className="space-y-2.5">
-                              {order.items?.map((item: any, i: number) => {
-                                const bookTitle = item.book?.title || "Book Title";
-                                const coverImage = item.book?.coverImage || "/placeholder-book.svg";
-                                const price = item.price || item.book?.price || 0;
+                              {order.items?.map((item, i) => {
+                                const bookTitle = populated(item.book)?.title || "Book Title";
+                                const coverImage = populated(item.book)?.coverImage || "/placeholder-book.svg";
+                                const price = item.price || populated(item.book)?.price || 0;
 
                                 return (
                                   <div
@@ -781,7 +783,7 @@ function OrdersContent() {
                                       </p>
                                     </div>
                                     <p className="font-bold text-sm text-[#0F3D3E]">
-                                      ₹{(price * item.quantity).toLocaleString()}
+                                      ₹{(price * (item.quantity ?? 0)).toLocaleString()}
                                     </p>
                                   </div>
                                 );
@@ -1085,36 +1087,35 @@ function OrdersContent() {
  * Real UPI QR for an unpaid order. Order list rows usually omit the (large) QR, so it is
  * read from the payment record: GET /users/{id}/payments/{paymentId} includes active QR metadata.
  */
-function OrderPaymentQr({ userId, order, payment }: { userId: string; order: any; payment?: any }) {
+function OrderPaymentQr({ userId, order, payment }: { userId: string; order: OrderRecord; payment?: PaymentRecord }) {
   const paymentId = String(
     payment?._id || (typeof order.payment === "object" ? order.payment?._id : order.payment) || ""
   );
   const initialQr = getPaymentQr(payment?.qrCodeDataUrl || order.qrCodeDataUrl);
-  const [qr, setQr] = useState<string>(initialQr);
-  const [upi, setUpi] = useState(() => getUpiDestination(payment?.upiUrl));
-  const [state, setState] = useState<"loading" | "ready" | "missing">(initialQr ? "ready" : "loading");
+  const requestKey = userId && paymentId ? `${userId}/${paymentId}` : "";
+  const [result, setResult] = useState<{ key: string; qr: string; upi: ReturnType<typeof getUpiDestination> }>();
+  const [failedQr, setFailedQr] = useState("");
+  const current = result?.key === requestKey ? result : undefined;
+  const qr = initialQr || current?.qr || "";
+  const upi = current?.upi || getUpiDestination(payment?.upiUrl);
+  const state = qr ? (failedQr === qr ? "missing" : "ready") : requestKey && !current ? "loading" : "missing";
 
   useEffect(() => {
-    if (initialQr || !paymentId || !userId) {
-      if (!initialQr) setState("missing");
-      return;
-    }
-    let cancelled = false;
+    if (initialQr || !requestKey) return;
+    const controller = new AbortController();
     api
-      .get(`/users/${userId}/payments/${paymentId}`, { cache: "no-store" })
+      .get(`/users/${userId}/payments/${paymentId}`, { cache: "no-store", signal: controller.signal })
       .then(({ data }) => {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         const detail = data?.data?.payment || data?.data || data;
         const raw = getPaymentQr(detail?.qrCodeDataUrl || detail?.qr?.dataUrl || detail?.qrCode);
-        setQr(raw);
-        setUpi(getUpiDestination(detail?.upiUrl || detail?.qr?.upiUrl));
-        setState(raw ? "ready" : "missing");
+        setResult({ key: requestKey, qr: raw, upi: getUpiDestination(detail?.upiUrl || detail?.qr?.upiUrl) });
       })
-      .catch(() => !cancelled && setState("missing"));
-    return () => {
-      cancelled = true;
-    };
-  }, [initialQr, paymentId, userId]);
+      .catch(() => {
+        if (!controller.signal.aborted) setResult({ key: requestKey, qr: "", upi: null });
+      });
+    return () => controller.abort();
+  }, [initialQr, paymentId, requestKey, userId]);
 
   return (
     <div className="flex flex-col items-center bg-white p-3 rounded-xl border-2 border-[#D4AF37] shadow-sm w-40 shrink-0">
@@ -1126,7 +1127,7 @@ function OrderPaymentQr({ userId, order, payment }: { userId: string; order: any
           width={128}
           height={128}
           className="h-32 w-32 object-contain"
-          onError={() => setState("missing")}
+          onError={() => setFailedQr(qr)}
         />
       ) : state === "loading" ? (
         <div className="h-32 w-32 flex items-center justify-center">

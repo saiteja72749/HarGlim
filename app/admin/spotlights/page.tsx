@@ -1,5 +1,6 @@
 "use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -32,7 +33,7 @@ type AdminSpotlight = {
 type StatusFilter = "all" | "active" | "archived";
 
 const emptyForm: SpotlightForm = { authorName: "", caption: "", sortOrder: "", isActive: true };
-const errorMessage = (err: any, fallback: string) => err?.response?.data?.message || fallback;
+const errorMessage = (err: unknown, fallback: string) => describeApiError(err).response?.data.message || fallback;
 const multipart = { headers: { "Content-Type": "multipart/form-data" } };
 
 async function fetchAllSpotlights(): Promise<AdminSpotlight[]> {
@@ -57,7 +58,7 @@ export default function AdminSpotlightsPage() {
   const [editing, setEditing] = useState<AdminSpotlight | null>(null);
   const [form, setForm] = useState<SpotlightForm>(emptyForm);
   const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState("");
+  const [preview, setPreview] = useState<{ file: File; url: string }>();
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -73,19 +74,20 @@ export default function AdminSpotlightsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => scheduleRequest(load), [load]);
 
   // Preview of the chosen file, released when it changes.
   useEffect(() => {
-    if (!file) {
-      setPreview("");
-      return;
-    }
-    const url = URL.createObjectURL(file);
-    setPreview(url);
-    return () => URL.revokeObjectURL(url);
+    if (!file) return;
+    let url: string | undefined;
+    const cancel = scheduleRequest(() => {
+      url = URL.createObjectURL(file);
+      setPreview({ file, url });
+    });
+    return () => {
+      cancel();
+      if (url) URL.revokeObjectURL(url);
+    };
   }, [file]);
 
   const counts = useMemo(() => ({ active: items.filter((s) => s.isActive !== false).length, all: items.length }), [items]);
@@ -187,7 +189,7 @@ export default function AdminSpotlightsPage() {
     { key: "archived", label: `Archived (${counts.all - counts.active})` },
     { key: "all", label: `All (${counts.all})` },
   ];
-  const shownImage = preview || editing?.image || "";
+  const shownImage = preview?.file === file ? preview.url : editing?.image || "";
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">

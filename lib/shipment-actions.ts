@@ -6,7 +6,7 @@ import { getShipmentStatusPath, normalizeShipmentStatus } from "@/lib/tracking";
  * already on its way. If the backend resets such a shipment to COURIER_ASSIGNED, the progress
  * steps it already had are replayed so the order does not slide back from Shipped.
  */
-export async function assignCourier(shipment: any, payload: Record<string, any>, source: string) {
+export async function assignCourier(shipment: { _id?: string; id?: string; status?: unknown }, payload: Record<string, unknown>, source: string) {
   const shipmentId = shipment?._id || shipment?.id;
   const before = normalizeShipmentStatus(shipment?.status);
 

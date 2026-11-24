@@ -1,4 +1,5 @@
 'use client';
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 
@@ -82,9 +83,7 @@ export default function AuthorDetailPage() {
     }
   }, [params.id]);
 
-  useEffect(() => {
-    fetchAuthorData();
-  }, [fetchAuthorData]);
+  useEffect(() => scheduleRequest(fetchAuthorData), [fetchAuthorData]);
 
   const handleShare = () => {
     if (typeof window !== 'undefined') {
@@ -222,7 +221,7 @@ export default function AuthorDetailPage() {
               {/* Genres / Topics */}
               {categoriesList.length > 0 && (
                 <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 pt-1">
-                  {categoriesList.slice(0, 4).map((cat: any, i) => (
+                  {categoriesList.slice(0, 4).map((cat, i) => (
                     <span
                       key={i}
                       className="px-2.5 py-0.5 rounded-full bg-white/10 text-white/90 text-xs font-medium border border-white/10"

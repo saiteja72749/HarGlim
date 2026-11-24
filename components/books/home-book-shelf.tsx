@@ -12,22 +12,22 @@ import { publicApiMessage, publicRetryAt } from "@/lib/api-error";
 import { onLiveChange } from "@/lib/live-sync";
 import type { Book } from "@/types";
 
+const EMPTY_BOOKS: Book[] = [];
+
 export function HomeBookShelf() {
   const list = useRef<HTMLUListElement>(null);
-  const [books, setBooks] = useState<Book[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<unknown>(null);
+  const [result, setResult] = useState<{ attempt: number; books: Book[]; error?: unknown }>();
   const [attempt, setAttempt] = useState(0);
+  const current = result?.attempt === attempt ? result : undefined;
+  const { books = EMPTY_BOOKS, error } = current ?? {};
+  const loading = !current;
   const [edges, setEdges] = useState({ start: true, end: false });
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
     fetchCatalogPage({ page: 1, limit: 10 }, controller.signal)
-      .then(({ books }) => { if (!controller.signal.aborted) setBooks(books); })
-      .catch((error) => { if (!controller.signal.aborted) setError(error); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+      .then(({ books }) => { if (!controller.signal.aborted) setResult({ attempt, books }); })
+      .catch((error) => { if (!controller.signal.aborted) setResult({ attempt, books: EMPTY_BOOKS, error }); });
     return () => controller.abort();
   }, [attempt]);
 

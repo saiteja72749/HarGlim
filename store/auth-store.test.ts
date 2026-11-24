@@ -1,7 +1,9 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it } from "vitest";
-import { useAuthStore } from "./auth-store";
+import { createAuthStore } from "./auth-store";
 import type { Role, UserContextData } from '@/types';
+
+const useAuthStore = createAuthStore(() => localStorage);
 
 const context = (role: Role, profilePicture: string | null = null): UserContextData =>
   ({

@@ -1,6 +1,7 @@
 "use client";
 
-import { describeApiError } from "@/lib/api-error";
+import { scheduleRequest } from "@/lib/schedule-request";
+import { describeApiError, record } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -40,9 +41,18 @@ import { RoyaltyCostFields } from "@/components/books/royalty-cost-fields";
 
 type AuthorType = "existing" | "new" | "external";
 
+type AccountRef = string | { _id?: string; id?: string; name?: string; email?: string };
+type AuthorAccount = {
+  _id?: string; id?: string; name?: string; fullName?: string; authorName?: string; penName?: string;
+  email?: string; role?: string; bio?: string; user?: AccountRef; userId?: AccountRef; authorId?: AccountRef;
+  account?: AccountRef; profile?: { user?: AccountRef; userId?: AccountRef };
+};
+type AuthorOption = { _id: string; name: string; email: string; role: string; bio?: string };
+const accountDetails = (value: AccountRef | undefined) => typeof value === "object" ? value : undefined;
+
 const isObjectId = (value: unknown) => /^[0-9a-fA-F]{24}$/.test(String(value || ""));
 
-const getAuthorUserId = (item: any) => {
+const getAuthorUserId = (item: AuthorAccount) => {
   const linkedUser =
     item?.user ||
     item?.userId ||
@@ -58,20 +68,20 @@ const getAuthorUserId = (item: any) => {
   return linkedUser || item?._id || item?.id || "";
 };
 
-const getAuthorName = (item: any) =>
+const getAuthorName = (item: AuthorAccount) =>
   item?.name ||
   item?.fullName ||
   item?.authorName ||
   item?.penName ||
-  item?.user?.name ||
-  item?.userId?.name ||
+  accountDetails(item.user)?.name ||
+  accountDetails(item.userId)?.name ||
   item?.email ||
-  item?.user?.email ||
-  item?.userId?.email ||
+  accountDetails(item.user)?.email ||
+  accountDetails(item.userId)?.email ||
   "Registered Author";
 
-const getAuthorEmail = (item: any) =>
-  item?.email || item?.user?.email || item?.userId?.email || "";
+const getAuthorEmail = (item: AuthorAccount) =>
+  item?.email || accountDetails(item.user)?.email || accountDetails(item.userId)?.email || "";
 
 const normalizeBookStatus = (status: string) => {
   const normalized = String(status || "").toLowerCase();
@@ -80,8 +90,11 @@ const normalizeBookStatus = (status: string) => {
   return "draft";
 };
 
-const getCreatedBookFromResponse = (data: any) =>
-  data?.data?.book || data?.book || data?.data || data;
+const getCreatedBookFromResponse = (input: unknown) => {
+  const response = record(input);
+  const data = record(response.data);
+  return record(data.book ?? response.book ?? response.data ?? input);
+};
 
 export default function AddBookPage() {
   const router = useRouter();
@@ -127,7 +140,7 @@ export default function AddBookPage() {
 
   // Author Selection State
   const [authorType, setAuthorType] = useState<AuthorType>("existing");
-  const [authorsList, setAuthorsList] = useState<any[]>([]);
+  const [authorsList, setAuthorsList] = useState<AuthorOption[]>([]);
   const [authorSearchQuery, setAuthorSearchQuery] = useState(initialAuthor);
   const [selectedAuthorId, setSelectedAuthorId] = useState<string>("");
   const [selectedAuthorName, setSelectedAuthorName] = useState<string>("");
@@ -173,12 +186,12 @@ export default function AddBookPage() {
       const resUsers = await api.get("/admin/users", {
         params: { role: "author", limit: 100 },
         cache: "no-store",
-      } as any);
+      });
       const list = resUsers?.data?.data?.users ?? resUsers?.data?.data;
       const combined = Array.isArray(list) ? list : [];
 
       const seen = new Set<string>();
-      const parsed: any[] = [];
+      const parsed: AuthorOption[] = [];
 
       for (const item of combined) {
         if (!item) continue;
@@ -216,9 +229,7 @@ export default function AddBookPage() {
     }
   }, [initialAuthor, selectedAuthorId, setAuthorsList, setSelectedAuthorId, setSelectedAuthorName]);
 
-  useEffect(() => {
-    loadAllAuthors();
-  }, [loadAllAuthors]);
+  useEffect(() => scheduleRequest(loadAllAuthors), [loadAllAuthors]);
 
   // Background search to pull any authors matching query not in initial page
   useEffect(() => {
@@ -232,7 +243,7 @@ export default function AddBookPage() {
           params: { role: "author", search: query, limit: 20 },
           cache: "no-store",
           signal: controller.signal,
-        } as any);
+        });
         const userList =
           data?.data?.users ||
           data?.users ||
@@ -243,8 +254,8 @@ export default function AddBookPage() {
           setAuthorsList((prev) => {
             const existingIds = new Set(prev.map((a) => a._id));
             const newAuthors = userList
-              .filter((u: any) => !existingIds.has(String(u._id || u.id)))
-              .map((u: any) => ({
+              .filter((u: AuthorAccount) => !existingIds.has(String(u._id || u.id)))
+              .map((u: AuthorAccount) => ({
                 _id: String(u._id || u.id),
                 name: getAuthorName(u),
                 email: getAuthorEmail(u),
@@ -483,7 +494,7 @@ export default function AddBookPage() {
               params: { role: "author", search: emailToUse, limit: 20 },
             }).catch(() => null);
             const foundUser = lookup?.data?.data?.users?.find(
-              (u: any) => normalizeEmailForStorage(u.email || "").toLowerCase() === emailToUse.toLowerCase()
+              (u: AuthorAccount) => normalizeEmailForStorage(u.email || "").toLowerCase() === emailToUse.toLowerCase()
             );
 
             if (foundUser?._id) {
@@ -532,7 +543,7 @@ export default function AddBookPage() {
           ? newAuthorName
           : authorType === "external"
           ? externalAuthorName
-          : (authorsList.find((a) => (a._id || a.id) === finalAuthorId)?.name || "")
+          : (authorsList.find((a) => (a._id) === finalAuthorId)?.name || "")
       ).trim();
 
       // Resolve category to a valid 24-character ObjectId to prevent Mongoose CastError
@@ -540,7 +551,7 @@ export default function AddBookPage() {
 
       if (!resolvedCategoryObjectId) throw new Error("The selected category is unavailable. Refresh categories and select again.");
 
-      const jsonPayload: Record<string, any> = {
+      const jsonPayload: Record<string, unknown> = {
         title: formData.title.trim(),
         authorName: targetAuthorDisplayName || undefined,
         description: formData.description.trim(),
@@ -774,7 +785,7 @@ export default function AddBookPage() {
                   value={selectedAuthorId}
                   onValueChange={(val) => {
                     setSelectedAuthorId(val);
-                    const found = authorsList.find((a) => (a._id || a.id) === val);
+                    const found = authorsList.find((a) => (a._id) === val);
                     if (found) {
                       setSelectedAuthorName(found.name || "");
                     }
@@ -799,7 +810,7 @@ export default function AddBookPage() {
                       </div>
                     ) : (
                       filteredAuthors.map((a) => (
-                        <SelectItem key={a._id || a.id} value={a._id || a.id} className="text-xs py-2">
+                        <SelectItem key={a._id} value={a._id} className="text-xs py-2">
                           <div className="flex items-center gap-2">
                             <span className="font-semibold text-[#0F3D3E]">{a.name}</span>
                             {a.email && <span className="text-[#5C6E6E] text-[11px]">({a.email})</span>}
@@ -848,11 +859,11 @@ export default function AddBookPage() {
                       <div>
                         <span className="text-emerald-900 font-bold">Selected Author: </span>
                         <span className="text-[#0F3D3E] font-medium font-serif font-bold">
-                          {authorsList.find((a) => (a._id || a.id) === selectedAuthorId)?.name || selectedAuthorName}
+                          {authorsList.find((a) => (a._id) === selectedAuthorId)?.name || selectedAuthorName}
                         </span>
-                        {authorsList.find((a) => (a._id || a.id) === selectedAuthorId)?.email && (
+                        {authorsList.find((a) => (a._id) === selectedAuthorId)?.email && (
                           <span className="text-[#5C6E6E] text-[11px] ml-1.5">
-                            ({authorsList.find((a) => (a._id || a.id) === selectedAuthorId)?.email})
+                            ({authorsList.find((a) => (a._id) === selectedAuthorId)?.email})
                           </span>
                         )}
                       </div>

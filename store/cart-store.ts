@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware';
 
 import type { Book, CartItem } from '@/types';
 import { getCartUnitPrice } from '@/lib/book-presentation';
@@ -18,7 +18,7 @@ interface CartState {
   itemCount: () => number;
 }
 
-export const useCartStore = create<CartState>()(
+export const createCartStore = (getStorage: () => StateStorage = () => window.localStorage) => create<CartState>()(
   persist(
     (set, get): CartState => ({
       items: [],
@@ -81,7 +81,9 @@ export const useCartStore = create<CartState>()(
     }),
     {
       name: 'cart-storage',
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(getStorage),
     }
   )
 );
+
+export const useCartStore = createCartStore();

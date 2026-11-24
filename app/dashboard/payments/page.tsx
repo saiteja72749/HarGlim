@@ -1,5 +1,7 @@
 "use client";
 
+import type { PaymentRecord, InvoiceRecord, OrderRecord } from "@/types/commerce-api";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback } from "react";
@@ -40,7 +42,7 @@ import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
 import { extractList } from "@/lib/tracking";
-import { PAYMENT_STATE_META, getPaymentOrderId, mapPaymentStatus, type PaymentState } from "@/lib/order-status";
+import { PAYMENT_STATE_META, getPaymentOrderId, populated, relatedId, mapPaymentStatus, type PaymentState } from "@/lib/order-status";
 
 const FILTERS: { value: "ALL" | PaymentState; label: string }[] = [
   { value: "ALL", label: "All Statuses" },
@@ -57,7 +59,7 @@ const PURPOSE_LABEL: Record<string, string> = {
   AUTHOR_ACCESS: "Author dashboard plan",
 };
 
-const getStatusColor = (status: string) => {
+const getStatusColor = (status: string | undefined) => {
   const s = (status || "").toUpperCase();
   switch (s) {
     case "COMPLETED":
@@ -89,7 +91,7 @@ const getStatusColor = (status: string) => {
   }
 };
 
-const getStatusIcon = (status: string) => {
+const getStatusIcon = (status: string | undefined) => {
   const s = (status || "").toUpperCase();
   switch (s) {
     case "COMPLETED":
@@ -116,7 +118,7 @@ const getStatusIcon = (status: string) => {
   }
 };
 
-const getFriendlyStatus = (status: string) => {
+const getFriendlyStatus = (status: string | undefined) => {
   const s = (status || "").toUpperCase();
   switch (s) {
     case "COMPLETED":
@@ -153,7 +155,7 @@ const getFriendlyStatus = (status: string) => {
 
 export default function PaymentsPage() {
   const { user } = useAuthStore();
-  const [payments, setPayments] = useState<any[]>([]);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -174,14 +176,14 @@ export default function PaymentsPage() {
         api.get(`/users/${userId}/payments`, { params: { page: 1, limit: 100 }, cache: "no-store" }),
         api.get(`/users/${userId}/orders`, { params: { limit: 100 } }).catch(() => null),
       ]);
-      const list = extractList(res.data, "payments").sort(
-        (a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      const list = extractList<PaymentRecord>(res.data, "payments").sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
       );
       setPayments(list);
 
       // Payment.order is an id; show the human order number instead.
       const numbers: Record<string, string> = {};
-      extractList(ordersRes?.data, "orders").forEach((o: any) => {
+      extractList<OrderRecord>(ordersRes?.data, "orders").forEach((o) => {
         if (o._id && o.orderNumber) numbers[String(o._id)] = o.orderNumber;
       });
       setOrderNumbers(numbers);
@@ -196,14 +198,12 @@ export default function PaymentsPage() {
     }
   }, [user]);
 
-  useEffect(() => {
-    fetchPayments();
-  }, [fetchPayments]);
+  useEffect(() => scheduleRequest(fetchPayments), [fetchPayments]);
 
   const filteredPayments = payments.filter((payment) => {
     const payId = (payment._id || payment.id || "").toLowerCase();
     const orderRef = (
-      payment.order?.orderNumber ||
+      populated(payment.order)?.orderNumber ||
       payment.orderNumber ||
       (typeof payment.order === "string" ? payment.order : "") ||
       payment.orderId ||
@@ -227,9 +227,9 @@ export default function PaymentsPage() {
     .filter((p) => mapPaymentStatus(p.status) === "verification_pending")
     .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
-  const handleDownloadReceipt = async (payment: any) => {
+  const handleDownloadReceipt = async (payment: PaymentRecord) => {
     const userId = user?._id || user?.id;
-    const orderId = payment.order?._id || payment.order?.id || (typeof payment.order === "string" ? payment.order : null);
+    const orderId = getPaymentOrderId(payment);
     
     if (!orderId) {
       toast.error("Receipt document will be generated once payment verification completes.");
@@ -239,11 +239,11 @@ export default function PaymentsPage() {
     setDownloadingId(payment._id);
     try {
       const { data } = await api.get(`/users/${userId}/invoices`, { params: { limit: 100 } });
-      const invoices = extractList(data, "invoices");
+      const invoices = extractList<InvoiceRecord>(data, "invoices");
       const matchingInvoice = invoices.find(
-        (inv: any) =>
-          String(inv.order?._id || inv.order) === String(orderId) ||
-          String(inv.payment?._id || inv.payment) === String(payment._id)
+        (inv: InvoiceRecord) =>
+          relatedId(inv.order) === orderId ||
+          relatedId(inv.payment) === (payment.id || payment._id)
       );
 
       const invoiceId = matchingInvoice?._id || matchingInvoice?.id;
@@ -403,7 +403,7 @@ export default function PaymentsPage() {
                     const orderId = getPaymentOrderId(payment);
                     const purpose = PURPOSE_LABEL[String(payment.purpose || "").toUpperCase()];
                     const orderNo =
-                      payment.order?.orderNumber ||
+                      populated(payment.order)?.orderNumber ||
                       payment.orderNumber ||
                       orderNumbers[getPaymentOrderId(payment)] ||
                       (purpose && payment.purpose !== "ORDER_PURCHASE" ? purpose : "—");

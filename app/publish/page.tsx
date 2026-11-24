@@ -1,5 +1,6 @@
 "use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
@@ -88,8 +89,9 @@ export default function PublishPage() {
     }
   }, []);
 
+  useEffect(() => scheduleRequest(() => loadPackages(true)), [loadPackages]);
+
   useEffect(() => {
-    loadPackages(true);
     return onPackagesChanged(() => loadPackages(false));
   }, [loadPackages]);
 

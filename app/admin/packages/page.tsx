@@ -1,5 +1,6 @@
 "use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -64,7 +65,7 @@ type PublishPackage = {
 type StatusFilter = "all" | "active" | "archived";
 
 const formatPrice = (price: number) => `₹${Number(price || 0).toLocaleString("en-IN")}`;
-const errorMessage = (err: any, fallback: string) => err?.response?.data?.message || fallback;
+const errorMessage = (err: unknown, fallback: string) => describeApiError(err).response?.data.message || fallback;
 
 /** Every package (active and archived); the admin list endpoint is paged, so all pages are read. */
 async function fetchAllPackages(): Promise<PublishPackage[]> {
@@ -120,9 +121,7 @@ export default function AdminPackagesPage() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchPackages();
-  }, [fetchPackages]);
+  useEffect(() => scheduleRequest(fetchPackages), [fetchPackages]);
 
   // Active packages in Publish page order, then archived ones.
   const active = useMemo(() => sortPackages(packages.filter((p) => p.isActive !== false)), [packages]);

@@ -1,5 +1,6 @@
 "use client";
 
+import { record } from "@/lib/api-error";
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
@@ -18,7 +19,7 @@ export default function FAQPage() {
       try {
         const parsed = JSON.parse(raw || "");
         if (!Array.isArray(parsed) || parsed.length === 0) return [];
-        return parsed.some((item: any) => Array.isArray(item?.items))
+        return parsed.some((item: unknown) => Array.isArray(record(item).items))
           ? parsed
           : [{ category: "Frequently Asked Questions", items: parsed }];
       } catch {
@@ -66,7 +67,7 @@ export default function FAQPage() {
               {cat.category}
             </h2>
             <div className="space-y-3">
-              {cat.items?.map((item: any, itemIdx: number) => {
+              {cat.items?.map((item, itemIdx) => {
                 const globalIndex = catIdx * 100 + itemIdx;
                 const isOpen = openIndex === globalIndex;
 

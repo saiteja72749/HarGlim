@@ -1,5 +1,8 @@
 "use client";
 
+import { populated } from "@/lib/order-status";
+import type { OrderRecord, PaymentRecord } from "@/types/commerce-api";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback } from "react";
@@ -73,8 +76,19 @@ const getMongoId = (value?: unknown) => {
   return MONGO_ID_REGEX.test(value) ? value : undefined;
 };
 
+type PaymentDetail = PaymentRecord & {
+  payment?: PaymentRecord;
+  order?: OrderRecord;
+  qr?: { qrCodeDataUrl?: string; qrExpiresAt?: string; upiUri?: string; upiUrl?: string };
+  books?: { title?: string; name?: string; quantity?: number; price?: number }[];
+  inventoryReservations?: unknown[];
+  verificationHistory?: { action?: string; status?: string; note?: string; reason?: string; timestamp?: string }[];
+  paymentLedger?: { type?: string; entryType?: string; amount?: number }[];
+  auditHistory?: { action?: string; createdAt?: string; details?: unknown; event?: string; reason?: string }[];
+};
+
 export default function AdminPaymentVerificationPage() {
-  const [payments, setPayments] = useState<any[]>([]);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [pagination, setPagination] = useState({
     total: 0,
     page: 1,
@@ -94,7 +108,7 @@ export default function AdminPaymentVerificationPage() {
   // Detail Modal State
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [selectedPaymentDetail, setSelectedPaymentDetail] = useState<any>(null);
+  const [selectedPaymentDetail, setSelectedPaymentDetail] = useState<PaymentDetail | null>(null);
   const [actionReason, setActionReason] = useState("");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
@@ -133,9 +147,7 @@ export default function AdminPaymentVerificationPage() {
     }
   }, [page, statusFilter, paymentMethodFilter, providerFilter, searchQuery]);
 
-  useEffect(() => {
-    fetchPayments();
-  }, [fetchPayments]);
+  useEffect(() => scheduleRequest(fetchPayments), [fetchPayments]);
 
   // Open Detail Dialog
   const handleOpenDetail = async (paymentId: string) => {
@@ -510,12 +522,12 @@ export default function AdminPaymentVerificationPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {payments.map((p: any) => {
+                  {payments.map((p) => {
                     const paymentId = getMongoId(p._id) || getMongoId(p.id);
-                    const orderNum = p.order?.orderNumber || p.orderId || "N/A";
+                    const orderNum = populated(p.order)?.orderNumber || p.orderId || "N/A";
                     const customerName = p.user?.name || p.customer?.name || "Customer";
                     const customerEmail = p.user?.email || p.customer?.email || "N/A";
-                    const amount = p.amount ?? p.order?.totalPrice ?? 0;
+                    const amount = p.amount ?? populated(p.order)?.totalPrice ?? 0;
                     const currency = p.currency || "INR";
                     const status = p.status || "VERIFICATION_PENDING";
                     const isPending = status === "VERIFICATION_PENDING" || status === "PAYMENT_SUBMITTED";
@@ -781,7 +793,7 @@ export default function AdminPaymentVerificationPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {selectedPaymentDetail.books.map((b: any, idx: number) => (
+                          {selectedPaymentDetail.books.map((b, idx) => (
                             <TableRow key={idx} className="text-xs">
                               <TableCell className="font-serif font-medium">{b.title || b.name || "Book"}</TableCell>
                               <TableCell className="text-right font-mono">₹{b.price || 0}</TableCell>
@@ -802,7 +814,7 @@ export default function AdminPaymentVerificationPage() {
                       <p className="text-xs text-[#5C6E6E] italic">No verification history recorded yet.</p>
                     ) : (
                       <div className="space-y-2">
-                        {selectedPaymentDetail.verificationHistory.map((vh: any, idx: number) => (
+                        {selectedPaymentDetail.verificationHistory.map((vh, idx) => (
                           <div key={idx} className="p-3 bg-[#F8F9F7] rounded-lg border border-[#E2E6DF] text-xs">
                             <p className="font-semibold text-[#0F3D3E]">{vh.status || vh.action || "Verification Event"}</p>
                             <p className="text-[11px] text-[#5C6E6E]">{vh.note || vh.reason || "No notes"}</p>
@@ -819,7 +831,7 @@ export default function AdminPaymentVerificationPage() {
                       <p className="text-xs text-[#5C6E6E] italic">No ledger entries recorded yet.</p>
                     ) : (
                       <div className="space-y-2">
-                        {selectedPaymentDetail.paymentLedger.map((pl: any, idx: number) => (
+                        {selectedPaymentDetail.paymentLedger.map((pl, idx) => (
                           <div key={idx} className="p-3 bg-[#F8F9F7] rounded-lg border border-[#E2E6DF] text-xs">
                             <p className="font-semibold text-[#0F3D3E]">{pl.entryType || pl.type || "Ledger Item"}</p>
                             <p className="text-[11px] text-[#5C6E6E]">Amount: ₹{pl.amount || 0}</p>
@@ -851,10 +863,10 @@ export default function AdminPaymentVerificationPage() {
                     <p className="text-[#5C6E6E] italic">No audit events recorded.</p>
                   ) : (
                     <div className="space-y-2">
-                      {selectedPaymentDetail.auditHistory.map((ah: any, idx: number) => (
+                      {selectedPaymentDetail.auditHistory.map((ah, idx) => (
                         <div key={idx} className="p-2.5 bg-[#F8F9F7] rounded-lg border border-[#E2E6DF] text-xs">
                           <p className="font-bold text-[#0F3D3E]">{ah.action || ah.event || "Audit Log"}</p>
-                          <p className="text-[11px] text-[#5C6E6E]">{ah.details || ah.reason || ""}</p>
+                          <p className="text-[11px] text-[#5C6E6E]">{(typeof ah.details === "string" ? ah.details : ah.reason) || ""}</p>
                           <p className="text-[10px] text-gray-400 mt-0.5">{ah.createdAt ? new Date(ah.createdAt).toLocaleString() : ""}</p>
                         </div>
                       ))}

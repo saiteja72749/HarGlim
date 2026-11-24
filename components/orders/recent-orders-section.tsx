@@ -1,4 +1,5 @@
 "use client";
+import type { OrderRecord } from "@/types/commerce-api";
 import { describeApiError } from "@/lib/api-error";
 
 
@@ -15,45 +16,42 @@ import {
   FULFILMENT_META,
   PAYMENT_STATE_META,
   getFulfilmentStage,
-  getOrderTotal,
+  getOrderTotal, populated,
   getPaymentState,
 } from "@/lib/order-status";
 
 export function RecentOrdersSection() {
   const { user } = useAuthStore();
-  const [orders, setOrders] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const userId = user?._id || user?.id;
+  const [result, setResult] = useState<{ userId: string; orders: OrderRecord[] }>();
+  const orders = result?.userId === userId ? result?.orders : undefined;
 
   useEffect(() => {
-    if (!user?._id && !user?.id) {
-      setLoading(false);
-      return;
-    }
+    if (!userId) return;
+    const controller = new AbortController();
 
-    async function fetchOrders() {
+    const fetchOrders = async () => {
       try {
         // /users/{id}/orders is the documented route; "me" is not an id.
-        const userId = user?._id || user?.id;
-        const { data } = await api.get(`/users/${userId}/orders`, { params: { limit: 20 } });
-        const ordersData = extractList(data, "orders").sort(
-          (a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        const { data } = await api.get(`/users/${userId}/orders`, { params: { limit: 20 }, signal: controller.signal });
+        const ordersData = extractList<OrderRecord>(data, "orders").sort(
+          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
         );
-        setOrders(ordersData.slice(0, 3)); // show top 3 recent orders
+        if (!controller.signal.aborted) setResult({ userId, orders: ordersData.slice(0, 3) });
       } catch (err) {
-        console.error("Failed to load user orders for recent orders section:", describeApiError(err));
-      } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) console.error("Failed to load user orders for recent orders section:", describeApiError(err));
       }
-    }
+    };
 
-    fetchOrders();
-  }, [user]);
+    void fetchOrders();
+    return () => controller.abort();
+  }, [userId]);
 
-  if (!user || loading || !orders.length) {
+  if (!orders?.length) {
     return null;
   }
 
-  const getStatusBadge = (order: any) => {
+  const getStatusBadge = (order: OrderRecord) => {
     const payment = getPaymentState(order);
     const stage = getFulfilmentStage(order);
     const meta = payment === "paid" || stage === "cancelled" ? FULFILMENT_META[stage] : PAYMENT_STATE_META[payment];
@@ -128,8 +126,8 @@ export function RecentOrdersSection() {
 
               {/* Order Items List */}
               <div className="space-y-3">
-                {items.slice(0, 2).map((item: any, idx: number) => {
-                  const bookObj = item.book || {};
+                {items.slice(0, 2).map((item, idx) => {
+                  const bookObj = populated(item.book) || {};
                   const title = bookObj.title || item.title || "Book";
                   const cover = bookObj.coverImage || "/logo.png";
                   const slug = bookObj.slug;

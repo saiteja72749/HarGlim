@@ -103,6 +103,15 @@ export function getPaymentOrderId(input: unknown): string {
   return String((typeof payment.order === 'object' ? order._id || order.id : payment.order) || payment.orderId || '');
 }
 
+/** Related records can be expanded objects or an ID in older API responses. */
+export function populated<T extends object>(value: T | string | null | undefined): T | undefined {
+  return value && typeof value === 'object' ? value : undefined;
+}
+
+export function relatedId(value: { _id?: string; id?: string } | string | null | undefined): string {
+  return typeof value === 'string' ? value : value?._id || value?.id || '';
+}
+
 const paymentTimestamp = (input: unknown) => {
   const value = record(input).createdAt;
   const time = typeof value === 'string' || typeof value === 'number' ? new Date(value).getTime() : value instanceof Date ? value.getTime() : 0;

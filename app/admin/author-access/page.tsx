@@ -1,5 +1,7 @@
 "use client";
 
+import type { AuthorAccessPlan, AuthorAccessPurchase } from "@/types/author-api";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback } from "react";
@@ -34,13 +36,15 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import toast from "react-hot-toast";
 
+type AuthorEntitlement = { _id: string; userId?: string; user?: { _id?: string; id?: string; name?: string }; status?: string; source?: string; createdAt?: string };
+
 export default function AdminAuthorAccessPage() {
   const [activeTab, setActiveTab] = useState<"entitlements" | "plans" | "purchases">("entitlements");
   // From GET /users/me/context (loaded by SessionBootstrap). Missing flag = disabled.
   const paidAccessFeatureEnabled = isPaidAuthorDashboardEnabled(useAuthStore((state) => state.userContext));
 
   // Entitlements State
-  const [entitlements, setEntitlements] = useState<any[]>([]);
+  const [entitlements, setEntitlements] = useState<AuthorEntitlement[]>([]);
   const [loadingEntitlements, setLoadingEntitlements] = useState(true);
 
   // Grant Modal State
@@ -50,7 +54,7 @@ export default function AdminAuthorAccessPage() {
   const [submittingGrant, setSubmittingGrant] = useState(false);
 
   // Plans State
-  const [plans, setPlans] = useState<any[]>([]);
+  const [plans, setPlans] = useState<AuthorAccessPlan[]>([]);
   const [loadingPlans, setLoadingPlans] = useState(false);
   const [isCreatePlanOpen, setIsCreatePlanOpen] = useState(false);
   const [planForm, setPlanForm] = useState({
@@ -63,14 +67,14 @@ export default function AdminAuthorAccessPage() {
   const [submittingPlan, setSubmittingPlan] = useState(false);
 
   // Purchases State
-  const [purchases, setPurchases] = useState<any[]>([]);
+  const [purchases, setPurchases] = useState<AuthorAccessPurchase[]>([]);
   const [loadingPurchases, setLoadingPurchases] = useState(false);
 
   // Fetch Entitlements
   const fetchEntitlements = useCallback(async () => {
     setLoadingEntitlements(true);
     try {
-      const res: any = await api.get("/admin/author-access/entitlements", { params: { limit: 50 } }).catch(() => null);
+      const res = await api.get("/admin/author-access/entitlements", { params: { limit: 50 } }).catch(() => null);
       const items = res?.data?.data?.entitlements || res?.data?.data?.items || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];
       setEntitlements(Array.isArray(items) ? items : []);
     } catch (err) {
@@ -84,7 +88,7 @@ export default function AdminAuthorAccessPage() {
   const fetchPlans = useCallback(async () => {
     setLoadingPlans(true);
     try {
-      const res: any = await api.get("/admin/author-access/plans").catch(() => null);
+      const res = await api.get("/admin/author-access/plans").catch(() => null);
       const items = res?.data?.data?.plans || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];
       setPlans(Array.isArray(items) ? items : []);
     } catch (err) {
@@ -98,7 +102,7 @@ export default function AdminAuthorAccessPage() {
   const fetchPurchases = useCallback(async () => {
     setLoadingPurchases(true);
     try {
-      const res: any = await api.get("/admin/author-access/purchases", { params: { limit: 50 } }).catch(() => null);
+      const res = await api.get("/admin/author-access/purchases", { params: { limit: 50 } }).catch(() => null);
       const items = res?.data?.data?.purchases || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];
       setPurchases(Array.isArray(items) ? items : []);
     } catch (err) {
@@ -108,11 +112,11 @@ export default function AdminAuthorAccessPage() {
     }
   }, []);
 
-  useEffect(() => {
+  useEffect(() => scheduleRequest(() => {
     if (activeTab === "entitlements") fetchEntitlements();
     if (activeTab === "plans") fetchPlans();
     if (activeTab === "purchases") fetchPurchases();
-  }, [activeTab, fetchEntitlements, fetchPlans, fetchPurchases]);
+  }), [activeTab, fetchEntitlements, fetchPlans, fetchPurchases]);
 
   // Manual Grant Action
   const handleGrant = async (e: React.FormEvent) => {
@@ -228,7 +232,7 @@ export default function AdminAuthorAccessPage() {
       )}
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={(val: any) => setActiveTab(val)}>
+      <Tabs value={activeTab} onValueChange={(value) => { if (value === "entitlements" || value === "plans" || value === "purchases") setActiveTab(value); }}>
         <TabsList className="bg-[#E2E6DF]/60 p-1">
           <TabsTrigger value="entitlements" className="text-xs font-bold gap-1.5">
             <ShieldCheck className="h-3.5 w-3.5" />
@@ -413,7 +417,7 @@ export default function AdminAuthorAccessPage() {
                       <TableRow key={pc._id || pc.id} className="text-xs">
                         <TableCell className="font-mono text-[#0F3D3E] font-bold">{pc._id || pc.id}</TableCell>
                         <TableCell>{pc.user?.name || pc.userId}</TableCell>
-                        <TableCell className="font-bold">₹{(pc.amount || 999).toLocaleString()}</TableCell>
+                        <TableCell className="font-bold">{pc.amount == null ? "Unavailable" : `₹${pc.amount.toLocaleString("en-IN")}`}</TableCell>
                         <TableCell className="text-center">
                           <Badge className="bg-amber-500/15 text-amber-800 text-[10px]">
                             {pc.status || "PENDING"}

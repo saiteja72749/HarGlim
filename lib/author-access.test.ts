@@ -1,4 +1,5 @@
 // @vitest-environment node
+import type { UserContextData } from "@/types";
 import { describe, expect, it } from "vitest";
 import {
   canOpenAuthorDashboard,
@@ -8,14 +9,14 @@ import {
 } from "./author-access";
 
 const ctx = (overrides: {
-  role?: string;
+  role?: UserContextData["user"]["role"];
   canAccess?: boolean;
   appStatus?: string;
   dashboardAccessStatus?: string;
   paid?: boolean;
 }) =>
   ({
-    user: { role: overrides.role ?? "author" },
+    user: { id: "test", _id: "test", name: "Test account", email: "test@example.com", role: overrides.role ?? "author", isActive: true, profilePicture: null, createdAt: "" },
     capabilities: {
       canPublish: overrides.role === "author",
       canAccessAuthorDashboard: overrides.canAccess ?? overrides.role === "author",
@@ -27,7 +28,7 @@ const ctx = (overrides: {
       publishingStatus: "APPROVED",
     },
     features: overrides.paid === undefined ? undefined : { paidAuthorDashboardAccess: overrides.paid },
-  }) as any;
+  });
 
 describe("author dashboard access (paid access disabled)", () => {
   it("1. reader cannot open the author dashboard", () => {

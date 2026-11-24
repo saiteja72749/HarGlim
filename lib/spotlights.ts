@@ -1,4 +1,5 @@
 import api from "@/lib/api";
+import { record } from "@/lib/api-error";
 
 /**
  * Spotlight: author photos / testimonials uploaded by an admin and served by
@@ -19,7 +20,8 @@ export type SpotlightPage = { items: Spotlight[]; hasMore: boolean };
 const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
 /** One API record → a Spotlight; null when it has no usable image. */
-export function normalizeSpotlight(raw: any, index: number): Spotlight | null {
+export function normalizeSpotlight(input: unknown, index: number): Spotlight | null {
+  const raw = record(input);
   const image = text(raw?.image) || text(raw?.imageUrl) || text(raw?.url);
   const thumbnail = text(raw?.thumbnail) || text(raw?.thumbnailUrl) || image;
   if (!image && !thumbnail) return null;
@@ -27,22 +29,24 @@ export function normalizeSpotlight(raw: any, index: number): Spotlight | null {
     id: String(raw?._id ?? raw?.id ?? `${image || thumbnail}#${index}`),
     image: image || thumbnail,
     thumbnail,
-    authorName: text(raw?.author_name) || text(raw?.authorName) || text(raw?.author?.name),
+    authorName: text(raw.author_name) || text(raw.authorName) || text(record(raw.author).name),
     caption: text(raw?.caption),
   };
 }
 
 /** Accepts a bare array or `{ data: [...] }` / `{ data: { items | spotlights: [...] } }`. */
-export function parseSpotlightResponse(payload: any, page: number, limit: number): SpotlightPage {
-  const candidates = [payload?.data?.items, payload?.data?.spotlights, payload?.data, payload?.items, payload?.results, payload];
-  const list: any[] = candidates.find(Array.isArray) || [];
+export function parseSpotlightResponse(input: unknown, page: number, limit: number): SpotlightPage {
+  const payload = record(input);
+  const data = record(payload.data);
+  const candidates = [data.items, data.spotlights, payload.data, payload.items, payload.results, input];
+  const list: unknown[] = candidates.find(Array.isArray) || [];
   const items = list.map(normalizeSpotlight).filter((s): s is Spotlight => s !== null);
 
-  const pagination = payload?.pagination ?? payload?.data?.pagination ?? payload?.meta;
+  const pagination = record(payload.pagination ?? data.pagination ?? payload.meta);
   let hasMore: boolean;
   if (typeof pagination?.pages === "number") hasMore = page < pagination.pages;
   else if (typeof pagination?.total === "number") hasMore = page * limit < pagination.total;
-  else if ("next" in (payload || {})) hasMore = Boolean(payload.next);
+  else if ("next" in payload) hasMore = Boolean(payload.next);
   else hasMore = list.length >= limit;
   return { items, hasMore };
 }

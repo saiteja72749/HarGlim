@@ -1,5 +1,6 @@
 "use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback } from "react";
@@ -26,8 +27,10 @@ import {
 } from "@/components/ui/table";
 import toast from "react-hot-toast";
 
+type ModeratedReview = { _id: string; id?: string; rating?: number; status?: string; book?: { _id?: string; title?: string }; bookTitle?: string; bookId?: string; user?: { name?: string; email?: string }; userName?: string; comment?: string; review?: string };
+
 export default function AdminReviewsPage() {
-  const [reviews, setReviews] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<ModeratedReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("pending");
   const [searchQuery, setSearchQuery] = useState("");
@@ -36,7 +39,7 @@ export default function AdminReviewsPage() {
   const fetchReviews = useCallback(async () => {
     setLoading(true);
     try {
-      const params: any = { limit: 50 };
+      const params: Record<string, string | number> = { limit: 50 };
       if (statusFilter !== "all") params.status = statusFilter;
 
       const { data } = await api.get("/admin/reviews", { params });
@@ -50,9 +53,7 @@ export default function AdminReviewsPage() {
     }
   }, [statusFilter]);
 
-  useEffect(() => {
-    fetchReviews();
-  }, [fetchReviews]);
+  useEffect(() => scheduleRequest(fetchReviews), [fetchReviews]);
 
   // Moderate Status (PATCH /api/admin/reviews/:reviewId/status)
   const handleModerate = async (reviewId: string, newStatus: "approved" | "rejected") => {
@@ -168,6 +169,7 @@ export default function AdminReviewsPage() {
               ) : (
                 filteredReviews.map((rev) => {
                   const revId = rev._id || rev.id;
+                  if (!revId) return null;
                   const ratingNum = Number(rev.rating ?? 0);
                   const isApproved = rev.status === "approved";
                   const isRejected = rev.status === "rejected";

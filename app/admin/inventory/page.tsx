@@ -1,4 +1,6 @@
 "use client";
+import type { Book } from "@/types";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 
@@ -25,19 +27,22 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Link from "next/link";
 
+type InventoryReservation = { _id: string; id?: string; book?: { title?: string }; bookTitle?: string; expiresAt?: string; quantity?: number; status?: string };
+type InventoryEntry = { _id?: string; createdAt?: string; type?: string; event?: string; book?: { title?: string }; bookId?: string; delta: number; reason?: string };
+
 export default function AdminInventoryPage() {
   const [activeTab, setActiveTab] = useState<"reservations" | "low-stock" | "timeline">("low-stock");
 
   // Low Stock State
-  const [lowStockBooks, setLowStockBooks] = useState<any[]>([]);
+  const [lowStockBooks, setLowStockBooks] = useState<Book[]>([]);
   const [loadingLowStock, setLoadingLowStock] = useState(true);
 
   // Reservations State
-  const [reservations, setReservations] = useState<any[]>([]);
+  const [reservations, setReservations] = useState<InventoryReservation[]>([]);
   const [loadingReservations, setLoadingReservations] = useState(false);
 
   // Timeline Ledger State
-  const [ledgerTimeline, setLedgerTimeline] = useState<any[]>([]);
+  const [ledgerTimeline, setLedgerTimeline] = useState<InventoryEntry[]>([]);
   const [loadingTimeline, setLoadingTimeline] = useState(false);
 
   // Fetch Low Stock Books
@@ -50,7 +55,7 @@ export default function AdminInventoryPage() {
         // Fallback: query books with stock <= 5
         const booksRes = await api.get("/books", { params: { limit: 100 } }).catch(() => null);
         const bList = booksRes?.data?.data?.books || (Array.isArray(booksRes?.data?.data) ? booksRes.data.data : []) || [];
-        items = bList.filter((b: any) => typeof b.stock === "number" && b.stock <= 5);
+        items = bList.filter((b: Book) => typeof b.stock === "number" && b.stock <= 5);
       }
       setLowStockBooks(items);
     } catch (err) {
@@ -88,11 +93,11 @@ export default function AdminInventoryPage() {
     }
   }, []);
 
-  useEffect(() => {
+  useEffect(() => scheduleRequest(() => {
     if (activeTab === "low-stock") fetchLowStock();
     if (activeTab === "reservations") fetchReservations();
     if (activeTab === "timeline") fetchTimeline();
-  }, [activeTab, fetchLowStock, fetchReservations, fetchTimeline]);
+  }), [activeTab, fetchLowStock, fetchReservations, fetchTimeline]);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -113,7 +118,7 @@ export default function AdminInventoryPage() {
       </div>
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={(val: any) => setActiveTab(val)}>
+      <Tabs value={activeTab} onValueChange={(value) => { if (value === "low-stock" || value === "reservations" || value === "timeline") setActiveTab(value); }}>
         <TabsList className="bg-[#E2E6DF]/60 p-1">
           <TabsTrigger value="low-stock" className="text-xs font-bold gap-1.5">
             <AlertTriangle className="h-3.5 w-3.5" />

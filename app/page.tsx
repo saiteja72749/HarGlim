@@ -1,4 +1,5 @@
 "use client";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { publishedNumber } from "@/lib/book-presentation";
 import { publicApiMessage, publicRetryAt, record } from "@/lib/api-error";
 
@@ -129,15 +130,17 @@ export default function Home() {
     if (authorsRes.status === "rejected" || statsRes.status === "rejected") setError(true);
   }, []);
 
-  useEffect(() => { void fetchHomeData(); }, [fetchHomeData]);
+  useEffect(() => scheduleRequest(fetchHomeData), [fetchHomeData]);
+
+  useEffect(() => scheduleRequest(fetchHomeCategories), [fetchHomeCategories]);
 
   useEffect(() => {
-    void fetchHomeCategories();
     return onLiveChange("categories", (reason) => void fetchHomeCategories(reason === "change"), 60_000);
   }, [fetchHomeCategories]);
 
+  useEffect(() => scheduleRequest(fetchFeaturedBooks), [fetchFeaturedBooks]);
+
   useEffect(() => {
-    void fetchFeaturedBooks();
     return onLiveChange("books", () => {
       void fetchFeaturedBooks();
     }, 20_000);

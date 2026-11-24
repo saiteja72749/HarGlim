@@ -56,32 +56,33 @@ export default function AnalyticsPage() {
 }
 
 function AnalyticsContent() {
-  const [loading, setLoading] = useState(true);
-  useHashSection(!loading);
+  const [period, setPeriod] = useState<{ range: string; revision: number; data: AuthorAnalytics | null; problem: string | null }>();
   const [range, setRange] = useState("30d");
-  const [analyticsData, setAnalyticsData] = useState<AuthorAnalytics | null>(null);
   const [performanceData, setPerformanceData] = useState<BookPerformance[]>([]);
   const [performanceLoaded, setPerformanceLoaded] = useState(false);
-  const [periodProblem, setPeriodProblem] = useState<string | null>(null);
   const [performanceProblem, setPerformanceProblem] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  const currentPeriod = period?.range === range && period.revision === revision ? period : undefined;
+  const loading = !currentPeriod;
+  useHashSection(!loading);
+  const analyticsData = currentPeriod?.data ?? null;
+  const periodProblem = currentPeriod?.problem ?? null;
   const fetchAnalytics = useCallback(() => setRevision((n) => n + 1), []);
 
   useEffect(() => onLiveChange("author-data", fetchAnalytics), [fetchAnalytics]);
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    setAnalyticsData(null);
-    setPeriodProblem(null);
     api.get("/authors/me/analytics", { params: { range }, cache: "no-store", signal: controller.signal })
       .then(({ data }) => {
-        if (!controller.signal.aborted) setAnalyticsData(data?.data ?? data);
+        if (!controller.signal.aborted) setPeriod({ range, revision, data: data?.data ?? data, problem: null });
       })
       .catch((reason) => {
-        if (!controller.signal.aborted) setPeriodProblem(authorPanelProblem([{ label: "sales analytics", result: { status: "rejected", reason } }]));
-      })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+        if (!controller.signal.aborted) {
+          const problem = authorPanelProblem([{ label: "sales analytics", result: { status: "rejected", reason } }]);
+          setPeriod({ range, revision, data: null, problem });
+        }
+      });
     return () => controller.abort();
   }, [range, revision]);
 

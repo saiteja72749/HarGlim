@@ -1,5 +1,7 @@
 "use client";
 
+import type { ShipmentRecord } from "@/types/commerce-api";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback } from "react";
@@ -52,7 +54,7 @@ import { getSafeExternalUrl } from "@/lib/utils";
 
 export default function AdminShipmentsPage() {
   const [activeTab, setActiveTab] = useState<"shipments" | "plans">("shipments");
-  const [shipments, setShipments] = useState<any[]>([]);
+  const [shipments, setShipments] = useState<ShipmentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
@@ -60,7 +62,7 @@ export default function AdminShipmentsPage() {
   // Delivery Plans tab state
 
   // Assign Courier Modal State
-  const [selectedShipmentForCourier, setSelectedShipmentForCourier] = useState<any | null>(null);
+  const [selectedShipmentForCourier, setSelectedShipmentForCourier] = useState<ShipmentRecord | null>(null);
   const [courierForm, setCourierForm] = useState({
     provider: "manual",
     serviceName: "",
@@ -71,7 +73,7 @@ export default function AdminShipmentsPage() {
   const [submittingCourier, setSubmittingCourier] = useState(false);
 
   // Update Status Modal State
-  const [selectedShipmentForStatus, setSelectedShipmentForStatus] = useState<any | null>(null);
+  const [selectedShipmentForStatus, setSelectedShipmentForStatus] = useState<ShipmentRecord | null>(null);
   const [newStatus, setNewStatus] = useState("IN_TRANSIT");
   const [statusDescription, setStatusDescription] = useState("Package dispatched via courier");
   const [statusLocation, setStatusLocation] = useState("");
@@ -80,10 +82,10 @@ export default function AdminShipmentsPage() {
   const fetchShipments = useCallback(async () => {
     setLoading(true);
     try {
-      const params: any = { limit: 50 };
+      const params: Record<string, string | number> = { limit: 50 };
       if (statusFilter !== "ALL") params.status = statusFilter;
 
-      let res: any;
+      let res;
       if (searchQuery.trim()) {
         res = await api.get("/admin/shipments/search", { params: { q: searchQuery.trim() } });
       } else {
@@ -100,12 +102,10 @@ export default function AdminShipmentsPage() {
     }
   }, [statusFilter, searchQuery]);
 
-  useEffect(() => {
-    fetchShipments();
-  }, [fetchShipments]);
+  useEffect(() => scheduleRequest(fetchShipments), [fetchShipments]);
 
   // Open Assign Courier
-  const openAssignModal = (shipment: any, defaultCourier?: string) => {
+  const openAssignModal = (shipment: ShipmentRecord, defaultCourier?: string) => {
     setSelectedShipmentForCourier(shipment);
     const existing = extractTrackingInfo(shipment);
     const existingCourier = defaultCourier || existing.courierName || "";
@@ -224,7 +224,7 @@ export default function AdminShipmentsPage() {
   };
 
   // Cancel Shipment
-  const handleCancelShipment = async (shipment: any) => {
+  const handleCancelShipment = async (shipment: ShipmentRecord) => {
     const reason = prompt("Enter cancellation reason:", "Order cancelled by customer or admin");
     if (!reason) return;
     const sId = shipment._id || shipment.id;
@@ -238,7 +238,7 @@ export default function AdminShipmentsPage() {
     }
   };
 
-  const getShipmentBadge = (status: string) => {
+  const getShipmentBadge = (status: string | undefined) => {
     const s = normalizeShipmentStatus(status);
     const tone =
       s === "DELIVERED" || s === "COMPLETED"

@@ -1,5 +1,6 @@
 'use client';
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError, publicApiMessage, record } from "@/lib/api-error";
 
 
@@ -449,12 +450,15 @@ export function SiteContentProvider({ children, initialContent = null }: { child
   }, [applyBackendContent]);
 
   useEffect(() => {
-    if (!initialContent) void refreshContent();
+    if (!initialContent) return scheduleRequest(refreshContent);
+  }, [initialContent, refreshContent]);
+
+  useEffect(() => {
     return onLiveChange('site-content', (reason) => {
       if (reason === 'change') invalidateApiCache('/content');
       void refreshContent();
     }, 60_000);
-  }, [initialContent, refreshContent]);
+  }, [refreshContent]);
 
   /**
    * Saves to the backend, then reads GET /content back so the site (and the admin editor) shows

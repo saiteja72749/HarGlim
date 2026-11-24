@@ -1,5 +1,7 @@
 "use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
+import type { AuthorBook } from "@/types/author-api";
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect } from "react";
@@ -41,6 +43,10 @@ import { RoyaltyCostFields } from "@/components/books/royalty-cost-fields";
 
 type AuthorType = "existing" | "new" | "external";
 
+type AuthorAccount = { _id?: string; id?: string; name?: string; fullName?: string; email?: string };
+type AuthorOption = { _id: string; name: string; email: string; role: string };
+type AdminBook = Omit<AuthorBook, "category"> & { category?: (Exclude<AuthorBook["category"], string | undefined> & { id?: string }) | string };
+
 export default function EditBookPage() {
   const router = useRouter();
   const routeParams = useParams();
@@ -53,7 +59,7 @@ export default function EditBookPage() {
 
   // Author Mode & Details
   const [authorType, setAuthorType] = useState<AuthorType>("existing");
-  const [authorsList, setAuthorsList] = useState<any[]>([]);
+  const [authorsList, setAuthorsList] = useState<AuthorOption[]>([]);
   const [authorSearchQuery, setAuthorSearchQuery] = useState<string>("");
   const [selectedAuthorId, setSelectedAuthorId] = useState<string>("");
   const [selectedAuthorName, setSelectedAuthorName] = useState<string>("");
@@ -121,9 +127,7 @@ export default function EditBookPage() {
   useEffect(() => {
     const query = authorSearchQuery.trim();
     if (authorType !== "existing" || query.length < 2) {
-      setFetchingAuthors(false);
-      setAuthorsList([]);
-      return;
+      return scheduleRequest(() => { setFetchingAuthors(false); setAuthorsList([]); });
     }
 
     const controller = new AbortController();
@@ -133,28 +137,28 @@ export default function EditBookPage() {
         const { data } = await api.get("/admin/users", {
           params: { role: "author", search: query, limit: 20 },
           signal: controller.signal,
-        } as any);
+        });
         const userList =
           data?.data?.users ||
           data?.users ||
           (Array.isArray(data?.data) ? data.data : []) ||
           (Array.isArray(data) ? data : []);
         const authors = Array.isArray(userList)
-          ? userList.map((u: any) => ({
+          ? userList.map((u: AuthorAccount) => ({
               _id: String(u._id || u.id),
               name: u.name || u.fullName || u.email || "Registered Author",
               email: u.email || "",
               role: "author",
             }))
           : [];
-        setAuthorsList(authors);
+        if (!controller.signal.aborted) setAuthorsList(authors);
       } catch (caughtError) {
         const err = describeApiError(caughtError);
         if (err.name !== "CanceledError" && err.name !== "AbortError") {
           console.warn("Failed to search authors:", describeApiError(err));
         }
       } finally {
-        setFetchingAuthors(false);
+        if (!controller.signal.aborted) setFetchingAuthors(false);
       }
     }, 400);
 
@@ -172,7 +176,7 @@ export default function EditBookPage() {
       try {
         // GET /admin/books/{id} returns any status (draft, archived, published).
         const res = await api.get(`/admin/books/${bookId}`, { cache: "no-store" }).catch(() => null);
-        const bookData: any = res?.data?.data?.book || res?.data?.data || null;
+        const bookData: AdminBook | null = res?.data?.data?.book || res?.data?.data || null;
 
         if (bookData) {
           const authorInfo = getBookAuthorInfo(bookData);
@@ -311,7 +315,7 @@ export default function EditBookPage() {
           return;
         }
         finalAuthorId = selectedAuthorId;
-        const found = authorsList.find((a) => (a._id || a.id) === selectedAuthorId);
+        const found = authorsList.find((a) => (a._id) === selectedAuthorId);
         targetAuthorDisplayName = found?.name || selectedAuthorName || formData.authorName;
       } else if (authorType === "new") {
         targetAuthorDisplayName = newAuthorName.trim();
@@ -337,8 +341,8 @@ export default function EditBookPage() {
         const existingByEmail = authorsList.find(
           (a) => normalizeEmailForStorage(a.email || "").toLowerCase() === normalizedAuthorEmail.toLowerCase()
         );
-        if (existingByEmail && /^[0-9a-fA-F]{24}$/.test(existingByEmail._id || existingByEmail.id)) {
-          finalAuthorId = existingByEmail._id || existingByEmail.id;
+        if (existingByEmail && /^[0-9a-fA-F]{24}$/.test(existingByEmail._id)) {
+          finalAuthorId = existingByEmail._id;
           targetAuthorDisplayName = existingByEmail.name || targetAuthorDisplayName;
         }
 
@@ -372,8 +376,8 @@ export default function EditBookPage() {
         const existingByName = authorsList.find(
           (a) => a.name?.toLowerCase().trim() === targetAuthorDisplayName.toLowerCase()
         );
-        if (existingByName && /^[0-9a-fA-F]{24}$/.test(existingByName._id || existingByName.id)) {
-          finalAuthorId = existingByName._id || existingByName.id;
+        if (existingByName && /^[0-9a-fA-F]{24}$/.test(existingByName._id)) {
+          finalAuthorId = existingByName._id;
         } else if (selectedAuthorId && /^[0-9a-fA-F]{24}$/.test(selectedAuthorId)) {
           finalAuthorId = selectedAuthorId;
         }
@@ -405,7 +409,7 @@ export default function EditBookPage() {
 
       if (!resolvedCategoryObjectId) throw new Error("The selected category is unavailable. Refresh categories and select again.");
 
-      const jsonPayload: any = {
+      const jsonPayload: Record<string, unknown> = {
         title: formData.title.trim(),
         authorName: targetAuthorDisplayName || undefined,
         description: formData.description.trim(),
@@ -467,7 +471,7 @@ export default function EditBookPage() {
       }
     } catch (err) {
       console.error("Failed to update book:", describeApiError(err));
-      const errMsg = (err as any)?.response?.data?.message || (err as any)?.message || "Failed to update book";
+      const errMsg = describeApiError(err).response?.data.message || (err instanceof Error ? err.message : undefined) || "Failed to update book";
       toast.error(errMsg);
     } finally {
       setLoading(false);
@@ -624,7 +628,7 @@ export default function EditBookPage() {
                   value={selectedAuthorId}
                   onValueChange={(val) => {
                     setSelectedAuthorId(val);
-                    const found = authorsList.find((a) => (a._id || a.id) === val);
+                    const found = authorsList.find((a) => (a._id) === val);
                     if (found) {
                       setSelectedAuthorName(found.name || "");
                       setAuthorSearchQuery(found.email || found.name || authorSearchQuery);
@@ -648,7 +652,7 @@ export default function EditBookPage() {
                   </SelectTrigger>
                   <SelectContent className="bg-white border-[#E2E6DF] max-h-72">
                     {authorsList.map((a) => (
-                      <SelectItem key={a._id || a.id} value={a._id || a.id} className="text-xs py-2">
+                      <SelectItem key={a._id} value={a._id} className="text-xs py-2">
                         <div className="flex items-center gap-2">
                           <span className="font-semibold text-[#0F3D3E]">{a.name}</span>
                           {a.email && <span className="text-[#5C6E6E] text-[11px]">({a.email})</span>}

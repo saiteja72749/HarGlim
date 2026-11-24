@@ -1,5 +1,6 @@
 "use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -122,9 +123,7 @@ export default function ProfilePage() {
     }
   }, [user]);
 
-  useEffect(() => {
-    fetchProfile();
-  }, [fetchProfile]);
+  useEffect(() => scheduleRequest(fetchProfile), [fetchProfile]);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -215,8 +214,8 @@ export default function ProfilePage() {
     );
   }
 
-  const joinedYear = (user as any)?.createdAt
-    ? new Date((user as any).createdAt).getFullYear()
+  const joinedYear = user?.createdAt
+    ? new Date(user.createdAt).getFullYear()
     : null;
 
   return (

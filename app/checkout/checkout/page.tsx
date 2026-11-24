@@ -1,8 +1,8 @@
 ﻿"use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,9 +41,13 @@ type ConfirmedOrder = {
 };
 
 const rupees = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" });
+const orderRecoveryMessage = "The order request could not be confirmed. Check My Orders before placing another order.";
 
 function CheckoutForm() {
   const router = useRouter();
+  const params = useSearchParams();
+  const recoverOrder = params.has("orderCheck");
+  const createdId = params.get("orderId");
   const hydrated = useHydration();
   const items = useCartStore((state) => state.items);
   const subtotal = useCartStore((state) => state.getSubtotal());
@@ -56,7 +60,8 @@ function CheckoutForm() {
   const busy = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [order, setOrder] = useState<ConfirmedOrder | null>(null);
-  const [uncertain, setUncertain] = useState(false);
+  const [uncertainResponse, setUncertain] = useState(false);
+  const uncertain = uncertainResponse || recoverOrder;
   const [utr, setUtr] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
@@ -167,7 +172,7 @@ function CheckoutForm() {
       const status = failure.response?.status;
       if (!status || status >= 500 || status === 408) {
         setUncertain(true);
-        setError("The order request could not be confirmed. Check My Orders before placing another order.");
+        setError(orderRecoveryMessage);
         window.history.replaceState(null, "", "/checkout/checkout?orderCheck=1");
       } else {
         setError(failure.response?.data?.message || "Could not create the order. Check your details and try again.");
@@ -203,17 +208,12 @@ function CheckoutForm() {
 
   useEffect(() => {
     if (!hydrated || order || busy.current) return;
-    const params = new URLSearchParams(window.location.search);
-    const createdId = params.get("orderId");
     if (createdId) {
       router.replace(`/dashboard/orders?orderId=${encodeURIComponent(createdId)}`);
-    } else if (params.has("orderCheck")) {
-      setUncertain(true);
-      setError("The order request could not be confirmed. Check My Orders before placing another order.");
-    } else if (!items.length) {
+    } else if (!recoverOrder && !items.length) {
       router.replace("/checkout/cart");
     }
-  }, [hydrated, items.length, order, router]);
+  }, [createdId, hydrated, items.length, order, recoverOrder, router]);
 
   const ordersHref = order ? `/dashboard/orders?orderId=${encodeURIComponent(order.id)}` : "/dashboard/orders";
 
@@ -259,6 +259,15 @@ function CheckoutForm() {
             {submitted && <Button variant="ghost" asChild><Link href={`/checkout/success?orderId=${encodeURIComponent(order.id)}`}>View order confirmation</Link></Button>}
           </div>
         </section>
+      </div>
+    );
+  }
+
+  if (hydrated && uncertain && !items.length) {
+    return (
+      <div className="mx-auto max-w-xl space-y-4 px-4 py-8">
+        <p role="alert">{error || orderRecoveryMessage}</p>
+        <Button asChild variant="outline"><Link href={ordersHref}>Check My Orders</Link></Button>
       </div>
     );
   }
@@ -314,7 +323,7 @@ function CheckoutForm() {
             <div className="flex justify-between gap-3"><dt>Payment method</dt><dd>UPI</dd></div>
           </dl>
           <p className="text-sm text-muted-foreground">You’ll see the final payable amount before paying. Harglim verifies the UPI reference after submission.</p>
-          {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+          {(error || recoverOrder) && <p role="alert" className="text-sm text-red-700">{error || orderRecoveryMessage}</p>}
           {uncertain
             ? <Button asChild variant="outline" className="w-full"><Link href={ordersHref}>Check My Orders</Link></Button>
             : <Button type="submit" className="w-full min-h-11" disabled={submitting}>{submitting ? "Confirming order…" : "Confirm Order"}</Button>}
@@ -325,5 +334,5 @@ function CheckoutForm() {
 }
 
 export default function CheckoutStepPage() {
-  return <AuthGuard><CheckoutForm /></AuthGuard>;
+  return <AuthGuard><Suspense fallback={<p role="status" className="p-6">Loading checkout?</p>}><CheckoutForm /></Suspense></AuthGuard>;
 }

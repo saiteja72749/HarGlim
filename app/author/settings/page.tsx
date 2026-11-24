@@ -1,5 +1,6 @@
 "use client";
 
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError, record } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -133,7 +134,7 @@ export default function AuthorSettingsPage() {
     setSettingsLoading(false);
   }, [userId, applyPayoutDetails]);
 
-  useEffect(() => { void fetchSettings(); }, [fetchSettings]);
+  useEffect(() => scheduleRequest(fetchSettings), [fetchSettings]);
 
   // Handle local image file selection
   const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {

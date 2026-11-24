@@ -1,4 +1,5 @@
 "use client";
+import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 
@@ -96,9 +97,7 @@ export default function AdminAnalyticsPage() {
     }
   }, [period]);
 
-  useEffect(() => {
-    fetchAnalytics();
-  }, [fetchAnalytics]);
+  useEffect(() => scheduleRequest(fetchAnalytics), [fetchAnalytics]);
 
   if (error) return <ErrorState title="Analytics could not load" onRetry={fetchAnalytics} />;
 
