@@ -34,6 +34,8 @@ const nextConfig = {
   devIndicators: false,
   async redirects() {
     return [
+      { source: '/admin/analytics', destination: '/admin', permanent: false },
+      { source: '/admin/notifications', destination: '/admin', permanent: false },
       { source: '/author/add-book', destination: '/author/manuscripts/new', permanent: true },
       { source: '/author/book-performance', destination: '/author/analytics#performance', permanent: true },
       { source: '/author/royalty-settlements', destination: '/author/royalties#settlements', permanent: true },

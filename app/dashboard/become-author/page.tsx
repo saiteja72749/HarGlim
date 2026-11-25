@@ -2,6 +2,7 @@
 
 import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
+import { onLiveChange } from "@/lib/live-sync";
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
@@ -89,6 +90,7 @@ export default function BecomeAuthorPage() {
   }, []);
 
   useEffect(() => scheduleRequest(checkStatus), [checkStatus]);
+  useEffect(() => onLiveChange("account-access", () => { void checkStatus(); }, 30_000), [checkStatus]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

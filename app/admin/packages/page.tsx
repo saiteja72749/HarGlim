@@ -1,5 +1,6 @@
 "use client";
 
+import { adminResponse, adminRows } from "@/lib/admin-account-api";
 import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
@@ -72,9 +73,9 @@ async function fetchAllPackages(): Promise<PublishPackage[]> {
   const all: PublishPackage[] = [];
   for (let page = 1; page <= 20; page++) {
     const { data } = await api.get("/admin/publish-packages", { params: { page, limit: 100 }, cache: "no-store" });
-    const items: PublishPackage[] = Array.isArray(data?.data) ? data.data : [];
+    const items = adminRows<PublishPackage>(data, "packages", "publishPackages");
     all.push(...items);
-    if (items.length === 0 || page >= (data?.pagination?.pages ?? 1)) break;
+    if (items.length === 0 || page >= (data?.pagination?.pages ?? data?.data?.pagination?.pages ?? 1)) break;
   }
   return all;
 }
@@ -175,9 +176,10 @@ export default function AdminPackagesPage() {
     try {
       let savedId = editing?._id;
       if (editing) {
-        await api.patch(`/admin/publish-packages/${editing._id}`, payload);
+        adminResponse((await api.patch(`/admin/publish-packages/${editing._id}`, payload)).data);
       } else {
         const { data } = await api.post("/admin/publish-packages", payload);
+        adminResponse(data);
         savedId = data?.data?._id || data?._id;
       }
 
@@ -240,7 +242,7 @@ export default function AdminPackagesPage() {
     }
     setBusyId(pkg._id);
     try {
-      await api.delete(`/admin/publish-packages/${pkg._id}`);
+      adminResponse((await api.delete(`/admin/publish-packages/${pkg._id}`)).data);
       toast.success(`"${pkg.name}" archived and removed from the Publish page.`);
       await afterChange();
     } catch (caughtError) {
@@ -255,7 +257,7 @@ export default function AdminPackagesPage() {
   const handleRestore = async (pkg: PublishPackage) => {
     setBusyId(pkg._id);
     try {
-      await api.patch(`/admin/publish-packages/${pkg._id}`, { isActive: true });
+      adminResponse((await api.patch(`/admin/publish-packages/${pkg._id}`, { isActive: true })).data);
       toast.success(`"${pkg.name}" restored to the Publish page.`);
       await afterChange();
     } catch (caughtError) {
@@ -407,7 +409,7 @@ export default function AdminPackagesPage() {
       </Card>
 
       <Card className="border border-[#E2E6DF] bg-white rounded-2xl shadow-2xs overflow-hidden">
-        <div className="overflow-x-auto">
+        <div>
           <Table>
             <TableHeader className="bg-[#F8F9F7]">
               <TableRow>

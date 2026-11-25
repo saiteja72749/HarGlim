@@ -3,6 +3,7 @@
 import { scheduleRequest } from "@/lib/schedule-request";
 import type { AuthorBook } from "@/types/author-api";
 import { describeApiError } from "@/lib/api-error";
+import { adminResponse } from "@/lib/admin-account-api";
 
 import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
@@ -449,26 +450,10 @@ export default function EditBookPage() {
         jsonPayload.coverImage = coverImageUrl || manualCoverImageUrl;
       }
 
-      // Execute update with graceful fallback
-      let updateSuccess = false;
-      try {
-        await api.put(`/admin/books/${bookId}`, jsonPayload);
-        updateSuccess = true;
-      } catch (caughtError) {
-        const putErr = describeApiError(caughtError);
-        console.warn("Primary /admin/books put failed, trying /books fallback:", putErr?.message);
-        try {
-          throw putErr;
-        } catch (caughtError) {
-          const fallbackErr = describeApiError(caughtError);
-          throw putErr || fallbackErr;
-        }
-      }
-
-      if (updateSuccess) {
-        toast.success("Book updated successfully! 📚");
-        router.push("/admin/books");
-      }
+      const { data } = await api.put(`/admin/books/${bookId}`, jsonPayload);
+      adminResponse(data);
+      toast.success("Book updated successfully.");
+      router.push("/admin/books");
     } catch (err) {
       console.error("Failed to update book:", describeApiError(err));
       const errMsg = describeApiError(err).response?.data.message || (err instanceof Error ? err.message : undefined) || "Failed to update book";

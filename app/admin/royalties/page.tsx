@@ -1,5 +1,6 @@
 "use client";
 
+import { notifyLiveChange } from "@/lib/live-sync";
 import type { Book } from "@/types";
 import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
@@ -145,8 +146,9 @@ function ManualRoyaltiesPage() {
 
     setSaving(true);
     try {
-      await createManualRoyalty(buildPayload(authorId, rows, { periodStart, periodEnd, note }));
-      toast.success(`Royalty of ${formatINR(totals.royalty)} recorded for ${selectedAuthor?.name || "the author"}.`);
+      const saved = await createManualRoyalty(buildPayload(authorId, rows, { periodStart, periodEnd, note }));
+      notifyLiveChange("author-data");
+      toast.success(`Royalty of ${formatINR(saved.totalRoyalty)} recorded for ${selectedAuthor?.name || "the author"}.`);
       resetForm();
       loadStatements();
     } catch (caughtError) {
@@ -154,7 +156,7 @@ function ManualRoyaltiesPage() {
       toast.error(
         isMissingEndpoint(err)
           ? "The backend does not support manual royalties yet (POST /admin/manual-royalties)."
-          : err?.response?.data?.message || "Failed to save the royalty statement."
+          : err.response?.data.message || err.message
       );
     } finally {
       setSaving(false);
@@ -166,11 +168,12 @@ function ManualRoyaltiesPage() {
     if (!reason) return;
     try {
       await voidManualRoyalty(statement.id, reason);
+      notifyLiveChange("author-data");
       toast.success("Statement voided.");
       loadStatements();
     } catch (caughtError) {
       const err = describeApiError(caughtError);
-      toast.error(err?.response?.data?.message || "Failed to void the statement.");
+      toast.error(err.response?.data.message || err.message);
     }
   };
 

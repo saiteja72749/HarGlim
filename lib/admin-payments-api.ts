@@ -61,7 +61,7 @@ export async function listAdminPayments(params: AdminPaymentQueryParams = {}) {
   if (params.search?.trim()) queryParams.search = params.search.trim();
   if (params.sort) queryParams.sort = params.sort;
 
-  const { data } = await api.get('/admin/operations/payments', { params: queryParams });
+  const { data } = await api.get('/admin/operations/payments', { params: queryParams, cache: "no-store" });
   return data;
 }
 
@@ -71,7 +71,7 @@ export async function listAdminPayments(params: AdminPaymentQueryParams = {}) {
  */
 export async function getAdminPaymentDetail(paymentId: string) {
   assertMongoId(paymentId);
-  const { data } = await api.get(`/admin/operations/payments/${paymentId}`);
+  const { data } = await api.get(`/admin/operations/payments/${paymentId}`, { cache: "no-store" });
   return data;
 }
 

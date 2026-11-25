@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
+import { notifyLiveChange } from "@/lib/live-sync";
 import toast from "react-hot-toast";
 import {
   User,
@@ -214,7 +215,8 @@ export default function AuthorSettingsPage() {
       setImageFile(null);
       setIsEditingProfile(false);
 
-      toast.success("Author profile updated successfully! 👤");
+      notifyLiveChange("author-data");
+      toast.success("Author profile updated successfully.");
     } catch (caughtError) {
       const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || err.message || "Failed to update profile.");

@@ -1,9 +1,12 @@
 "use client";
 
+import { adminResponse, adminRows } from "@/lib/admin-account-api";
+import { invalidateApiCache } from "@/lib/api";
+import { notifyLiveChange } from "@/lib/live-sync";
 import { scheduleRequest } from "@/lib/schedule-request";
-import { describeApiError } from "@/lib/api-error";
+import { describeApiError, record } from "@/lib/api-error";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Archive, ArchiveRestore, Camera, Edit2, ExternalLink, Loader2, Plus, Search, Upload, X } from "lucide-react";
 import toast from "react-hot-toast";
@@ -33,18 +36,50 @@ type AdminSpotlight = {
 type StatusFilter = "all" | "active" | "archived";
 
 const emptyForm: SpotlightForm = { authorName: "", caption: "", sortOrder: "", isActive: true };
-const errorMessage = (err: unknown, fallback: string) => describeApiError(err).response?.data.message || fallback;
+const errorMessage = (err: unknown, fallback: string) => (err instanceof Error && !describeApiError(err).response ? err.message : describeApiError(err).response?.data.message) || fallback;
 const multipart = { headers: { "Content-Type": "multipart/form-data" } };
 
 async function fetchAllSpotlights(): Promise<AdminSpotlight[]> {
   const all: AdminSpotlight[] = [];
   for (let page = 1; page <= 50; page++) {
     const { data } = await api.get("/admin/spotlights", { params: { page, limit: 60 }, cache: "no-store" });
-    const items: AdminSpotlight[] = Array.isArray(data?.data) ? data.data : [];
+    const items = adminRows<AdminSpotlight>(data, "spotlights");
     all.push(...items);
-    if (items.length === 0 || page >= (data?.pagination?.pages ?? 1)) break;
+    if (items.length === 0 || page >= (data?.pagination?.pages ?? data?.data?.pagination?.pages ?? 1)) break;
   }
   return all;
+}
+
+function checkImage(source: string) {
+  return new Promise<void>((resolve, reject) => {
+    if (!/^https:\/\//i.test(source)) {
+      reject(new Error("The service did not return a public HTTPS image URL."));
+      return;
+    }
+    const image = new window.Image();
+    const timeout = window.setTimeout(() => finish(false), 12_000);
+    const finish = (loaded: boolean) => {
+      window.clearTimeout(timeout);
+      image.onload = null;
+      image.onerror = null;
+      if (loaded) resolve();
+      else reject(new Error("The image was saved but could not be loaded. Refresh Spotlight before uploading it again."));
+    };
+    image.onload = () => finish(true);
+    image.onerror = () => finish(false);
+    image.src = source;
+  });
+}
+
+function SpotlightPreview({ item }: { item: AdminSpotlight }) {
+  const [failed, setFailed] = useState<string[]>([]);
+  const source = [item.thumbnail, item.image].find(url => url && !failed.includes(url));
+  return source ? (
+    // eslint-disable-next-line @next/next/no-img-element -- the upload's real URL can use arbitrary CDN hosts
+    <img src={source} alt={item.caption || `Spotlight: ${item.author_name}`} loading="lazy"
+      onError={() => setFailed(values => [...values, source])}
+      className={`h-full w-full object-cover ${item.isActive === false ? "opacity-50" : ""}`} />
+  ) : <div className="grid h-full place-content-center gap-2 text-center text-sm text-muted-foreground"><Camera className="mx-auto size-6" />Image unavailable</div>;
 }
 
 export default function AdminSpotlightsPage() {
@@ -60,6 +95,7 @@ export default function AdminSpotlightsPage() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<{ file: File; url: string }>();
   const [saving, setSaving] = useState(false);
+  const pendingWrite = useRef(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -119,57 +155,68 @@ export default function AdminSpotlightsPage() {
     setIsModalOpen(true);
   };
 
+  const refreshSaved = async (id: string, active: boolean) => {
+    const rows = await fetchAllSpotlights();
+    setItems(rows);
+    const saved = rows.find(row => row._id === id);
+    if (!saved || saved.isActive !== active) {
+      throw new Error("The saved spotlight status could not be confirmed. Refresh Spotlight before retrying.");
+    }
+    if (active) await checkImage(saved.image);
+    invalidateApiCache("/spotlights");
+    notifyLiveChange("spotlights");
+    return saved;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (pendingWrite.current) return;
     const problem = spotlightFormError(form, file, !editing);
-    if (problem) {
-      toast.error(problem);
-      return;
-    }
+    if (problem) { toast.error(problem); return; }
+
+    pendingWrite.current = true;
     setSaving(true);
     try {
       const body = spotlightFormData(form, file);
-      if (editing) await api.patch(`/admin/spotlights/${editing._id}`, body, multipart);
-      else await api.post("/admin/spotlights", body, multipart);
+      const { data } = editing
+        ? await api.patch(`/admin/spotlights/${encodeURIComponent(editing._id)}`, body, multipart)
+        : await api.post("/admin/spotlights", body, multipart);
+      const result = record(adminResponse(data));
+      const item = record(result.spotlight ?? result);
+      const id = editing?._id ?? item._id ?? item.id;
+      if (typeof id !== "string" || !id) throw new Error("The backend did not return a spotlight ID. Refresh Spotlight before retrying.");
+      const saved = await refreshSaved(id, form.isActive);
+      if (!form.isActive && file) await checkImage(saved.image);
+      if (saved.author_name !== form.authorName.trim() || (saved.caption ?? "") !== form.caption.trim()
+        || (form.sortOrder.trim() !== "" && saved.sortOrder !== Number(form.sortOrder))) {
+        throw new Error("The saved spotlight details did not match the form. Refresh Spotlight before retrying.");
+      }
       toast.success(editing ? "Spotlight updated." : "Spotlight added.");
       setIsModalOpen(false);
-      await load();
-    } catch (caughtError) {
-      const err = describeApiError(caughtError);
-      console.error("Failed to save spotlight:", describeApiError(err));
+    } catch (err) {
       toast.error(errorMessage(err, "Could not save the spotlight."));
     } finally {
+      pendingWrite.current = false;
       setSaving(false);
     }
   };
 
-  const handleArchive = async (item: AdminSpotlight) => {
-    if (!window.confirm(`Archive the photo of ${item.author_name}? It leaves the website; you can restore it later.`)) return;
+  const setSpotlightActive = async (item: AdminSpotlight, active: boolean) => {
+    if (pendingWrite.current || (!active && !window.confirm(`Archive the photo of ${item.author_name}?`))) return;
+    pendingWrite.current = true;
     setBusyId(item._id);
     try {
-      await api.delete(`/admin/spotlights/${item._id}`);
-      toast.success("Spotlight archived.");
-      await load();
-    } catch (caughtError) {
-      const err = describeApiError(caughtError);
-      toast.error(errorMessage(err, "Could not archive the spotlight."));
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleRestore = async (item: AdminSpotlight) => {
-    setBusyId(item._id);
-    try {
+      const path = `/admin/spotlights/${encodeURIComponent(item._id)}`;
       const body = new FormData();
       body.append("isActive", "true");
-      await api.patch(`/admin/spotlights/${item._id}`, body, multipart);
-      toast.success("Spotlight restored to the website.");
-      await load();
-    } catch (caughtError) {
-      const err = describeApiError(caughtError);
-      toast.error(errorMessage(err, "Could not restore the spotlight."));
+      const { data } = active ? await api.patch(path, body, multipart) : await api.delete(path);
+      adminResponse(data);
+      await refreshSaved(item._id, active);
+      toast.success(active ? "Spotlight restored to the website." : "Spotlight archived.");
+    } catch (err) {
+      toast.error(errorMessage(err, "Could not update the spotlight."));
     } finally {
+      pendingWrite.current = false;
       setBusyId(null);
     }
   };
@@ -260,13 +307,7 @@ export default function AdminSpotlightsPage() {
             return (
               <li key={item._id} className="rounded-2xl border border-[#E2E6DF] bg-white overflow-hidden shadow-2xs flex flex-col">
                 <div className="relative aspect-square bg-[#E2E6DF]">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={item.thumbnail || item.image}
-                    alt={item.caption || `Spotlight: ${item.author_name}`}
-                    loading="lazy"
-                    className={`h-full w-full object-cover ${live ? "" : "opacity-50"}`}
-                  />
+                  <SpotlightPreview key={item.thumbnail || item.image} item={item} />
                   <Badge
                     className={`absolute left-2 top-2 text-[10px] ${
                       live ? "bg-emerald-500/90 text-white border-emerald-600" : "bg-slate-600/90 text-white border-slate-700"
@@ -295,7 +336,7 @@ export default function AdminSpotlightsPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => (live ? handleArchive(item) : handleRestore(item))}
+                        onClick={() => (live ? setSpotlightActive(item, false) : setSpotlightActive(item, true))}
                         disabled={busy}
                         className={`h-8 w-8 ${live ? "text-rose-600 hover:bg-rose-50" : "text-emerald-700 hover:bg-emerald-50"}`}
                         title={live ? "Archive photo" : "Restore photo"}

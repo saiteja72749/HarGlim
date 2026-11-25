@@ -1,9 +1,11 @@
 "use client";
 
 import { scheduleRequest } from "@/lib/schedule-request";
-import { describeApiError } from "@/lib/api-error";
+import { describeApiError, record } from "@/lib/api-error";
+import { accountId, adminResponse, adminRows } from "@/lib/admin-account-api";
+import { notifyLiveChange } from "@/lib/live-sync";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import api from "@/lib/api";
 import { ErrorState } from "@/components/ui/error-state";
 import { CheckCircle2, XCircle, Search } from "lucide-react";
@@ -54,6 +56,7 @@ export default function AdminAuthorApplicationsPage() {
   const [error, setError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const saving = useRef(false);
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
@@ -65,9 +68,8 @@ export default function AdminAuthorApplicationsPage() {
       if (statusFilter !== "all") params.status = statusFilter;
       if (searchQuery.trim()) params.search = searchQuery.trim();
 
-      const { data } = await api.get("/admin/author-applications", { params });
-      const items = data?.data?.applications || data?.applications || data?.data?.items || (Array.isArray(data?.data) ? data.data : []) || (Array.isArray(data) ? data : []);
-      setApplications(Array.isArray(items) ? items : []);
+      const { data } = await api.get("/admin/author-applications", { params, cache: "no-store" });
+      setApplications(adminRows<AuthorApplication>(data, "applications"));
     } catch (err) {
       console.error("Failed to fetch author applications:", describeApiError(err));
       setError(true);
@@ -78,35 +80,35 @@ export default function AdminAuthorApplicationsPage() {
 
   useEffect(() => scheduleRequest(fetchApplications), [fetchApplications]);
 
-  const handleApprove = async (id: string) => {
+  const changeApplicationStatus = async (id: string, status: "approved" | "rejected") => {
+    if (saving.current) return;
+    if (status === "rejected" && !window.confirm("Reject this author application?")) return;
+    saving.current = true;
     setProcessingId(id);
     try {
-      await api.put(`/admin/author-applications/${id}/status`, { status: "approved" });
-
-      toast.success("Author application APPROVED successfully! 🎉");
-      fetchApplications();
+      const { data } = await api.put(`/admin/author-applications/${encodeURIComponent(id)}/status`, { status });
+      const result = record(adminResponse(data));
+      const updated = record(result.application ?? result);
+      const matches = (app: { _id?: unknown; id?: unknown; status?: unknown }) =>
+        accountId(app) === id && String(app.status).toLowerCase() === status;
+      if (!matches(updated)) {
+        let confirmed = false;
+        try {
+          const { data: readback } = await api.get("/admin/author-applications", { params: { status }, cache: "no-store" });
+          confirmed = adminRows<AuthorApplication>(readback, "applications").some(matches);
+        } catch {
+          // Surface an uncertain result instead of encouraging a repeated write.
+        }
+        if (!confirmed) throw new Error("The backend accepted the request, but the new status could not be confirmed. Refresh the applications list before retrying.");
+      }
+      notifyLiveChange("account-access", false);
+      toast.success(status === "approved" ? "Author application approved." : "Author application rejected.");
+      await fetchApplications();
     } catch (caughtError) {
       const err = describeApiError(caughtError);
-      toast.error(err.response?.data?.message || "Failed to approve application.");
+      toast.error(err.response?.data?.message || err.message);
     } finally {
-      setProcessingId(null);
-    }
-  };
-
-  const handleReject = async (id: string) => {
-    const reason = prompt("Enter rejection rationale for author application (optional):", "Incomplete publication details");
-    if (reason === null) return;
-
-    setProcessingId(id);
-    try {
-      await api.put(`/admin/author-applications/${id}/status`, { status: "rejected", rejectionReason: reason });
-
-      toast.error("Author application REJECTED.");
-      fetchApplications();
-    } catch (caughtError) {
-      const err = describeApiError(caughtError);
-      toast.error(err.response?.data?.message || "Failed to reject application.");
-    } finally {
+      saving.current = false;
       setProcessingId(null);
     }
   };
@@ -176,7 +178,7 @@ export default function AdminAuthorApplicationsPage() {
       ) : (
         <Card className="bg-white border border-[#E2E6DF] shadow-xs rounded-2xl overflow-hidden">
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
+            <div>
               <Table>
                 <TableHeader className="bg-[#F8F9F7]">
                   <TableRow>
@@ -189,7 +191,7 @@ export default function AdminAuthorApplicationsPage() {
                 </TableHeader>
                 <TableBody>
                   {filteredApps.map((app, index) => {
-                    const id = app._id || app.id || "";
+                    const id = accountId(app);
                     if (!id) return null;
                     const status = (app.status || "pending").toLowerCase();
 
@@ -252,7 +254,7 @@ export default function AdminAuthorApplicationsPage() {
                             {/* Approve (Green Button) */}
                             <Button
                               size="sm"
-                              onClick={() => handleApprove(id)}
+                              onClick={() => changeApplicationStatus(id, "approved")}
                               disabled={processingId === id || status === "approved"}
                               className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 px-3 rounded-lg gap-1.5 font-semibold"
                             >
@@ -264,7 +266,7 @@ export default function AdminAuthorApplicationsPage() {
                             <Button
                               variant="destructive"
                               size="sm"
-                              onClick={() => handleReject(id)}
+                              onClick={() => changeApplicationStatus(id, "rejected")}
                               disabled={processingId === id || status === "rejected"}
                               className="text-xs h-8 px-3 rounded-lg gap-1.5 font-semibold"
                             >

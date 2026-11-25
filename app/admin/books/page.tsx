@@ -1,5 +1,8 @@
 "use client";
 
+import { adminRows } from "@/lib/admin-account-api";
+import { useBookCategories } from "@/hooks/use-book-categories";
+import { resolveCategoryId } from "@/lib/category-data";
 import type { AuthorBook } from "@/types/author-api";
 import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
@@ -95,6 +98,7 @@ export default function AdminBooksPage() {
   const [error, setError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const { categories, error: categoryError, reload: reloadCategories } = useBookCategories();
   const [statusFilter, setStatusFilter] = useState("all");
 
   const fetchBooks = useCallback(async () => {
@@ -106,13 +110,11 @@ export default function AdminBooksPage() {
         params.search = searchQuery.trim();
         params.q = searchQuery.trim();
       }
-      if (statusFilter !== "all") params.status = statusFilter;
+      if (statusFilter === "Active") params.status = "published";
       if (categoryFilter !== "all") params.category = categoryFilter;
 
-      const { data } = await api.get("/admin/books", { params });
-      const items = data.data?.books || (Array.isArray(data.data) ? data.data : []) || (Array.isArray(data) ? data : []);
-      const apiBooks = Array.isArray(items) ? items : [];
-      setBooks(apiBooks);
+      const { data } = await api.get("/admin/books", { params, cache: "no-store" });
+      setBooks(adminRows<AuthorBook & { cover?: string }>(data, "books"));
     } catch (err) {
       console.error("Failed to fetch books from API:", describeApiError(err));
       setError(true);
@@ -131,7 +133,7 @@ export default function AdminBooksPage() {
     return getBookAuthorInfo(book).name;
   };
 
-  const categories = Array.from(new Set(books.map((b) => getCategoryName(b.category)))).filter(Boolean);
+  const selectedCategory = categories.find(category => category._id === categoryFilter);
 
   const filteredBooks = books.filter((book: AuthorBook) => {
     const title = book.title || "";
@@ -140,7 +142,9 @@ export default function AdminBooksPage() {
       title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       author.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory =
-      categoryFilter === "all" || getCategoryName(book.category) === categoryFilter;
+      categoryFilter === "all" || (selectedCategory && resolveCategoryId(
+        categories, typeof book.category === "object" && book.category !== null ? book.category._id || book.category.slug : book.category || ""
+      ) === selectedCategory._id);
     
     let matchesStatus = true;
     if (statusFilter === "Active") {
@@ -256,14 +260,11 @@ export default function AdminBooksPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
-                {categories.map((cat) => {
-                  const catString = String(cat);
-                  return (
-                    <SelectItem key={catString} value={catString}>
-                      {catString}
-                    </SelectItem>
-                  );
-                })}
+                {categories.map(category => (
+                  <SelectItem key={category._id} value={category._id}>
+                    {category.name}{category.active === false || category.isActive === false ? " (inactive)" : ""}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -279,13 +280,14 @@ export default function AdminBooksPage() {
               </SelectContent>
             </Select>
           </div>
+          {categoryError && <p className="mt-3 text-sm" role="status">Categories could not load. <Button variant="link" onClick={() => void reloadCategories()}>Retry categories</Button></p>}
         </CardContent>
       </Card>
 
       {/* Books Table */}
       <Card>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
+          <div>
             <Table>
               <TableHeader>
                 <TableRow>

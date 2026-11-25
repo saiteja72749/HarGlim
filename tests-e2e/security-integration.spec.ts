@@ -39,9 +39,19 @@ test('financial reads prohibit response caching and do not expose a full bank ac
 });
 
 test('the existing public site explains an offline connection', async ({ page, context }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/contact', { waitUntil: 'domcontentloaded' });
-  await context.setOffline(true);
-  await expect(page.getByRole('alert').filter({ hasText: 'You are offline.' })).toBeVisible();
-  await context.setOffline(false);
-  await expect(page.getByRole('alert').filter({ hasText: 'You are offline.' })).toHaveCount(0);
+  // Confirm the current page is interactive before making its network unavailable.
+  await page.getByRole('button', { name: 'Toggle menu' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const offlineNotice = page.getByRole('alert').filter({ hasText: 'You are offline.' });
+  try {
+    await context.setOffline(true);
+    await expect(offlineNotice).toBeVisible();
+  } finally {
+    await context.setOffline(false);
+  }
+  await expect(offlineNotice).toHaveCount(0);
 });

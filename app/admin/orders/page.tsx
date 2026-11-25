@@ -1,5 +1,7 @@
 "use client";
 
+import { adminResponse, adminRows } from "@/lib/admin-account-api";
+import { approveAdminPayment, rejectAdminPayment } from "@/lib/admin-payments-api";
 import { populated } from "@/lib/order-status";
 import { scheduleRequest } from "@/lib/schedule-request";
 import type { OrderRecord, OrderItem, ShipmentRecord } from "@/types/commerce-api";
@@ -20,7 +22,7 @@ import {
   normalizeShipmentStatus,
   shipmentBelongsToOrder,
 } from "@/lib/tracking";
-import { assignCourier } from "@/lib/shipment-actions";
+import { assignCourier, fetchSavedShipment } from "@/lib/shipment-actions";
 import { ErrorState } from "@/components/ui/error-state";
 import {
   Search,
@@ -323,7 +325,7 @@ export default function AdminOrdersPage() {
         api.get("/admin/orders", { params, cache: "no-store" }),
         api.get("/admin/shipments", { params: { limit: 100 }, cache: "no-store" }).catch(() => null),
       ]);
-      setOrders(mergeShipmentsIntoOrders(extractList(data, "orders"), extractList(shipmentsRes?.data, "shipments")));
+      setOrders(mergeShipmentsIntoOrders(adminRows<OrderRecord>(data, "orders"), extractList(shipmentsRes?.data, "shipments")));
       setTotalOrders(typeof data?.pagination?.total === "number" ? data.pagination.total : null);
     } catch (caughtError) {
       const err = describeApiError(caughtError);
@@ -347,75 +349,25 @@ export default function AdminOrdersPage() {
 
   useEffect(() => scheduleRequest(fetchOrders), [fetchOrders]);
 
-  // Action 1: Approve / Confirm Payment
-  const handleApprovePayment = async (orderMongoId?: string, paymentMongoId?: string) => {
+  const [paymentAction, setPaymentAction] = useState<string | null>(null);
+
+  const verifyPayment = async (paymentId: string, action: "approve" | "reject") => {
+    if (paymentAction) return;
+    const reason = action === "reject" ? window.prompt("Enter the reason for rejecting this payment.")?.trim() : "";
+    if (action === "reject" && !reason) return;
+    setPaymentAction(paymentId);
     try {
-      if (!paymentMongoId && !orderMongoId) {
-        toast.error("No valid Payment ID or Order ID found for this record.");
-        return;
-      }
-
-      // Payment approval is what triggers invoice + shipment creation on the backend.
-      // If it fails, stop here: marking the order "Processing" anyway leaves an order
-      // with no shipment record, so a tracking ID can never be attached to it.
-      if (!paymentMongoId) {
-        toast.error("This order has no linked payment record. Approve it from Payment Operations instead.");
-        return;
-      }
-      await api.post(`/admin/operations/payments/${paymentMongoId}/approve`, {
-        reason: "Admin payment confirmed from orders view",
-      });
-
-      if (orderMongoId) {
-        const paidPayload = {
-          status: "Processing",
-          orderStatus: "Processing",
-          paymentStatus: "CONFIRMED",
-          payment_status: "CONFIRMED",
-          payment_status_label: "CONFIRMED",
-          paymentState: "CONFIRMED",
-          isPaid: true,
-          paidAt: new Date().toISOString(),
-        };
-
-        await api.put(`/admin/orders/${orderMongoId}/status`, paidPayload);
-      }
-
-      toast.success("Payment confirmed successfully! ✅");
-      fetchOrders();
+      const result = action === "approve"
+        ? await approveAdminPayment(paymentId)
+        : await rejectAdminPayment(paymentId, { reason });
+      adminResponse(result);
+      toast.success(action === "approve" ? "Payment confirmed." : "Payment rejected.");
+      await fetchOrders();
     } catch (caughtError) {
-      const err = describeApiError(caughtError);
-      toast.error(err.response?.data?.message || "Failed to confirm payment.");
-    }
-  };
-
-
-  // Action 2: Reject Payment
-  const handleRejectPayment = async (orderMongoId?: string, paymentMongoId?: string) => {
-    const reason = prompt("Enter reason for payment rejection (optional):", "UTR reference mismatch");
-    if (reason === null) return;
-
-    try {
-      if (paymentMongoId) {
-        await api.post(`/admin/operations/payments/${paymentMongoId}/reject`, {
-          reason,
-        });
-      } else if (orderMongoId) {
-        await api.put(`/admin/orders/${orderMongoId}/status`, {
-          status: "Cancelled",
-          paymentStatus: "REJECTED",
-          reason,
-        });
-      } else {
-        toast.error("No valid Payment ID or Order ID found for this record.");
-        return;
-      }
-
-      toast.error("Payment marked as REJECTED.");
-      fetchOrders();
-    } catch (caughtError) {
-      const err = describeApiError(caughtError);
-      toast.error(err.response?.data?.message || "Failed to reject payment.");
+      const error = describeApiError(caughtError);
+      toast.error(error.response?.data.message || error.message);
+    } finally {
+      setPaymentAction(null);
     }
   };
 
@@ -426,11 +378,10 @@ export default function AdminOrdersPage() {
       return;
     }
     try {
-      await api.put(`/admin/orders/${orderMongoId}/status`, {
+      adminResponse((await api.put(`/admin/orders/${orderMongoId}/status`, {
         status: "Printed",
-        orderStatus: "Printed",
         reason: "Book physically printed",
-      });
+      })).data);
 
       toast.success("Order status updated to Printed 🖨️");
       fetchOrders();
@@ -504,7 +455,7 @@ export default function AdminOrdersPage() {
 
       // provider must be "manual" (courier adapters are placeholders); the backend builds the
       // tracking URL for India Post / Delhivery / BlueDart / DTDC / Ekart.
-      await assignCourier(
+      const currentStatus = await assignCourier(
         shipment,
         {
           provider: "manual",
@@ -519,18 +470,24 @@ export default function AdminOrdersPage() {
       // Mark it dispatched via the shipment (COURIER_ASSIGNED -> IN_TRANSIT). The backend then
       // syncs the order to SHIPPED; the order status must not be updated separately. A shipment
       // that is already in transit (only its AWB was corrected) needs no step.
-      const currentStatus = normalizeShipmentStatus(shipment.status) === "CREATED" ? "COURIER_ASSIGNED" : shipment.status;
       if (markDispatched) {
         for (const status of getShipmentStatusPath(currentStatus, "IN_TRANSIT")) {
-          await api.post(`/admin/shipments/${shipmentId}/update-status`, {
+          const { data } = await api.post(`/admin/shipments/${shipmentId}/update-status`, {
             status,
             description: `Dispatched via ${courierInput.trim()}`,
             occurredAt: new Date().toISOString(),
             metadata: { source: "admin-orders" },
           });
+          adminResponse(data);
         }
       }
 
+      if (markDispatched) {
+        const saved = await fetchSavedShipment(shipmentId);
+        if (!["IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED"].includes(normalizeShipmentStatus(saved.status))) {
+          throw new Error("The shipment dispatch could not be confirmed. Refresh Shipments before retrying.");
+        }
+      }
       toast.success(
         markDispatched
           ? `${courierInput} tracking saved and order marked Shipped.`
@@ -546,7 +503,7 @@ export default function AdminOrdersPage() {
       toast.error(
         status === 409
           ? "That tracking number is already used on another shipment. Check the AWB and enter a different one."
-          : err.response?.data?.message || "Failed to save tracking details."
+          : err.response?.data?.message || err.message
       );
     } finally {
       setIsSubmittingTracking(false);
@@ -586,6 +543,7 @@ export default function AdminOrdersPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#5C6E6E]" />
               <Input
+                aria-label="Search orders"
                 placeholder="Search by Order ID, UTR reference, or Customer Name..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -593,7 +551,7 @@ export default function AdminOrdersPage() {
               />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full sm:w-52 bg-white border-[#E2E6DF]">
+              <SelectTrigger aria-label="Filter order status" className="w-full sm:w-52 bg-white border-[#E2E6DF]">
                 <Filter className="mr-2 h-4 w-4 text-[#5C6E6E]" />
                 <SelectValue placeholder="Filter by status" />
               </SelectTrigger>
@@ -609,7 +567,7 @@ export default function AdminOrdersPage() {
           </div>
 
           {/* Quick Status Filter Pills with Live Counters */}
-          <div className="flex items-center gap-2 overflow-x-auto pt-3 border-t border-[#E2E6DF]/70 text-xs">
+          <div className="flex items-center flex-wrap gap-2 pt-3 border-t border-[#E2E6DF]/70 text-xs">
             {[
               // Counts reflect the loaded page; "All" shows the server total when available.
               { id: "all", label: "All Orders", count: statusFilter === "all" && totalOrders !== null ? totalOrders : orders.length },
@@ -659,21 +617,21 @@ export default function AdminOrdersPage() {
       ) : (
         <Card className="bg-white border border-[#E2E6DF] shadow-xs rounded-2xl overflow-hidden">
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader className="bg-[#F8F9F7]">
+            <div>
+              <Table aria-label="Orders and payment verification" role="table" className="admin-orders-table">
+                <TableHeader role="rowgroup" className="bg-[#F8F9F7]">
                   <TableRow>
-                    <TableHead className="font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Order ID</TableHead>
-                    <TableHead className="font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Customer & Contact</TableHead>
-                    <TableHead className="font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Books Ordered</TableHead>
-                    <TableHead className="font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">UTR Reference</TableHead>
-                    <TableHead className="text-right font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Total Amount</TableHead>
-                    <TableHead className="text-center font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Payment</TableHead>
-                    <TableHead className="text-center font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Order Status</TableHead>
-                    <TableHead className="text-center font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Action Buttons</TableHead>
+                    <TableHead role="columnheader" scope="col" className="font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Order ID</TableHead>
+                    <TableHead role="columnheader" scope="col" className="font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Customer & Contact</TableHead>
+                    <TableHead role="columnheader" scope="col" className="font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Books Ordered</TableHead>
+                    <TableHead role="columnheader" scope="col" className="font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">UTR Reference</TableHead>
+                    <TableHead role="columnheader" scope="col" className="text-right font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Total Amount</TableHead>
+                    <TableHead role="columnheader" scope="col" className="text-center font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Payment</TableHead>
+                    <TableHead role="columnheader" scope="col" className="text-center font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Order Status</TableHead>
+                    <TableHead role="columnheader" scope="col" className="text-center font-bold text-xs uppercase tracking-wider text-[#0F3D3E]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
+                <TableBody role="rowgroup">
                   {filteredOrders.map((order: OrderRecord) => {
                     const orderDisplayId = order.orderNumber || order._id || order.id;
                     const mongoOrderId = getMongoId(order._id) || getMongoId(order.id);
@@ -692,17 +650,18 @@ export default function AdminOrdersPage() {
                     const isPaid = Boolean(order.isPaid || PAID_STATUSES.includes(rawPaymentStatus));
                     const paymentStatus = rawPaymentStatus || (order.utr ? "VERIFICATION_PENDING" : "PENDING");
                     const orderStatus = order.status || order.orderStatus || "PENDING";
-                    const totalPrice = order.totalPrice ?? order.totalAmount ?? order.amount ?? 0;
+                    const totalPrice = order.totalPrice ?? order.totalAmount ?? order.amount;
+                    const canVerifyPayment = Boolean(paymentId && !isPaid && order.utr && normalizeOrderStatus(orderStatus) !== "CANCELLED");
 
                     return (
-                      <TableRow key={orderDisplayId} className="hover:bg-[#F8F9F7]/60 text-xs">
+                      <TableRow role="row" key={orderDisplayId} className="hover:bg-[#F8F9F7]/60 text-xs">
                         {/* Order ID */}
-                        <TableCell className="font-mono font-bold text-[#0F3D3E]">
+                        <TableCell role="cell" data-label="Order ID" className="font-mono font-bold text-[#0F3D3E]">
                           {orderDisplayId}
                         </TableCell>
 
                         {/* Customer & Contact (Strictly Entered Data, No Overrides) */}
-                        <TableCell>
+                        <TableCell role="cell" data-label="Customer and contact">
                           {(() => {
                             const enteredName = getCustomerName(order);
                             const enteredEmail = getCustomerEmail(order);
@@ -743,12 +702,12 @@ export default function AdminOrdersPage() {
                         </TableCell>
 
                         {/* Books (every item, not just the first) */}
-                        <TableCell className="align-top">
+                        <TableCell role="cell" data-label="Books ordered" className="align-top">
                           <OrderItemsCell items={order.items || []} />
                         </TableCell>
 
                         {/* UTR Number */}
-                        <TableCell>
+                        <TableCell role="cell" data-label="UTR reference">
                           {order.utr ? (
                             <span className="font-mono font-bold text-xs bg-amber-50 text-amber-900 px-2.5 py-1 rounded-lg border border-amber-300">
                               {order.utr}
@@ -759,28 +718,29 @@ export default function AdminOrdersPage() {
                         </TableCell>
 
                         {/* Total Amount */}
-                        <TableCell className="text-right font-serif font-bold text-[#0F3D3E]">
-                          ₹{totalPrice.toLocaleString()}
+                        <TableCell role="cell" data-label="Total" className="text-right font-serif font-bold text-[#0F3D3E]">
+                          {totalPrice == null ? "Unavailable" : `₹${totalPrice.toLocaleString("en-IN")}`}
                         </TableCell>
 
                         {/* Payment Status */}
-                        <TableCell className="text-center">
+                        <TableCell role="cell" data-label="Payment" className="text-center">
                           {getPaymentBadge(isPaid, paymentStatus, order.payment_status)}
                         </TableCell>
 
                         {/* Order Status */}
-                        <TableCell className="text-center">
+                        <TableCell role="cell" data-label="Order status" className="text-center">
                           {getOrderStatusBadge(orderStatus)}
                         </TableCell>
 
-                        {/* Action Buttons (Strictly matching prompt) */}
-                        <TableCell className="text-center">
+                        {/* Actions */}
+                        <TableCell role="cell" data-label="Actions" className="text-center">
                           <div className="flex flex-wrap items-center justify-center gap-1.5">
                             {/* 👉 Confirm Payment */}
-                            {!isPaid && (
+                            {canVerifyPayment && paymentId && (
                               <Button
                                 size="sm"
-                                onClick={() => handleApprovePayment(mongoOrderId, paymentId)}
+                                disabled={paymentAction !== null}
+                                onClick={() => verifyPayment(paymentId, "approve")}
                                 className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] h-7 px-2.5 rounded-lg gap-1 font-semibold"
                                 title="Confirm Payment"
                               >
@@ -790,11 +750,12 @@ export default function AdminOrdersPage() {
                             )}
 
                             {/* 👉 Reject Payment */}
-                            {!isPaid && (
+                            {canVerifyPayment && paymentId && (
                               <Button
                                 variant="destructive"
                                 size="sm"
-                                onClick={() => handleRejectPayment(mongoOrderId, paymentId)}
+                                disabled={paymentAction !== null}
+                                onClick={() => verifyPayment(paymentId, "reject")}
                                 className="text-[11px] h-7 px-2.5 rounded-lg gap-1 font-semibold"
                                 title="Reject Payment"
                               >
@@ -804,7 +765,7 @@ export default function AdminOrdersPage() {
                             )}
 
                             {/* 👉 Mark as Printed */}
-                            {orderStatus !== "SHIPPED" && orderStatus !== "DELIVERED" && (
+                            {isPaid && normalizeOrderStatus(orderStatus) === "PROCESSING" && (
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -821,6 +782,7 @@ export default function AdminOrdersPage() {
                             <Button
                               variant="outline"
                               size="sm"
+                              disabled={!mongoOrderId || !isPaid}
                               onClick={() => {
                                 setSelectedOrderForTracking(order);
                                 const existing = extractTrackingInfo(order);

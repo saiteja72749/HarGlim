@@ -29,7 +29,10 @@ import { Input } from '@/components/ui/input';
 import { CompactBookCard } from '@/components/books/book-card';
 import { ErrorState } from '@/components/ui/error-state';
 import type { Author, Book } from '@/types';
-import { getPublic } from '@/lib/api';
+import { getPublic, invalidateApiCache } from '@/lib/api';
+import { onLiveChange } from '@/lib/live-sync';
+import { parseCollectionPage } from '@/lib/catalog-data';
+import { publishedNumber } from '@/lib/book-presentation';
 import toast from 'react-hot-toast';
 import { getSafeExternalUrl } from '@/lib/utils';
 
@@ -45,6 +48,7 @@ export default function AuthorDetailPage() {
   const params = useParams();
   const [author, setAuthor] = useState<Author | null>(null);
   const [books, setBooks] = useState<Book[]>([]);
+  const [booksUnavailable, setBooksUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [imgError, setImgError] = useState(false);
@@ -63,12 +67,16 @@ export default function AuthorDetailPage() {
       const extracted = authorRes?.data?.data || authorRes?.data;
       const authorData: Author | null =
         extracted && (extracted._id || extracted.id) ? (extracted as Author) : null;
-      const bData = booksRes?.data?.data?.books ?? booksRes?.data?.data ?? booksRes?.data?.books;
-      const fetchedBooks: Book[] = Array.isArray(bData) ? bData : [];
-
       if (authorData) {
         setAuthor(authorData);
-        setBooks(fetchedBooks);
+        try {
+          const { items } = parseCollectionPage<Book>(booksRes?.data, 'books');
+          setBooks(items);
+          setBooksUnavailable(false);
+        } catch {
+          setBooks([]);
+          setBooksUnavailable(true);
+        }
       } else {
         setError(true);
         setAuthor(null);
@@ -84,6 +92,10 @@ export default function AuthorDetailPage() {
   }, [params.id]);
 
   useEffect(() => scheduleRequest(fetchAuthorData), [fetchAuthorData]);
+  useEffect(() => onLiveChange('author-data', (reason) => {
+    if (reason === 'change') invalidateApiCache('/authors');
+    void fetchAuthorData();
+  }, 60_000), [fetchAuthorData]);
 
   const handleShare = () => {
     if (typeof window !== 'undefined') {
@@ -93,7 +105,7 @@ export default function AuthorDetailPage() {
   };
 
   // Helper calculation for author stats
-  const totalBooksCount = author?.bookCount || books.length || 0;
+  const totalBooksCount = publishedNumber(author?.bookCount ?? author?.booksCount) ?? (booksUnavailable ? 'Unavailable' : books.length);
   const categoriesList = Array.from(
     new Set(
       books
@@ -108,7 +120,8 @@ export default function AuthorDetailPage() {
     (b.title || '').toLowerCase().includes(bookSearchQuery.toLowerCase())
   );
 
-  const avatarSrc = author?.profileImage || author?.profilePicture;
+  const avatarSrc = author?.profilePicture ?? author?.profileImage;
+  const biography = author?.bio?.trim();
 
   if (loading) {
     return (
@@ -213,10 +226,9 @@ export default function AuthorDetailPage() {
               </h1>
 
               {/* Tagline / Bio Snippet */}
-              <p className="text-sm sm:text-base text-white/80 max-w-2xl font-light leading-relaxed line-clamp-3">
-                {author.bio ||
-                  'Distinguished writer contributing exceptional literature to Harglim Publishers.'}
-              </p>
+              {biography && <p className="text-sm sm:text-base text-white/80 max-w-2xl font-light leading-relaxed line-clamp-3">
+                {biography}
+              </p>}
 
               {/* Genres / Topics */}
               {categoriesList.length > 0 && (
@@ -270,7 +282,7 @@ export default function AuthorDetailPage() {
             <div className="flex items-center justify-center gap-1.5 text-[#D4AF37]">
               <Award className="h-5 w-5" />
               <span className="text-2xl font-serif font-bold text-[#0F3D3E]">
-                {categoriesList.length || 1}
+                {booksUnavailable ? 'Unavailable' : categoriesList.length}
               </span>
             </div>
             <p className="text-xs text-[#5C6E6E] font-medium uppercase tracking-wider">
@@ -293,7 +305,7 @@ export default function AuthorDetailPage() {
                 : 'text-[#5C6E6E] hover:text-[#0F3D3E]'
             }`}
           >
-            <span>Published Books ({books.length})</span>
+            <span>Published Books{booksUnavailable ? '' : ` (${books.length})`}</span>
             {activeTab === 'books' && (
               <motion.div
                 layoutId="activeTabUnderline"
@@ -355,7 +367,9 @@ export default function AuthorDetailPage() {
                 </div>
               )}
 
-              {books.length === 0 ? (
+              {booksUnavailable ? (
+                <ErrorState title="Published books could not load" onRetry={() => void fetchAuthorData()} />
+              ) : books.length === 0 ? (
                 <div className="bg-white border border-dashed border-[#E2E6DF] rounded-3xl p-12 text-center space-y-4">
                   <div className="w-16 h-16 bg-[#0F3D3E]/5 rounded-full flex items-center justify-center mx-auto text-[#0F3D3E]">
                     <BookIcon className="h-8 w-8 text-[#D4AF37]" />
@@ -364,8 +378,7 @@ export default function AuthorDetailPage() {
                     No published books listed yet
                   </h3>
                   <p className="text-xs sm:text-sm text-[#5C6E6E] max-w-md mx-auto leading-relaxed">
-                    {author.name} is currently working on upcoming releases with
-                    Harglim Publishers. Check back soon or explore our full bookstore catalog!
+                    Browse the catalog for more books.
                   </p>
                   <Button
                     asChild
@@ -401,20 +414,12 @@ export default function AuthorDetailPage() {
                 </h2>
 
                 <div className="prose prose-slate max-w-none text-sm text-[#5C6E6E] leading-relaxed space-y-4 font-sans">
-                  {author.bio ? (
-                    author.bio.split('\n\n').map((para, idx) => (
+                  {biography ? (
+                    biography.split('\n\n').map((para, idx) => (
                       <p key={idx}>{para}</p>
                     ))
                   ) : (
-                    <>
-                      <p>
-                        {author.name} is a celebrated author publishing with Harglim
-                        Publishers. Dedicated to literary mastery, their works span across engaging narrative arcs, insightful perspectives, and memorable storytelling.
-                      </p>
-                      <p>
-                        Through their writings, {author.name} aims to inspire readers, spark intellectual curiosity, and contribute meaningful works to modern literature.
-                      </p>
-                    </>
+                    <p>No biography has been published.</p>
                   )}
                 </div>
               </div>

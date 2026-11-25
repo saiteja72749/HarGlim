@@ -1,6 +1,7 @@
 import toast from "react-hot-toast";
 import api from "@/lib/api";
 import { isValidEmailAddress } from "@/lib/email";
+import { accountId, adminResponse, adminUserRecord, verifyAdminAccount } from "@/lib/admin-account-api";
 
 /** Internal placeholder address for an author without an email; no invitation can reach it. */
 const isPlaceholderEmail = (email?: string) => /@harglim\.internal$/i.test(email || "");
@@ -22,13 +23,26 @@ export function announceInvite(user: { email?: string; invited?: boolean; emailS
 export async function createAuthorUser(user: { name: string; email: string }) {
   if (!isValidEmailAddress(user.email) || isPlaceholderEmail(user.email)) throw new Error("A real author email address is required.");
   const res = await api.post("/admin/users", { ...user, role: "author", isActive: true });
-  announceInvite(res.data?.data);
+  const saved = adminUserRecord(res.data);
+  const id = accountId(saved);
+  if (!id) throw new Error("The backend did not return a confirmed author account ID. Check Users & Accounts before retrying.");
+  await verifyAdminAccount(id, { email: user.email, role: "author", isActive: true });
+  announceInvite({
+    email: user.email,
+    invited: saved.invited === true,
+    emailSent: typeof saved.emailSent === "boolean" ? saved.emailSent : undefined,
+  });
   return res;
 }
 
 /** POST /admin/users/{id}/resend-invite. 409 once the author has already set a password. */
 export async function resendAuthorInvite(userId: string) {
-  const { data } = await api.post(`/admin/users/${userId}/resend-invite`);
-  announceInvite(data?.data);
-  return data?.data;
+  const { data } = await api.post(`/admin/users/${encodeURIComponent(userId)}/resend-invite`);
+  const saved = adminUserRecord(data);
+  announceInvite({
+    email: typeof saved.email === "string" ? saved.email : undefined,
+    invited: saved.invited === true,
+    emailSent: typeof saved.emailSent === "boolean" ? saved.emailSent : undefined,
+  });
+  return adminResponse(data);
 }

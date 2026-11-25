@@ -1,9 +1,10 @@
 "use client";
 
+import { adminResponse } from "@/lib/admin-account-api";
 import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import api from "@/lib/api";
 import { ErrorState } from "@/components/ui/error-state";
@@ -15,6 +16,7 @@ import {
   Trash2,
   BookOpen,
   Loader2,
+  ListPlus,
   X,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,6 +37,7 @@ import toast from "react-hot-toast";
 import { categoriesChanged, fetchAllCategories, type BackendCategory } from "@/lib/categories";
 import { categoryIsActive, findDuplicateCategory, parseCategoryPage } from "@/lib/category-data";
 import { onLiveChange } from "@/lib/live-sync";
+import { INITIAL_CATEGORY_NAMES, planCategorySeed } from "@/tools/category-seed-data.mjs";
 
 export default function AdminCategoriesPage() {
   const [categories, setCategories] = useState<BackendCategory[]>([]);
@@ -42,6 +45,9 @@ export default function AdminCategoriesPage() {
   const [error, setError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const importing = useRef(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importNotice, setImportNotice] = useState("");
 
   // Create / Edit Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -76,6 +82,47 @@ export default function AdminCategoriesPage() {
   useEffect(() => {
     return onLiveChange("categories", () => void fetchCategories());
   }, [fetchCategories]);
+
+  const importStandardCategories = async () => {
+    if (importing.current) return;
+    importing.current = true;
+    setImportBusy(true);
+    setImportNotice("");
+    let attemptedWrite = false;
+    try {
+      const existing = await fetchAllCategories(true);
+      const plan = planCategorySeed(existing);
+      let interrupted = false;
+      for (const name of plan.missing) {
+        attemptedWrite = true;
+        try {
+          adminResponse((await api.post("/admin/categories", { name, active: true })).data);
+        } catch {
+          // Reconcile ambiguous results with backend state before allowing another import.
+          interrupted = true;
+          break;
+        }
+      }
+      const rows = attemptedWrite ? await fetchAllCategories(true) : existing;
+      setCategories(rows);
+      const verified = attemptedWrite ? planCategorySeed(rows) : plan;
+      const { present, missing, conflicts } = verified;
+      const inactive = present.filter(category => !category.active).length;
+      setImportNotice([
+        `${present.length} of ${INITIAL_CATEGORY_NAMES.length} standard categories are in the backend.`,
+        inactive ? `${inactive} already exist as inactive.` : "",
+        conflicts.length ? `Review conflicting slugs for ${conflicts.map(category => category.name).join(", ")}.` : "",
+        missing.length ? `${missing.length} remain to import.` : "",
+        interrupted && missing.length ? "Run the import again to continue from the saved categories." : "",
+      ].filter(Boolean).join(" "));
+    } catch {
+      setImportNotice("The import could not be confirmed. Refresh Categories to check what was saved before retrying.");
+    } finally {
+      if (attemptedWrite) categoriesChanged(false);
+      importing.current = false;
+      setImportBusy(false);
+    }
+  };
 
   const openCreateModal = () => {
     setEditingCategory(null);
@@ -128,22 +175,27 @@ export default function AdminCategoriesPage() {
         active: formData.active,
       };
 
-      if (editingCategory) {
-        const catId = editingCategory._id;
-        await api.put(`/admin/categories/${catId}`, payload);
-        toast.success(`Category "${formData.name}" updated successfully!`);
-      } else {
-        await api.post("/admin/categories", payload);
-        toast.success(`Category "${formData.name}" created successfully! 🎉`);
-      }
-
-      setIsModalOpen(false);
+      const { data } = editingCategory
+        ? await api.put(`/admin/categories/${editingCategory._id}`, payload)
+        : await api.post("/admin/categories", payload);
+      adminResponse(data);
+      const rows = await fetchAllCategories(true);
+      setCategories(rows);
       categoriesChanged();
-      fetchCategories();
+      const saved = editingCategory
+        ? rows.find(row => row._id === editingCategory._id)
+        : findDuplicateCategory(rows, payload.name);
+      if (!saved || saved.name !== payload.name || (saved.description ?? "") !== payload.description
+        || Boolean(saved.featured) !== payload.featured || saved.sortOrder !== payload.sortOrder
+        || (saved.active !== false && saved.isActive !== false) !== payload.active) {
+        throw new Error("The backend save could not be confirmed. Refresh Categories before retrying.");
+      }
+      setIsModalOpen(false);
+      toast.success(editingCategory ? "Category updated." : "Category created.");
     } catch (caughtError) {
       const err = describeApiError(caughtError);
       console.error("Failed to save category:", describeApiError(err));
-      toast.error(err.response?.data?.message || "Failed to save category.");
+      toast.error(err.response?.data?.message || err.message);
     } finally {
       setSubmitting(false);
     }
@@ -155,18 +207,20 @@ export default function AdminCategoriesPage() {
     const newActive = !currentActive;
 
     try {
-      await api.patch(`/admin/categories/${catId}/status`, { active: newActive });
-      setCategories((prev) =>
-        prev.map((c) =>
-          (c._id || c.id) === catId ? { ...c, active: newActive, isActive: newActive } : c
-        )
-      );
+      const { data } = await api.patch(`/admin/categories/${catId}/status`, { active: newActive });
+      adminResponse(data);
+      const rows = await fetchAllCategories(true);
+      setCategories(rows);
       categoriesChanged();
-      toast.success(`Category set to ${newActive ? "Active" : "Inactive"}.`);
+      const saved = rows.find(row => row._id === catId);
+      if (!saved || (saved.active !== false && saved.isActive !== false) !== newActive) {
+        throw new Error("The category status could not be confirmed. Refresh Categories before retrying.");
+      }
+      toast.success(newActive ? "Category activated." : "Category deactivated.");
     } catch (caughtError) {
       const err = describeApiError(caughtError);
       console.error("Failed to toggle category status:", describeApiError(err));
-      toast.error(err.response?.data?.message || "Failed to update category status.");
+      toast.error(err.response?.data?.message || err.message);
     }
   };
 
@@ -185,7 +239,11 @@ export default function AdminCategoriesPage() {
       const { data } = await api.get(`/admin/categories/${catId}`, { cache: "no-store" });
       const latest = parseCategoryPage({ data: [data?.data?.category ?? data?.data ?? data] }).categories[0];
       if (latest.bookCount !== 0) throw new Error("Cannot delete: assigned books exist or the book count could not be verified.");
-      await api.delete(`/admin/categories/${catId}`);
+      adminResponse((await api.delete(`/admin/categories/${catId}`)).data);
+      const rows = await fetchAllCategories(true);
+      setCategories(rows);
+      const saved = rows.find(row => row._id === catId);
+      if (saved && saved.active !== false && saved.isActive !== false) throw new Error("Category deactivation could not be confirmed.");
       toast.success(`Category "${cat.name}" soft deleted successfully.`);
       categoriesChanged();
       fetchCategories();
@@ -232,14 +290,22 @@ export default function AdminCategoriesPage() {
             Create, order, and curate book categories for the storefront and catalog navigation.
           </p>
         </div>
-        <Button
-          onClick={openCreateModal}
-          className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-bold gap-2 shadow-xs"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Add New Category</span>
-        </Button>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Button variant="outline" onClick={importStandardCategories} disabled={loading || importBusy || submitting || deletingId !== null}>
+            {importBusy ? <Loader2 className="size-4 animate-spin" /> : <ListPlus className="size-4" />}
+            {importBusy ? "Importing categories…" : "Import Standard Categories"}
+          </Button>
+          <Button
+            onClick={openCreateModal}
+            disabled={importBusy}
+            className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-bold gap-2 shadow-xs"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Add New Category</span>
+          </Button>
+        </div>
       </div>
+      {importNotice && <p role="status" className="text-sm text-[#5C6E6E]">{importNotice}</p>}
 
       {/* Filters Bar */}
       <Card className="border border-[#E2E6DF] bg-white rounded-2xl shadow-2xs">
@@ -285,7 +351,7 @@ export default function AdminCategoriesPage() {
 
       {/* Categories Table */}
       <Card className="border border-[#E2E6DF] bg-white rounded-2xl shadow-2xs overflow-hidden">
-        <div className="overflow-x-auto">
+        <div>
           <Table>
             <TableHeader className="bg-[#F8F9F7]">
               <TableRow>
@@ -351,6 +417,7 @@ export default function AdminCategoriesPage() {
                         <button
                           type="button"
                           onClick={() => handleToggleStatus(cat)}
+                          disabled={importBusy}
                           className="cursor-pointer"
                           title="Click to toggle status"
                           aria-label={`${categoryIsActive(cat) ? "Deactivate" : "Activate"} category ${cat.name}`}
@@ -372,6 +439,7 @@ export default function AdminCategoriesPage() {
                             variant="ghost"
                             size="icon"
                             onClick={() => openEditModal(cat)}
+                            disabled={importBusy}
                             className="h-8 w-8 text-[#0F3D3E] hover:bg-[#0F3D3E]/10"
                             title="Edit Category"
                             aria-label={`Edit category ${cat.name}`}
@@ -382,7 +450,7 @@ export default function AdminCategoriesPage() {
                             variant="ghost"
                             size="icon"
                             onClick={() => handleDelete(cat)}
-                            disabled={deletingId === catId || cat.bookCount !== 0}
+                            disabled={importBusy || deletingId === catId || cat.bookCount !== 0}
                             className="h-8 w-8 text-rose-600 hover:bg-rose-50"
                             title={cat.bookCount !== 0 ? "Assigned books or unavailable book count prevent deletion" : "Soft Delete Category"}
                             aria-label={`Delete category ${cat.name}`}

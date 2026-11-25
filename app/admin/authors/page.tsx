@@ -1,6 +1,7 @@
 "use client";
 import { scheduleRequest } from "@/lib/schedule-request";
-import { describeApiError } from "@/lib/api-error";
+import { describeApiError, record } from "@/lib/api-error";
+import { accountActive, adminResponse, adminRows } from "@/lib/admin-account-api";
 
 
 import { useState, useEffect, useCallback } from "react";
@@ -75,13 +76,8 @@ export default function AdminAuthorsPage() {
       const params: Record<string, string | number> = { role: "author", page, limit: 20 };
       if (searchQuery.trim()) params.search = searchQuery.trim();
 
-      const { data } = await api.get("/admin/users", { params });
-
-      const items =
-        data?.data?.users ||
-        (Array.isArray(data?.data) ? data.data : []) ||
-        (Array.isArray(data) ? data : []);
-      setAuthors(Array.isArray(items) ? items : []);
+      const { data } = await api.get("/admin/users", { params, cache: "no-store" });
+      setAuthors(adminRows<AuthorSummary>(data, "users"));
 
       if (data?.pagination) {
         setPagination(data.pagination);
@@ -107,26 +103,20 @@ export default function AdminAuthorsPage() {
 
     try {
       // 1. Rich admin author detail + 2. sales dashboard (which books sold, in which orders)
-      const [res, dashRes] = await Promise.all([
-        api.get(`/admin/authors/${aId}`).catch(() => null),
-        api.get(`/admin/authors/${aId}/dashboard`, { cache: "no-store" }).catch(() => null),
+      const [detail, dashboard] = await Promise.allSettled([
+        api.get(`/admin/authors/${encodeURIComponent(aId)}`, { cache: "no-store" }).then(({ data }) => adminResponse(data)),
+        api.get(`/admin/authors/${encodeURIComponent(aId)}/dashboard`, { cache: "no-store" }).then(({ data }) => adminResponse(data)),
       ]);
-      if (dashRes?.data) setAuthorSales(normalizeAuthorDashboard(dashRes.data));
-      if (res?.data?.data) {
-        setAuthorDetail(res.data.data);
-      } else {
-        // Fallback with basic user object
-        setAuthorDetail({
-          author,
-          bookCounts: { published: 0, drafts: 0, total: 0 },
-        });
+      const response = record(dashboard.status === "fulfilled" ? dashboard.value : null);
+      const metrics = record(response.data ?? response);
+      if ((metrics.books && metrics.sales && metrics.royalties)
+        || (metrics.totalBooks != null && metrics.unitsSold != null && (metrics.accruedKnown ?? metrics.accrued) != null)) {
+        setAuthorSales(normalizeAuthorDashboard(metrics));
       }
-    } catch (err) {
-      console.warn("Failed to load detailed author record:", describeApiError(err));
-      setAuthorDetail({
-        author,
-        bookCounts: { published: 0, drafts: 0, total: 0 },
-      });
+      if (detail.status === "fulfilled") {
+        const data = record(detail.value) as AuthorDetail;
+        setAuthorDetail({ ...data, author: data.author ?? author });
+      } else setAuthorDetail({ author });
     } finally {
       setLoadingDetail(false);
     }
@@ -186,7 +176,7 @@ export default function AdminAuthorsPage() {
 
       {/* Authors Table */}
       <Card className="border border-[#E2E6DF] bg-white rounded-2xl shadow-2xs overflow-hidden">
-        <div className="overflow-x-auto">
+        <div>
           <Table>
             <TableHeader className="bg-[#F8F9F7]">
               <TableRow>
@@ -216,7 +206,7 @@ export default function AdminAuthorsPage() {
                 filteredAuthors.map((author) => {
                   const authorId = author._id || author.id;
                   if (!authorId) return null;
-                  const isActive = author.isActive !== false && author.status !== "Suspended";
+                  const isActive = accountActive(author);
 
                   return (
                     <TableRow key={authorId} className="hover:bg-[#F8F9F7]/60 text-xs">
@@ -244,11 +234,11 @@ export default function AdminAuthorsPage() {
                           <Badge className="bg-emerald-500/15 text-emerald-800 border-emerald-300 text-[11px]">
                             Active
                           </Badge>
-                        ) : (
+                        ) : isActive === false ? (
                           <Badge className="bg-rose-500/15 text-rose-800 border-rose-300 text-[11px]">
                             Suspended
                           </Badge>
-                        )}
+                        ) : <Badge variant="outline">Unavailable</Badge>}
                       </TableCell>
                       <TableCell className="text-xs text-[#5C6E6E] font-sans">
                         {author.createdAt
@@ -324,19 +314,19 @@ export default function AdminAuthorsPage() {
                     <div className="p-3.5 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF] text-center">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E]">Published Books</p>
                       <p className="text-xl font-serif font-bold text-[#0F3D3E] mt-1">
-                        {authorDetail?.bookCounts?.published ?? authorSales?.books.published ?? 0}
+                        {authorDetail?.bookCounts?.published ?? authorSales?.books.published ?? "Unavailable"}
                       </p>
                     </div>
                     <div className="p-3.5 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF] text-center">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E]">Manuscripts</p>
                       <p className="text-xl font-serif font-bold text-[#0F3D3E] mt-1">
-                        {authorDetail?.publishRequestCount ?? 0}
+                        {authorDetail?.publishRequestCount ?? "Unavailable"}
                       </p>
                     </div>
                     <div className="p-3.5 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF] text-center">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-[#5C6E6E]">Total Catalog</p>
                       <p className="text-xl font-serif font-bold text-[#0F3D3E] mt-1">
-                        {authorDetail?.bookCounts?.total || authorSales?.books.total || 0}
+                        {authorDetail?.bookCounts?.total ?? authorSales?.books.total ?? "Unavailable"}
                       </p>
                     </div>
                   </div>
@@ -360,15 +350,15 @@ export default function AdminAuthorsPage() {
                       <div className="flex items-center justify-between">
                         <span className="text-[#5C6E6E]">Application Review Status:</span>
                         <Badge className="bg-emerald-500/15 text-emerald-800 border-emerald-300 text-[11px]">
-                          {authorDetail?.application?.status || "Approved"}
+                          {authorDetail?.application?.status || "Unavailable"}
                         </Badge>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-[#5C6E6E]">Author Dashboard Access:</span>
+                        <span className="text-[#5C6E6E]">{paidAccessEnabled ? "Dashboard entitlement:" : "Dashboard access policy:"}</span>
                         <Badge className="bg-blue-500/15 text-blue-800 border-blue-300 text-[11px]">
                           {paidAccessEnabled
-                            ? authorDetail?.entitlement?.status || "NO ENTITLEMENT"
-                            : "FREE (APPROVED AUTHOR)"}
+                            ? authorDetail?.entitlement?.status || "Unavailable"
+                            : "Free for approved authors"}
                         </Badge>
                       </div>
                       {paidAccessEnabled && authorDetail?.entitlement?.source && (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import "./admin-workspace.css";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -25,8 +26,6 @@ import {
   Camera,
   Star,
   Receipt,
-  Bell,
-  BarChart3,
   Feather,
   PackageCheck,
 } from "lucide-react";
@@ -75,8 +74,6 @@ const sidebarSections = [
       // { href: "/admin/settlements", label: "Royalty Settlements", icon: DollarSign },
       { href: "/admin/royalties", label: "Manual Royalties", icon: FileText },
       { href: "/admin/invoices", label: "Invoices", icon: Receipt },
-      { href: "/admin/analytics", label: "Platform Analytics", icon: BarChart3 },
-      { href: "/admin/notifications", label: "Notifications Log", icon: Bell },
     ],
   },
 ];
@@ -109,8 +106,8 @@ export default function AdminLayout({
         {/* Sidebar (Seamless Uniform Deep Green #0F3D3E) */}
         <aside
           className={cn(
-            "fixed left-0 top-0 z-50 h-full w-64 transform bg-[#0F3D3E] text-white border-r border-[#174C4D] transition-transform duration-300 lg:translate-x-0 shadow-2xl flex flex-col",
-            sidebarOpen ? "translate-x-0" : "-translate-x-full",
+            "fixed left-0 top-0 z-50 h-dvh w-64 max-w-[90vw] transform bg-[#0F3D3E] text-white border-r border-[#174C4D] motion-safe:transition-transform duration-300 lg:visible lg:translate-x-0 shadow-2xl flex flex-col",
+            sidebarOpen ? "visible translate-x-0" : "invisible -translate-x-full",
           )}
         >
           {/* Header Brand */}
@@ -161,7 +158,7 @@ export default function AdminLayout({
           </div>
 
           {/* Navigation Sections */}
-          <nav className="flex-1 overflow-y-auto p-4 space-y-6 bg-[#0F3D3E]">
+          <nav aria-label="Admin navigation" className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 space-y-6 bg-[#0F3D3E]">
             {sidebarSections.map((section) => (
               <div key={section.title} className="space-y-1">
                 <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-white/40 mb-2 font-sans">
@@ -176,6 +173,7 @@ export default function AdminLayout({
                     <Link
                       key={link.href}
                       href={link.href}
+                      aria-current={isActive ? "page" : undefined}
                       prefetch={false}
                       className={cn(
                         "flex items-center justify-between rounded-xl px-3 py-2.5 text-xs font-medium transition-all duration-200 group relative",
@@ -227,12 +225,13 @@ export default function AdminLayout({
         {/* Main Content Area */}
         <div className="lg:pl-64 min-w-0 flex-1 flex flex-col min-h-screen">
           {/* Top Admin Header Bar */}
-          <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-[#E2E6DF] bg-white px-4 sm:px-8 shadow-xs">
-            <div className="flex items-center gap-3">
+          <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-[#E2E6DF] bg-white px-4 sm:px-8 shadow-xs">
+            <div className="flex min-w-0 items-center gap-3">
               <Button
                 variant="ghost"
                 size="icon"
                 aria-label="Open admin navigation"
+                aria-expanded={sidebarOpen}
                 onClick={() => setSidebarOpen(true)}
                 className="text-[#0F3D3E] lg:hidden"
               >
@@ -243,7 +242,7 @@ export default function AdminLayout({
               </span>
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="hidden shrink-0 items-center gap-4 md:flex">
               <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#0F3D3E]/5 border border-[#0F3D3E]/10 text-xs">
                 <div className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#D4AF37] text-[#0F3D3E] font-bold text-xs overflow-hidden">
                   {user?.profileImage || user?.profilePicture ? (
@@ -264,7 +263,7 @@ export default function AdminLayout({
           </header>
 
           {/* Main Workspace View */}
-          <div className="min-w-0 p-4 sm:p-6 lg:p-8 flex-1 max-w-7xl w-full mx-auto">{children}</div>
+          <div className="admin-workspace min-w-0 p-4 sm:p-6 lg:px-6 lg:py-8 xl:px-8 flex-1 max-w-[96rem] w-full mx-auto">{children}</div>
         </div>
       </div>
     </AuthGuard>

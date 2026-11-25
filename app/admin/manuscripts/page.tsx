@@ -1,5 +1,7 @@
 "use client";
 
+import { adminResponse, adminRows } from "@/lib/admin-account-api";
+import { notifyLiveChange } from "@/lib/live-sync";
 import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
@@ -16,7 +18,6 @@ import {
   XCircle,
   Clock,
   Download,
-  BookOpen,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -44,7 +45,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import toast from "react-hot-toast";
-import Link from "next/link";
 import { getSafeExternalUrl } from "@/lib/utils";
 
 const getStatusColor = (status: unknown) => {
@@ -94,23 +94,8 @@ export default function AdminManuscriptsPage() {
       if (statusFilter !== "all") params.status = statusFilter;
       if (searchQuery.trim()) params.search = searchQuery.trim();
 
-      const { data } = await api.get("/admin/publish-requests", { params });
-      let fetchedManuscripts = [];
-      if (Array.isArray(data)) {
-        fetchedManuscripts = data;
-      } else if (data && Array.isArray(data.data?.requests)) {
-        fetchedManuscripts = data.data.requests;
-      } else if (data && Array.isArray(data.data)) {
-        fetchedManuscripts = data.data;
-      } else if (data && Array.isArray(data.requests)) {
-        fetchedManuscripts = data.requests;
-      } else if (data && Array.isArray(data.publishRequests)) {
-        fetchedManuscripts = data.publishRequests;
-      } else if (data && typeof data === 'object') {
-        const arrayProp = Object.values(data).find(val => Array.isArray(val));
-        if (arrayProp) fetchedManuscripts = arrayProp as AdminManuscript[];
-      }
-      setManuscripts(fetchedManuscripts);
+      const { data } = await api.get("/admin/publish-requests", { params, cache: "no-store" });
+      setManuscripts(adminRows<AdminManuscript>(data, "requests", "publishRequests"));
     } catch (err) {
       console.error("Failed to fetch admin manuscripts:", describeApiError(err));
       setError(true);
@@ -134,25 +119,18 @@ export default function AdminManuscriptsPage() {
 
   const updateStatus = async (id: string, newStatus: string) => {
     try {
-      if (newStatus === "approved") {
-        await api.post(`/admin/publish-requests/${id}/approve`, {
-          notes: "Approved from admin manuscripts panel.",
-        });
-      } else if (newStatus === "rejected") {
-        const reason = prompt("Enter rejection reason (optional):", "Editorial standards mismatch");
-        await api.post(`/admin/publish-requests/${id}/reject`, { reason });
-      } else if (newStatus === "under_review") {
-        await api.post(`/admin/publish-requests/${id}/request-changes`);
-      } else {
-        await api.put(`/admin/publish-requests/${id}/status`, { status: newStatus });
-      }
-
+      const path = `/admin/publish-requests/${encodeURIComponent(id)}`;
+      const decision = { approved: "approve", rejected: "reject", changes_requested: "request-changes" }[newStatus];
+      const reason = decision === "reject" || decision === "request-changes" ? window.prompt("Enter an optional reason for the author.") : "";
+      if (reason === null) return;
+      const { data } = decision
+        ? await api.post(`${path}/${decision}`, reason.trim() ? { reason: reason.trim() } : {})
+        : await api.put(`${path}/status`, { status: newStatus });
+      adminResponse(data);
+      notifyLiveChange("author-data");
+      if (newStatus === "approved") notifyLiveChange("books");
       await fetchManuscripts();
-      toast.success(
-        newStatus === "approved"
-          ? "Manuscript approved and published as a book."
-          : `Manuscript status updated to ${newStatus}`
-      );
+      toast.success(newStatus === "approved" ? "Manuscript approved by the backend." : "Manuscript status updated.");
     } catch (caughtError) {
       const err = describeApiError(caughtError);
       console.error("Failed to update manuscript status:", describeApiError(err));
@@ -211,6 +189,7 @@ export default function AdminManuscriptsPage() {
                 <SelectItem value="all">All Status</SelectItem>
                 <SelectItem value="pending">Pending</SelectItem>
                 <SelectItem value="under_review">Under Review</SelectItem>
+                <SelectItem value="changes_requested">Changes Requested</SelectItem>
                 <SelectItem value="approved">Approved</SelectItem>
                 <SelectItem value="rejected">Rejected</SelectItem>
               </SelectContent>
@@ -222,7 +201,7 @@ export default function AdminManuscriptsPage() {
       {/* Manuscripts Table */}
       <Card>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
+          <div>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -269,7 +248,7 @@ export default function AdminManuscriptsPage() {
                         <TableCell>
                           <Badge className={`gap-1 ${getStatusColor(manuscript.status)}`}>
                             <StatusIcon className="h-3 w-3" />
-                            {manuscript.status || "Pending"}
+                            {manuscript.status?.replace(/_/g, " ") || "Unavailable"}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
@@ -300,13 +279,17 @@ export default function AdminManuscriptsPage() {
                                   Mark Under Review
                                 </DropdownMenuItem>
                               )}
-                              {(manuscript.status === "pending" || manuscript.status === "under_review") && (
+                              {(["pending", "under_review"].includes(String(manuscript.status).toLowerCase())) && (
                                 <>
                                   <DropdownMenuItem
                                     onClick={() => updateStatus(manuscriptId, "approved")}
                                   >
                                     <CheckCircle className="mr-2 h-4 w-4" />
                                     Approve Request
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => updateStatus(manuscriptId, "changes_requested")}>
+                                    <FileText className="mr-2 h-4 w-4" />
+                                    Request Changes
                                   </DropdownMenuItem>
                                   <DropdownMenuItem
                                     className="text-destructive"
@@ -316,14 +299,6 @@ export default function AdminManuscriptsPage() {
                                     Reject Request
                                   </DropdownMenuItem>
                                 </>
-                              )}
-                              {manuscript.status === "approved" && (
-                                <DropdownMenuItem asChild>
-                                  <Link href={`/admin/books/new?title=${encodeURIComponent(manuscript.title || "")}&author=${encodeURIComponent(manuscript.authorName || manuscript.author?.name || "")}`} prefetch={false}>
-                                    <BookOpen className="mr-2 h-4 w-4" />
-                                    Publish as Book
-                                  </Link>
-                                </DropdownMenuItem>
                               )}
                             </DropdownMenuContent>
                           </DropdownMenu>

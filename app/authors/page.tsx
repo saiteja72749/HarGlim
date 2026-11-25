@@ -29,6 +29,7 @@ import {
 import { ErrorState } from "@/components/ui/error-state";
 import type { Author } from "@/types";
 import { fetchPublicCollection } from "@/lib/public-collection";
+import { invalidateApiCache } from "@/lib/api";
 
 export default function AuthorsPage() {
   const [authors, setAuthors] = useState<Author[]>([]);
@@ -53,7 +54,10 @@ export default function AuthorsPage() {
   }, []);
   useEffect(() => {
     const cancelInitial = scheduleRequest(fetchAuthors);
-    const unsubscribe = onLiveChange('author-data', () => void fetchAuthors());
+    const unsubscribe = onLiveChange('author-data', (reason) => {
+      if (reason === 'change') invalidateApiCache('/authors');
+      void fetchAuthors();
+    }, 60_000);
     return () => { cancelInitial(); unsubscribe(); pending.current?.abort(); };
   }, [fetchAuthors]);
 

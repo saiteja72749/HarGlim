@@ -1,5 +1,7 @@
 "use client";
 
+import { onLiveChange } from "@/lib/live-sync";
+import { invalidateApiCache } from "@/lib/api";
 import { scheduleRequest } from "@/lib/schedule-request";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -29,6 +31,10 @@ export function SpotlightSection() {
   }, []);
 
   useEffect(() => scheduleRequest(load), [load]);
+  useEffect(() => onLiveChange("spotlights", reason => {
+    if (reason === "change") invalidateApiCache("/spotlights");
+    void load();
+  }), [load]);
 
   return (
     <section id="spotlight" className="py-16 sm:py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

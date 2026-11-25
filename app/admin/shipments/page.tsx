@@ -1,5 +1,6 @@
 "use client";
 
+import { adminResponse, adminRows } from "@/lib/admin-account-api";
 import type { ShipmentRecord } from "@/types/commerce-api";
 import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
@@ -42,20 +43,20 @@ import {
   SHIPMENT_LABELS,
   canCancelShipment,
   canEditTracking,
-  extractList,
   extractTrackingInfo,
   getNextShipmentStatuses,
   getShipmentLabel,
   nextTrackingUrl,
   normalizeShipmentStatus,
 } from "@/lib/tracking";
-import { assignCourier } from "@/lib/shipment-actions";
+import { assignCourier, fetchSavedShipment } from "@/lib/shipment-actions";
 import { getSafeExternalUrl } from "@/lib/utils";
 
 export default function AdminShipmentsPage() {
   const [activeTab, setActiveTab] = useState<"shipments" | "plans">("shipments");
   const [shipments, setShipments] = useState<ShipmentRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -81,22 +82,22 @@ export default function AdminShipmentsPage() {
 
   const fetchShipments = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const params: Record<string, string | number> = { limit: 50 };
       if (statusFilter !== "ALL") params.status = statusFilter;
 
       let res;
       if (searchQuery.trim()) {
-        res = await api.get("/admin/shipments/search", { params: { q: searchQuery.trim() } });
+        res = await api.get("/admin/shipments/search", { params: { q: searchQuery.trim() }, cache: "no-store" });
       } else {
-        res = await api.get("/admin/shipments", { params });
+        res = await api.get("/admin/shipments", { params, cache: "no-store" });
       }
 
-      setShipments(extractList(res?.data, "shipments"));
+      setShipments(adminRows<ShipmentRecord>(res.data, "shipments"));
     } catch (err) {
       console.warn("Shipments fetch notice:", describeApiError(err));
-      // If shipments endpoint not yet seeded, set empty gracefully
-      setShipments([]);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -187,7 +188,7 @@ export default function AdminShipmentsPage() {
       toast.error(
         status === 409
           ? "That tracking number is already used on another shipment. Check the AWB and enter a different one."
-          : err.response?.data?.message || "Failed to assign courier."
+          : err.response?.data?.message || err.message
       );
       if (status === 400 || status === 409) fetchShipments();
     } finally {
@@ -198,25 +199,28 @@ export default function AdminShipmentsPage() {
   // Submit Status Update
   const handleStatusUpdateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedShipmentForStatus) return;
+    if (!selectedShipmentForStatus || submittingStatus) return;
     const shipmentId = selectedShipmentForStatus._id || selectedShipmentForStatus.id;
+    if (!shipmentId) return;
     setSubmittingStatus(true);
     try {
       // Order status follows automatically (PICKED_UP/IN_TRANSIT -> SHIPPED, DELIVERED -> DELIVERED);
       // don't update the order separately.
-      await api.post(`/admin/shipments/${shipmentId}/update-status`, {
+      adminResponse((await api.post(`/admin/shipments/${shipmentId}/update-status`, {
         status: newStatus,
         description: statusDescription.trim() || undefined,
         location: statusLocation.trim() || undefined,
         occurredAt: new Date().toISOString(),
         metadata: { source: "admin-dashboard" },
-      });
+      })).data);
+      const saved = await fetchSavedShipment(shipmentId);
+      if (normalizeShipmentStatus(saved.status) !== normalizeShipmentStatus(newStatus)) throw new Error("Shipment status could not be confirmed.");
       toast.success(`Shipment updated: ${getShipmentLabel(newStatus)}`);
       setSelectedShipmentForStatus(null);
       fetchShipments();
     } catch (caughtError) {
       const err = describeApiError(caughtError);
-      toast.error(err.response?.data?.message || "Failed to update shipment status.");
+      toast.error(err.response?.data?.message || err.message);
       if (err.response?.status === 400) fetchShipments();
     } finally {
       setSubmittingStatus(false);
@@ -228,13 +232,16 @@ export default function AdminShipmentsPage() {
     const reason = prompt("Enter cancellation reason:", "Order cancelled by customer or admin");
     if (!reason) return;
     const sId = shipment._id || shipment.id;
+    if (!sId) return;
     try {
-      await api.post(`/admin/shipments/${sId}/cancel`, { reason });
+      adminResponse((await api.post(`/admin/shipments/${sId}/cancel`, { reason })).data);
+      const saved = await fetchSavedShipment(sId);
+      if (normalizeShipmentStatus(saved.status) !== "CANCELLED") throw new Error("Shipment cancellation could not be confirmed.");
       toast.success("Shipment cancelled.");
       fetchShipments();
     } catch (caughtError) {
       const err = describeApiError(caughtError);
-      toast.error(err.response?.data?.message || "Failed to cancel shipment.");
+      toast.error(err.response?.data?.message || err.message);
     }
   };
 
@@ -268,7 +275,7 @@ export default function AdminShipmentsPage() {
         </div>
 
         {/* View Toggle Tabs */}
-        <div className="flex items-center gap-2 bg-[#F8F9F7] p-1 rounded-xl border border-[#E2E6DF]">
+        <div className="flex flex-wrap items-center gap-2 bg-[#F8F9F7] p-1 rounded-xl border border-[#E2E6DF]">
           <Button
             size="sm"
             variant={activeTab === "shipments" ? "default" : "ghost"}
@@ -319,7 +326,7 @@ export default function AdminShipmentsPage() {
                   className="pl-9 text-xs bg-[#F8F9F7]"
                 />
               </div>
-              <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+              <div className="flex items-center flex-wrap gap-2 w-full sm:w-auto">
                 {["ALL", "CREATED", "COURIER_ASSIGNED", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED"].map((st) => (
                   <Button
                     key={st}
@@ -341,7 +348,7 @@ export default function AdminShipmentsPage() {
 
           {/* Shipments Table */}
           <Card className="border border-[#E2E6DF] bg-white rounded-2xl shadow-2xs overflow-hidden">
-            <div className="overflow-x-auto">
+            <div>
               <Table>
                 <TableHeader className="bg-[#F8F9F7]">
                   <TableRow>
@@ -360,6 +367,10 @@ export default function AdminShipmentsPage() {
                         <Loader2 className="h-6 w-6 animate-spin mx-auto text-[#0F3D3E]" />
                         <p className="text-xs text-[#5C6E6E] mt-2">Loading shipment records...</p>
                       </TableCell>
+                    </TableRow>
+                  ) : loadError ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="whitespace-normal"><ErrorState title="Could not load shipments" onRetry={fetchShipments} /></TableCell>
                     </TableRow>
                   ) : shipments.length === 0 ? (
                     <TableRow>
@@ -487,7 +498,7 @@ export default function AdminShipmentsPage() {
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-[#E2E6DF] overflow-hidden"
+            className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-[#E2E6DF] max-h-[calc(100dvh-2rem)] overflow-y-auto"
           >
             <div className="flex items-center justify-between p-5 border-b border-[#E2E6DF] bg-[#F8F9F7]">
               <div className="flex items-center gap-2.5">
@@ -595,7 +606,7 @@ export default function AdminShipmentsPage() {
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-[#E2E6DF] overflow-hidden"
+            className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-[#E2E6DF] max-h-[calc(100dvh-2rem)] overflow-y-auto"
           >
             <div className="flex items-center justify-between p-5 border-b border-[#E2E6DF] bg-[#F8F9F7]">
               <h3 className="font-serif font-bold text-base text-[#0F3D3E]">

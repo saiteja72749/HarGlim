@@ -15,9 +15,6 @@ const api = axios.create({
   baseURL: API_URL,
   timeout: 45000,
   validateStatus: (status) => status >= 200 && status < 300,
-  headers: {
-    'Content-Type': 'application/json',
-  },
 });
 
 const rawGet = api.get.bind(api);
@@ -79,8 +76,7 @@ api.interceptors.request.use(
         config.headers.Authorization = `Bearer ${state.token}`;
       }
     }
-    // With the instance's JSON default, axios would turn FormData into the JSON text
-    // {"document":{}} and the file would be lost. The browser sets multipart and its boundary.
+    // The browser must set the multipart boundary for uploads.
     if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
       config.headers.setContentType(false);
     }
@@ -119,7 +115,7 @@ api.interceptors.response.use(
       !originalRequest.url?.includes('/auth/refresh')
     ) {
       const currentSession = useAuthStore.getState();
-      const canReplay = originalRequest.method?.toLowerCase() !== 'post';
+      const canReplay = /^(get|head|options)$/i.test(originalRequest.method ?? 'get');
       originalRequest._retry = true;
       if (isRefreshing) {
         if (currentSession.refreshToken !== refreshingSessionToken) {
@@ -199,6 +195,7 @@ api.interceptors.response.use(
           // the cached context is stale, so refresh it instead of showing a paywall.
           if (!url.includes('/users/me/context')) bootstrapUserContext();
         } else if (errorCode === 'AUTHOR_ROLE_REQUIRED') {
+          if (!url.includes('/users/me/context')) void bootstrapUserContext();
           toast.error('This area is for approved authors only.', { id: 'author-role-required' });
         } else {
           toast.error(
@@ -263,8 +260,16 @@ export async function bootstrapUserContext(overrideToken?: string): Promise<User
       setContextStatus('error');
       return null;
     } catch (error) {
-      if (useAuthStore.getState().token === requestToken) {
-        console.error('Failed to fetch user context:', describeApiError(error));
+      const current = useAuthStore.getState();
+      if (current.token === requestToken) {
+        const failure = describeApiError(error);
+        const code = failure.response?.data.error;
+        if (failure.response?.status === 403 && (code === 'USER_INACTIVE' || code === 'ACCOUNT_DISABLED')) {
+          current.logout({ revoke: false });
+          toast.error('Your account is inactive. Contact support for assistance.', { id: 'inactive-account' });
+          return null;
+        }
+        console.error('Failed to fetch user context:', failure);
         setContextStatus('error');
       }
       return null;

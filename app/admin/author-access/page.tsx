@@ -1,5 +1,8 @@
 "use client";
 
+import { adminResponse, adminRows } from "@/lib/admin-account-api";
+import { ErrorState } from "@/components/ui/error-state";
+import { notifyLiveChange } from "@/lib/live-sync";
 import type { AuthorAccessPlan, AuthorAccessPurchase } from "@/types/author-api";
 import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
@@ -71,42 +74,51 @@ export default function AdminAuthorAccessPage() {
   const [loadingPurchases, setLoadingPurchases] = useState(false);
 
   // Fetch Entitlements
+  const [entitlementsError, setEntitlementsError] = useState(false);
+
   const fetchEntitlements = useCallback(async () => {
     setLoadingEntitlements(true);
+    setEntitlementsError(false);
     try {
-      const res = await api.get("/admin/author-access/entitlements", { params: { limit: 50 } }).catch(() => null);
-      const items = res?.data?.data?.entitlements || res?.data?.data?.items || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];
-      setEntitlements(Array.isArray(items) ? items : []);
+      const { data } = await api.get("/admin/author-access/entitlements", { cache: "no-store", params: { limit: 50 } });
+      setEntitlements(adminRows<AuthorEntitlement>(data, "entitlements"));
     } catch (err) {
       console.warn("Failed to fetch author entitlements:", describeApiError(err));
+      setEntitlementsError(true);
     } finally {
       setLoadingEntitlements(false);
     }
   }, []);
 
   // Fetch Plans
+  const [plansError, setPlansError] = useState(false);
+
   const fetchPlans = useCallback(async () => {
     setLoadingPlans(true);
+    setPlansError(false);
     try {
-      const res = await api.get("/admin/author-access/plans").catch(() => null);
-      const items = res?.data?.data?.plans || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];
-      setPlans(Array.isArray(items) ? items : []);
+      const { data } = await api.get("/admin/author-access/plans", { cache: "no-store" });
+      setPlans(adminRows<AuthorAccessPlan>(data, "plans"));
     } catch (err) {
       console.warn("Failed to fetch author access plans:", describeApiError(err));
+      setPlansError(true);
     } finally {
       setLoadingPlans(false);
     }
   }, []);
 
   // Fetch Purchases
+  const [purchasesError, setPurchasesError] = useState(false);
+
   const fetchPurchases = useCallback(async () => {
     setLoadingPurchases(true);
+    setPurchasesError(false);
     try {
-      const res = await api.get("/admin/author-access/purchases", { params: { limit: 50 } }).catch(() => null);
-      const items = res?.data?.data?.purchases || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];
-      setPurchases(Array.isArray(items) ? items : []);
+      const { data } = await api.get("/admin/author-access/purchases", { cache: "no-store", params: { limit: 50 } });
+      setPurchases(adminRows<AuthorAccessPurchase>(data, "purchases"));
     } catch (err) {
       console.warn("Failed to fetch author access purchases:", describeApiError(err));
+      setPurchasesError(true);
     } finally {
       setLoadingPurchases(false);
     }
@@ -127,14 +139,15 @@ export default function AdminAuthorAccessPage() {
     }
     setSubmittingGrant(true);
     try {
-      await api.post("/admin/author-access/entitlements/grant", {
+      adminResponse((await api.post("/admin/author-access/entitlements/grant", {
         userId: grantUserId.trim(),
         reason: grantReason.trim(),
-      });
+      })).data);
       toast.success("Author dashboard access granted successfully! 🛡️");
       setIsGrantModalOpen(false);
       setGrantUserId("");
-      fetchEntitlements();
+      notifyLiveChange("account-access", false);
+      await fetchEntitlements();
     } catch (caughtError) {
       const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to grant access.");
@@ -148,9 +161,10 @@ export default function AdminAuthorAccessPage() {
     const reason = prompt("Enter reason for revoking author access:", "Admin revoked access");
     if (!reason) return;
     try {
-      await api.post(`/admin/author-access/entitlements/${userId}/revoke`, { reason });
+      adminResponse((await api.post(`/admin/author-access/entitlements/${userId}/revoke`, { reason })).data);
       toast.success("Author access revoked.");
-      fetchEntitlements();
+      notifyLiveChange("account-access", false);
+      await fetchEntitlements();
     } catch (caughtError) {
       const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to revoke access.");
@@ -160,11 +174,12 @@ export default function AdminAuthorAccessPage() {
   // Restore Action
   const handleRestore = async (userId: string) => {
     try {
-      await api.post(`/admin/author-access/entitlements/${userId}/restore`, {
+      adminResponse((await api.post(`/admin/author-access/entitlements/${userId}/restore`, {
         reason: "Admin restored access",
-      });
+      })).data);
       toast.success("Author access restored! ✅");
-      fetchEntitlements();
+      notifyLiveChange("account-access", false);
+      await fetchEntitlements();
     } catch (caughtError) {
       const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to restore access.");
@@ -176,7 +191,7 @@ export default function AdminAuthorAccessPage() {
     e.preventDefault();
     setSubmittingPlan(true);
     try {
-      await api.post("/admin/author-access/plans", planForm);
+      adminResponse((await api.post("/admin/author-access/plans", planForm)).data);
       toast.success("Author access plan created! 🏷️");
       setIsCreatePlanOpen(false);
       fetchPlans();
@@ -233,7 +248,7 @@ export default function AdminAuthorAccessPage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={(value) => { if (value === "entitlements" || value === "plans" || value === "purchases") setActiveTab(value); }}>
-        <TabsList className="bg-[#E2E6DF]/60 p-1">
+        <TabsList className="h-auto max-w-full flex-wrap justify-start gap-1 bg-[#E2E6DF]/60 p-1">
           <TabsTrigger value="entitlements" className="text-xs font-bold gap-1.5">
             <ShieldCheck className="h-3.5 w-3.5" />
             <span>Entitlements</span>
@@ -255,7 +270,7 @@ export default function AdminAuthorAccessPage() {
         {/* Tab 1: Entitlements */}
         <TabsContent value="entitlements" className="space-y-4 pt-4">
           <Card className="border border-[#E2E6DF] bg-white rounded-2xl shadow-2xs overflow-hidden">
-            <div className="overflow-x-auto">
+            <div>
               <Table>
                 <TableHeader className="bg-[#F8F9F7]">
                   <TableRow>
@@ -267,7 +282,9 @@ export default function AdminAuthorAccessPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {loadingEntitlements ? (
+                  {entitlementsError ? (
+                  <TableRow><TableCell colSpan={5} className="whitespace-normal"><ErrorState title="Could not load entitlements" onRetry={fetchEntitlements} /></TableCell></TableRow>
+                ) : loadingEntitlements ? (
                     <TableRow>
                       <TableCell colSpan={5} className="h-32 text-center">
                         <Loader2 className="h-6 w-6 animate-spin mx-auto text-[#0F3D3E]" />
@@ -355,7 +372,9 @@ export default function AdminAuthorAccessPage() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {loadingPlans ? (
+            {plansError ? (
+                  <ErrorState title="Could not load plans" onRetry={fetchPlans} />
+                ) : loadingPlans ? (
               <div className="col-span-3 py-12 text-center">
                 <Loader2 className="h-6 w-6 animate-spin mx-auto text-[#0F3D3E]" />
               </div>
@@ -388,7 +407,7 @@ export default function AdminAuthorAccessPage() {
         {/* Tab 3: Purchases Queue */}
         <TabsContent value="purchases" className="space-y-4 pt-4">
           <Card className="border border-[#E2E6DF] bg-white rounded-2xl shadow-2xs overflow-hidden">
-            <div className="overflow-x-auto">
+            <div>
               <Table>
                 <TableHeader className="bg-[#F8F9F7]">
                   <TableRow>
@@ -400,7 +419,9 @@ export default function AdminAuthorAccessPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {loadingPurchases ? (
+                  {purchasesError ? (
+                  <TableRow><TableCell colSpan={5} className="whitespace-normal"><ErrorState title="Could not load purchases" onRetry={fetchPurchases} /></TableCell></TableRow>
+                ) : loadingPurchases ? (
                     <TableRow>
                       <TableCell colSpan={5} className="h-32 text-center">
                         <Loader2 className="h-6 w-6 animate-spin mx-auto text-[#0F3D3E]" />

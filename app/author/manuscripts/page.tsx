@@ -1,5 +1,6 @@
 "use client";
 
+import { onLiveChange } from "@/lib/live-sync";
 import type { AuthorBook } from "@/types/author-api";
 import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError, record } from "@/lib/api-error";
@@ -134,6 +135,7 @@ export default function ManuscriptsPage() {
   }, []);
 
   useEffect(() => scheduleRequest(fetchManuscripts), [fetchManuscripts]);
+  useEffect(() => onLiveChange("author-data", fetchManuscripts), [fetchManuscripts]);
 
   const filteredManuscripts = items.filter((m) => {
     const matchesSearch = m.title.toLowerCase().includes(searchQuery.toLowerCase());

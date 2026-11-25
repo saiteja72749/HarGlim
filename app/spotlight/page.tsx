@@ -1,5 +1,7 @@
 "use client";
 
+import { onLiveChange } from "@/lib/live-sync";
+import { invalidateApiCache } from "@/lib/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,17 +23,18 @@ export default function SpotlightPage() {
   const itemsRef = useRef<Spotlight[]>([]);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  const loadNext = useCallback(async () => {
+  const loadNext = useCallback(async (reset = false) => {
     if (loadingRef.current) return;
     loadingRef.current = true;
     setLoading(true);
     setError(false);
-    const nextPage = page + 1;
+    const nextPage = reset ? 1 : page + 1;
     try {
       const result = await fetchSpotlights(nextPage, PAGE_SIZE);
-      const seen = new Set(itemsRef.current.map((s) => s.id));
+      const previous = reset ? [] : itemsRef.current;
+      const seen = new Set(previous.map((s) => s.id));
       const fresh = result.items.filter((s) => !seen.has(s.id));
-      itemsRef.current = [...itemsRef.current, ...fresh];
+      itemsRef.current = [...previous, ...fresh];
       setItems(itemsRef.current);
       setPage(nextPage);
       // Stop when the backend says so, or when a page brings nothing new (an unpaged list).
@@ -48,6 +51,12 @@ export default function SpotlightPage() {
   useEffect(() => {
     if (page === 0) loadNext();
   }, [page, loadNext]);
+
+  useEffect(() => onLiveChange("spotlights", reason => {
+    if (reason === "change") invalidateApiCache("/spotlights");
+    setOpenIndex(null);
+    void loadNext(true);
+  }), [loadNext]);
 
   // Infinite scroll: load the next page when the end of the grid comes near.
   useEffect(() => {
@@ -74,7 +83,7 @@ export default function SpotlightPage() {
         {error && items.length === 0 ? (
           <div className="max-w-md mx-auto text-center rounded-2xl border border-[#E2E6DF] bg-white p-8 space-y-3">
             <p className="font-serif font-bold text-[#0F3D3E]">We couldn&apos;t load the spotlight right now.</p>
-            <Button onClick={loadNext} className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-bold">
+            <Button onClick={() => void loadNext()} className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-bold">
               Try again
             </Button>
           </div>
@@ -97,11 +106,11 @@ export default function SpotlightPage() {
 
             <div className="flex justify-center py-8">
               {error ? (
-                <Button onClick={loadNext} variant="outline" className="font-bold">
+                <Button onClick={() => void loadNext()} variant="outline" className="font-bold">
                   Couldn&apos;t load more. Try again
                 </Button>
               ) : hasMore ? (
-                <Button onClick={loadNext} disabled={loading} variant="outline" className="font-bold gap-2">
+                <Button onClick={() => void loadNext()} disabled={loading} variant="outline" className="font-bold gap-2">
                   {loading && <Loader2 className="h-4 w-4 animate-spin" />}
                   {loading ? "Loading…" : "Load more"}
                 </Button>

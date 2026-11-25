@@ -1,13 +1,14 @@
 import { describeApiError, record } from "@/lib/api-error";
 import api from "@/lib/api";
 import { fetchAuthorLedgerRows } from "@/lib/author-royalties";
+import { adminResponse, adminRows } from "@/lib/admin-account-api";
 
 /**
  * Manual royalty statements: admin types, per book, the royalty per copy (100% of it goes to
  * the author), how many copies sold and gets the line and grand totals. The statement is saved
  * against the author's user id and shown in that author's Royalties page.
  *
- * Backend contract (to be built, see BACKEND_ALIGNMENT_REPORT.md §1):
+ * Deployed routes:
  *   POST   /admin/manual-royalties                { authorId, periodStart?, periodEnd?, note?, items[] }
  *   GET    /admin/manual-royalties?authorId=      list (admin)
  *   POST   /admin/manual-royalties/{id}/void      { reason }
@@ -96,12 +97,6 @@ export const buildPayload = (
   })),
 });
 
-const listFrom = (input: unknown): Record<string, unknown>[] => {
-  const payload = record(input), data = record(payload.data);
-  const candidates = [data.statements, data.items, payload?.data, payload?.statements, input];
-  return (candidates.find(Array.isArray) || []).map(record);
-};
-
 export function normalizeStatement(input: unknown, authoritative = false): ManualRoyaltyStatement {
   const raw = record(input);
   if (authoritative && (raw.totalRoyalty == null || raw.totalUnits == null)) throw new Error("The statement omitted its published totals.");
@@ -121,7 +116,7 @@ export function normalizeStatement(input: unknown, authoritative = false): Manua
   const author = record(raw.author);
   return {
     id: String(raw?._id || raw?.id || ""),
-    authorId: String(author?._id || raw?.author || raw?.authorId || ""),
+    authorId: String(author._id || author.id || (typeof raw.author === "string" ? raw.author : "") || raw.authorId || ""),
     authorName: String(author.name || raw.authorName || ""),
     periodStart: String(raw.periodStart || ""),
     periodEnd: String(raw.periodEnd || ""),
@@ -139,7 +134,15 @@ export const isMissingEndpoint = (err: unknown) => describeApiError(err).respons
 
 export async function createManualRoyalty(payload: ReturnType<typeof buildPayload>) {
   const { data } = await api.post("/admin/manual-royalties", payload);
-  return normalizeStatement(data?.data ?? data);
+  const result = record(adminResponse(data));
+  const created = record(result.statement ?? result);
+  const id = created._id || created.id;
+  if (typeof id !== "string" || !id) throw new Error("The backend didn't return a statement ID. Refresh the statement list before retrying.");
+  const saved = await fetchManualRoyalty(id);
+  if (saved.authorId !== payload.authorId || saved.status === "VOID") {
+    throw new Error("The saved statement could not be confirmed for this author. Refresh the statement list before retrying.");
+  }
+  return saved;
 }
 
 export async function listManualRoyalties(authorId?: string) {
@@ -147,11 +150,26 @@ export async function listManualRoyalties(authorId?: string) {
     params: { limit: 100, ...(authorId ? { authorId } : {}) },
     cache: "no-store",
   });
-  return listFrom(data).map((row) => normalizeStatement(row));
+  return adminRows(data, "statements").map((row) => normalizeStatement(row, true));
 }
 
 export async function voidManualRoyalty(id: string, reason: string) {
-  await api.post(`/admin/manual-royalties/${id}/void`, { reason });
+  const { data } = await api.post(`/admin/manual-royalties/${encodeURIComponent(id)}/void`, { reason });
+  adminResponse(data);
+  const saved = await fetchManualRoyalty(id);
+  if (saved.status !== "VOID") throw new Error("The voided status could not be confirmed. Refresh the statement list before retrying.");
+}
+
+async function fetchManualRoyalty(id: string) {
+  try {
+    const { data } = await api.get(`/admin/manual-royalties/${encodeURIComponent(id)}`, { cache: "no-store" });
+    const result = record(adminResponse(data));
+    const saved = normalizeStatement(result.statement ?? result, true);
+    if (saved.id === id) return saved;
+  } catch {
+    // The write may already have committed even if the read failed.
+  }
+  throw new Error("The saved statement could not be confirmed. Refresh the statement list before retrying.");
 }
 
 export async function listMyManualRoyalties() {

@@ -83,6 +83,6 @@ export function spotlightFormData(form: SpotlightForm, file: File | null): FormD
 
 /** One page of spotlights in the order the backend returns them (sortOrder, then creation date). */
 export async function fetchSpotlights(page: number, limit: number): Promise<SpotlightPage> {
-  const { data } = await api.get("/spotlights", { params: { page, limit } });
+  const { data } = await api.get("/spotlights", { params: { page, limit }, publicRead: true });
   return parseSpotlightResponse(data, page, limit);
 }

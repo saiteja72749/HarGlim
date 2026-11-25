@@ -4,10 +4,11 @@ import { useEffect, useRef } from "react";
 import { bootstrapUserContext } from "@/lib/api";
 import { useAuthStore } from "@/store/auth-store";
 import { record } from '@/lib/api-error';
+import { onLiveChange } from "@/lib/live-sync";
 import { useSWRConfig } from 'swr';
 
 /**
- * Re-fetches GET /users/me/context once per page load for signed-in users.
+ * Re-fetches GET /users/me/context on load and when a signed-in user returns to the tab.
  * The persisted role/capabilities are only a cache: an admin can approve an
  * author application (or suspend a user) at any time, and the backend context
  * is the authoritative source for author dashboard access.
@@ -27,8 +28,9 @@ export function SessionBootstrap() {
   }, [token, cache, mutate]);
 
   useEffect(() => {
-    if (token) bootstrapUserContext();
-    // Run on load and whenever a different session token appears; login flows call it themselves too.
+    if (!token) return;
+    void bootstrapUserContext();
+    return onLiveChange("account-access", () => { void bootstrapUserContext(); }, 30_000);
   }, [token]);
 
   useEffect(() => {

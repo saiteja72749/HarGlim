@@ -20,6 +20,22 @@ test('public home content matches backend copy', async ({ page }) => {
   if (subtitle) await expect(page.getByText(subtitle, { exact: true }).first()).toBeVisible();
 });
 
+test('the public author profile displays the saved name and biography', async ({ page }) => {
+  const records = backendList(await backendGet('/authors?limit=10'), 'authors');
+  const candidate = records.find(author => author.bio?.trim()) ?? records[0];
+  test.skip(!candidate, 'The real backend returned no public authors.');
+  const id = encodeURIComponent(candidate._id || candidate.id);
+  const profile = backendData(await backendGet(`/authors/${id}`));
+  await page.goto(`/authors/${id}`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(profile.name);
+  await page.getByRole('button', { name: 'Biography & Story' }).click();
+  await expect(page.getByRole('heading', { name: `About ${profile.name}` })).toBeVisible();
+  const biography: string = typeof profile.bio === 'string' ? profile.bio.trim() : '';
+  for (const paragraph of biography ? biography.split('\n\n').filter(text => text.trim()) : ['No biography has been published.']) {
+    await expect(page.getByText(paragraph, { exact: true }).last()).toBeVisible();
+  }
+});
+
 test('the FAQ page shows only the backend-published FAQ list', async ({ page }) => {
   const content = backendData(await backendGet('/content'));
   const faqs = Array.isArray(content.faq) ? content.faq : typeof content.faqsJson === 'string' ? JSON.parse(content.faqsJson) : [];

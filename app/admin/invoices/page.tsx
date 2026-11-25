@@ -1,8 +1,10 @@
 "use client";
+import { adminResponse, adminRows } from "@/lib/admin-account-api";
+import { ErrorState } from "@/components/ui/error-state";
 import { populated } from "@/lib/order-status";
-import type { InvoiceRecord, OrderRecord } from "@/types/commerce-api";
+import type { InvoiceRecord } from "@/types/commerce-api";
 import { scheduleRequest } from "@/lib/schedule-request";
-import { describeApiError } from "@/lib/api-error";
+import { describeApiError, record } from "@/lib/api-error";
 
 
 import { useState, useEffect, useCallback } from "react";
@@ -33,6 +35,7 @@ import toast from "react-hot-toast";
 export default function AdminInvoicesPage() {
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
   // Detail Modal State
@@ -41,37 +44,17 @@ export default function AdminInvoicesPage() {
 
   const fetchInvoices = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
-      let res;
-      if (searchQuery.trim()) {
-        res = await api.get("/admin/invoices/search", { params: { q: searchQuery.trim() } });
-      } else {
-        res = await api.get("/admin/invoices", { params: { limit: 50 } });
-      }
-
-      let items = res?.data?.data?.invoices || res?.data?.invoices || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];
-      
-      // If invoices collection is not separately seeded yet, fallback to orders with verified payments
-      if (items.length === 0) {
-        const ordersRes = await api.get("/admin/orders", { params: { limit: 50 } }).catch(() => null);
-        const orderList = ordersRes?.data?.data?.orders || (Array.isArray(ordersRes?.data?.data) ? ordersRes.data.data : []) || [];
-        items = orderList.map((ord: OrderRecord) => ({
-          _id: ord._id || ord.id,
-          invoiceNumber: `INV-${(ord.orderNumber || ord._id || "1000").toString().slice(-6)}`,
-          orderNumber: ord.orderNumber || ord._id,
-          customerName: ord.shippingAddress?.fullName || ord.shippingAddress?.name || populated(ord.user)?.name || "Customer",
-          customerEmail: ord.shippingAddress?.email || populated(ord.user)?.email || "N/A",
-          totalAmount: ord.totalPrice ?? ord.totalAmount ?? ord.amount ?? 0,
-          paymentStatus: ord.paymentStatus || (ord.isPaid ? "PAID" : "PENDING"),
-          createdAt: ord.createdAt || new Date().toISOString(),
-          items: ord.items || [],
-        }));
-      }
-
-      setInvoices(items);
+      const query = searchQuery.trim();
+      const { data } = await api.get(query ? "/admin/invoices/search" : "/admin/invoices", {
+        params: query ? { q: query } : { limit: 50 },
+        cache: "no-store",
+      });
+      setInvoices(adminRows<InvoiceRecord>(data, "invoices"));
     } catch (err) {
       console.warn("Invoices fetch error:", describeApiError(err));
-      setInvoices([]);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -79,34 +62,41 @@ export default function AdminInvoicesPage() {
 
   useEffect(() => scheduleRequest(fetchInvoices), [fetchInvoices]);
 
+  const openInvoice = async (id: string) => {
+    try {
+      const { data } = await api.get(`/admin/invoices/${encodeURIComponent(id)}`, { cache: "no-store" });
+      const details = record(adminResponse(data));
+      const invoice = record(details.invoice ?? details);
+      if ((invoice._id || invoice.id) !== id) throw new Error("The backend did not return the selected invoice.");
+      setSelectedInvoice(invoice as unknown as InvoiceRecord);
+    } catch (err) {
+      toast.error(describeApiError(err).response?.data.message || "Could not load invoice details.");
+    }
+  };
+
   const handleDownloadInvoice = async (invoice: InvoiceRecord) => {
     const invId = invoice._id || invoice.id;
-    if (!invId) return;
+    if (!invId || downloadingId) return;
     setDownloadingId(invId);
     try {
-      // First attempt backend PDF stream: GET /api/admin/invoices/:id/download
-      const response = await api.get(`/admin/invoices/${invId}/download`, {
+      const { data } = await api.get<Blob>(`/admin/invoices/${encodeURIComponent(invId)}/download`, {
         responseType: "blob",
-      }).catch(() => null);
-
-      if (response && response.data) {
-        const blob = new Blob([response.data], { type: "application/pdf" });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `Invoice-${invoice.invoiceNumber || invId}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        toast.success("Invoice PDF downloaded successfully! 📄");
-      } else {
-        // Fallback: Browser print dialog
-        window.print();
+        cache: "no-store",
+      });
+      if (!(data instanceof Blob) || await data.slice(0, 5).text() !== "%PDF-") {
+        throw new Error("The backend did not return an invoice PDF.");
       }
+      const url = URL.createObjectURL(new Blob([data], { type: "application/pdf" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Invoice-${invoice.invoiceNumber || invId}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
     } catch (err) {
-      console.error("Failed to download invoice:", describeApiError(err));
-      window.print();
+      const failure = describeApiError(err);
+      toast.error(failure.response?.data.message || failure.message);
     } finally {
       setDownloadingId(null);
     }
@@ -146,8 +136,8 @@ export default function AdminInvoicesPage() {
 
       {/* Invoices Table */}
       <Card className="border border-[#E2E6DF] bg-white rounded-2xl shadow-2xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <Table>
+        <div>
+          <Table aria-label="Invoices">
             <TableHeader className="bg-[#F8F9F7]">
               <TableRow>
                 <TableHead className="font-bold text-xs uppercase text-[#0F3D3E]">Invoice No</TableHead>
@@ -167,6 +157,12 @@ export default function AdminInvoicesPage() {
                     <p className="text-xs text-[#5C6E6E] mt-2">Loading invoices...</p>
                   </TableCell>
                 </TableRow>
+              ) : loadError ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="whitespace-normal">
+                    <ErrorState title="Could not load invoices" onRetry={fetchInvoices} />
+                  </TableCell>
+                </TableRow>
               ) : invoices.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} className="h-32 text-center text-xs text-[#5C6E6E]">
@@ -182,7 +178,7 @@ export default function AdminInvoicesPage() {
                   return (
                     <TableRow key={invId} className="hover:bg-[#F8F9F7]/60 text-xs">
                       <TableCell className="font-mono font-bold text-[#0F3D3E]">
-                        {inv.invoiceNumber || `INV-${invId.slice(-6)}`}
+                        {inv.invoiceNumber || "Unavailable"}
                       </TableCell>
                       <TableCell className="font-mono text-[11px] text-[#5C6E6E]">
                         {inv.orderNumber || "N/A"}
@@ -192,7 +188,7 @@ export default function AdminInvoicesPage() {
                         <p className="text-[11px] text-[#5C6E6E]">{inv.customerEmail}</p>
                       </TableCell>
                       <TableCell className="text-right font-serif font-bold text-sm text-[#0F3D3E]">
-                        ₹{Number(inv.totalAmount || 0).toLocaleString()}
+                        {inv.totalAmount == null ? "Unavailable" : `₹${inv.totalAmount.toLocaleString("en-IN")}`}
                       </TableCell>
                       <TableCell className="text-center">
                         {isPaid ? (
@@ -201,7 +197,7 @@ export default function AdminInvoicesPage() {
                           </Badge>
                         ) : (
                           <Badge className="bg-amber-500/15 text-amber-800 border-amber-300 text-[11px]">
-                            {inv.paymentStatus || "PENDING"}
+                            {inv.paymentStatus || "Unavailable"}
                           </Badge>
                         )}
                       </TableCell>
@@ -213,7 +209,7 @@ export default function AdminInvoicesPage() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => setSelectedInvoice(inv)}
+                            onClick={() => openInvoice(invId)}
                             className="h-8 text-xs text-[#0F3D3E] border-[#0F3D3E]/30 gap-1"
                           >
                             <Eye className="h-3.5 w-3.5" />
@@ -250,7 +246,7 @@ export default function AdminInvoicesPage() {
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-[#E2E6DF] overflow-hidden flex flex-col"
+            className="max-h-[calc(100dvh-2rem)] overflow-y-auto w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-[#E2E6DF] flex flex-col"
           >
             <div className="flex items-center justify-between p-5 border-b border-[#E2E6DF] bg-[#F8F9F7]">
               <div className="flex items-center gap-2.5">
@@ -285,7 +281,7 @@ export default function AdminInvoicesPage() {
                     {selectedInvoice.createdAt ? new Date(selectedInvoice.createdAt).toLocaleDateString() : "Unavailable"}
                   </p>
                   <Badge className="bg-emerald-500/15 text-emerald-800 text-[10px] mt-1">
-                    {selectedInvoice.paymentStatus || "PAID"}
+                    {selectedInvoice.paymentStatus || "Unavailable"}
                   </Badge>
                 </div>
               </div>
@@ -307,7 +303,7 @@ export default function AdminInvoicesPage() {
               <div className="pt-3 border-t border-[#E2E6DF] flex justify-between items-center text-sm">
                 <span className="font-bold text-[#0F3D3E]">Total Paid:</span>
                 <span className="font-serif font-bold text-lg text-[#0F3D3E]">
-                  ₹{Number(selectedInvoice.totalAmount || 0).toLocaleString()}
+                  {selectedInvoice.totalAmount == null ? "Unavailable" : `₹${selectedInvoice.totalAmount.toLocaleString("en-IN")}`}
                 </span>
               </div>
             </div>

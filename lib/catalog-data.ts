@@ -19,7 +19,6 @@ const sortValues: Record<string, string> = {
   "price-low": "price_asc",
   "price-high": "price_desc",
   newest: "newest",
-  rating: "rating",
   featured: "featured",
 };
 
@@ -31,16 +30,15 @@ export type CatalogQuery = {
   format?: string;
   minPrice?: number;
   maxPrice?: number;
-  minRating?: number;
   sort?: string;
   tag?: CatalogTag;
 };
 
-export function catalogParams({ q, category, page, limit, format, minPrice, maxPrice, minRating, sort, tag }: CatalogQuery) {
+export function catalogParams({ q, category, page, limit, format, minPrice, maxPrice, sort, tag }: CatalogQuery) {
   return {
     q: q?.trim() || undefined,
     category: category || undefined,
-    page, limit, format, minPrice, maxPrice, minRating,
+    page, limit, format, minPrice, maxPrice,
     sort: sortValues[sort || ""] || "newest",
     ...(tag && tag !== "all" ? { [tag]: true } : {}),
   };

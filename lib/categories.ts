@@ -24,9 +24,9 @@ export function invalidateCategoryCache() {
   invalidateApiCache("/categories");
 }
 
-export function categoriesChanged() {
+export function categoriesChanged(includeCurrentTab = true) {
   invalidateCategoryCache();
-  notifyLiveChange("categories");
+  notifyLiveChange("categories", includeCurrentTab);
 }
 
 export async function createBackendCategory(name: string, description: string): Promise<BackendCategory> {

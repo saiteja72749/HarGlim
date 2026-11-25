@@ -1,0 +1,115 @@
+.admin-workspace [data-slot="card"] {
+  min-inline-size: 0;
+}
+
+.admin-workspace [data-slot="table-container"] {
+  max-block-size: min(68dvh, 48rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.admin-workspace [data-slot="table-container"]:focus-visible {
+  outline: 2px solid #8a6d1e;
+  outline-offset: -2px;
+}
+
+.admin-workspace [data-slot="table-header"] {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+  background-color: #f8f9f7;
+  box-shadow: 0 1px #e2e6df;
+}
+
+.admin-workspace :is(td, th)[data-label] {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.admin-orders-table [data-slot="badge"] {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.admin-orders-table {
+  min-inline-size: 58rem;
+  table-layout: fixed;
+}
+
+.admin-orders-table th:nth-child(1) { width: 10%; }
+.admin-orders-table th:nth-child(2) { width: 17%; }
+.admin-orders-table th:nth-child(3) { width: 21%; }
+.admin-orders-table th:nth-child(4) { width: 10%; }
+.admin-orders-table th:nth-child(5) { width: 8%; }
+.admin-orders-table th:nth-child(6) { width: 11%; }
+.admin-orders-table th:nth-child(7) { width: 10%; }
+.admin-orders-table th:nth-child(8) { width: 13%; }
+
+.admin-orders-table :is(th, td):last-child:not([colspan]) {
+  position: sticky;
+  inset-inline-end: 0;
+  background-color: #fff;
+  box-shadow: -1px 0 #e2e6df;
+}
+
+.admin-orders-table th:last-child { background-color: #f8f9f7; }
+
+@media (width < 80rem) {
+  .admin-workspace [data-slot="table-container"]:has(> .admin-orders-table) {
+    scrollbar-gutter: auto;
+  }
+
+  .admin-workspace .admin-orders-table {
+    display: block;
+    min-inline-size: 0;
+  }
+
+  .admin-workspace .admin-orders-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .admin-orders-table tbody { display: block; }
+
+  .admin-orders-table tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    padding: 1rem;
+  }
+
+  .admin-orders-table tbody td {
+    display: block;
+    min-inline-size: 0;
+    padding: 0;
+    text-align: start;
+  }
+
+  .admin-orders-table tbody td[data-label]::before {
+    display: block;
+    margin-block-end: 0.25rem;
+    color: #536665;
+    content: attr(data-label);
+    font: 600 0.6875rem/1.4 system-ui, sans-serif;
+  }
+
+  .admin-orders-table tbody :is(td[data-label="Books ordered"], td[data-label="Actions"], td[colspan]) {
+    grid-column: 1 / -1;
+  }
+
+  .admin-orders-table tbody td:last-child:not([colspan]) {
+    position: static;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .admin-orders-table td[data-label="Actions"] > div { justify-content: flex-start; }
+}
+
+@media (width < 25rem) {
+  .admin-orders-table tbody tr { grid-template-columns: minmax(0, 1fr); }
+}

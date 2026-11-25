@@ -65,4 +65,11 @@ describe("initial category seed", () => {
     const plan = planCategorySeed([{ _id: "old-id", name: "Different Genre", slug: "self-help" }]);
     expect(plan.conflicts).toEqual([{ name: "Self-Help", existingName: "Different Genre", id: "old-id" }]);
   });
+  it("recognizes existing children's categories and retains their inactive state", () => {
+    for (const name of ["Children Books", "Children’s Books", "Childrens Books"]) {
+      const plan = planCategorySeed([{ _id: "old-id", name, active: false }]);
+      expect(plan.missing).not.toContain("Children's Books");
+      expect(plan.present).toContainEqual({ name: "Children's Books", existingName: name, id: "old-id", active: false });
+    }
+  });
 });

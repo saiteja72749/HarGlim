@@ -1,5 +1,6 @@
 "use client";
 
+import { adminResponse, adminRows } from "@/lib/admin-account-api";
 import { populated } from "@/lib/order-status";
 import type { OrderRecord, PaymentRecord } from "@/types/commerce-api";
 import { scheduleRequest } from "@/lib/schedule-request";
@@ -127,7 +128,7 @@ export default function AdminPaymentVerificationPage() {
       };
 
       const res = await listAdminPayments(params);
-      const items = res?.data?.items || res?.items || (Array.isArray(res?.data) ? res.data : []);
+      const items = adminRows<PaymentRecord>(res, "payments");
       const pag = res?.data?.pagination || res?.pagination || {
         total: items.length,
         page,
@@ -163,6 +164,7 @@ export default function AdminPaymentVerificationPage() {
 
     try {
       const res = await getAdminPaymentDetail(paymentId);
+      adminResponse(res);
       setSelectedPaymentDetail(res?.data || res);
     } catch (caughtError) {
       const err = describeApiError(caughtError);
@@ -182,7 +184,7 @@ export default function AdminPaymentVerificationPage() {
     setActionLoading("approve");
     try {
       const reason = actionReason.trim() || "Admin payment approved";
-      await approveAdminPayment(paymentId, { reason });
+      adminResponse(await approveAdminPayment(paymentId, { reason }));
       toast.success("Payment approved successfully! Order status updated to Paid. ✅");
       setActionReason("");
       setDetailModalOpen(false);
@@ -204,7 +206,7 @@ export default function AdminPaymentVerificationPage() {
     setActionLoading("reject");
     try {
       const reason = actionReason.trim() || "UTR reference mismatch";
-      await rejectAdminPayment(paymentId, { reason });
+      adminResponse(await rejectAdminPayment(paymentId, { reason }));
       toast.error("Payment rejected successfully. ❌");
       setActionReason("");
       setDetailModalOpen(false);
@@ -228,7 +230,7 @@ export default function AdminPaymentVerificationPage() {
     setActionLoading("cancel");
     try {
       const reason = actionReason.trim() || "Order cancelled by admin";
-      await cancelAdminPayment(paymentId, { reason });
+      adminResponse(await cancelAdminPayment(paymentId, { reason }));
       toast.success("Payment intent cancelled.");
       setActionReason("");
       fetchPayments();
@@ -252,7 +254,7 @@ export default function AdminPaymentVerificationPage() {
     setActionLoading("expire");
     try {
       const reason = actionReason.trim() || "Payment window expired";
-      await expireAdminPayment(paymentId, { reason });
+      adminResponse(await expireAdminPayment(paymentId, { reason }));
       toast.success("Payment intent set to expired.");
       setActionReason("");
       fetchPayments();
@@ -274,7 +276,7 @@ export default function AdminPaymentVerificationPage() {
 
     setActionLoading("retry");
     try {
-      await retryAdminVerification(paymentId);
+      adminResponse(await retryAdminVerification(paymentId));
       toast.success("Verification retried.");
       fetchPayments();
       if (selectedPaymentDetail) handleOpenDetail(paymentId);
@@ -295,7 +297,7 @@ export default function AdminPaymentVerificationPage() {
 
     setActionLoading("recreate-qr");
     try {
-      await recreateAdminQr(paymentId, { force: true, reason: actionReason.trim() || "Admin requested new QR" });
+      adminResponse(await recreateAdminQr(paymentId, { force: true, reason: actionReason.trim() || "Admin requested new QR" }));
       toast.success("QR Code recreated successfully!");
       fetchPayments();
       if (selectedPaymentDetail) handleOpenDetail(paymentId);
@@ -508,7 +510,7 @@ export default function AdminPaymentVerificationPage() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div>
               <Table>
                 <TableHeader className="bg-[#F8F9F7]">
                   <TableRow>
@@ -660,7 +662,7 @@ export default function AdminPaymentVerificationPage() {
 
       {/* Comprehensive Payment Detail Modal */}
       <Dialog open={detailModalOpen} onOpenChange={setDetailModalOpen}>
-        <DialogContent className="max-w-4xl bg-white border-[#E2E6DF] rounded-2xl max-h-[90vh] overflow-y-auto p-0">
+        <DialogContent className="sm:max-w-4xl bg-white border-[#E2E6DF] rounded-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto p-0">
           <DialogHeader className="p-6 pb-4 border-b border-[#E2E6DF] sticky top-0 bg-white z-10">
             <div className="flex items-center justify-between">
               <div>
@@ -749,7 +751,7 @@ export default function AdminPaymentVerificationPage() {
 
               {/* Detailed Specs Tabs */}
               <Tabs defaultValue="customer-order" className="w-full">
-                <TabsList className="grid grid-cols-4 bg-[#F8F9F7] p-1 rounded-xl">
+                <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-[#F8F9F7] p-1 rounded-xl sm:grid-cols-4 [&>button]:whitespace-normal">
                   <TabsTrigger value="customer-order" className="text-xs font-semibold">Customer & Order</TabsTrigger>
                   <TabsTrigger value="verification" className="text-xs font-semibold">Verification & Ledger</TabsTrigger>
                   <TabsTrigger value="inventory" className="text-xs font-semibold">Inventory</TabsTrigger>

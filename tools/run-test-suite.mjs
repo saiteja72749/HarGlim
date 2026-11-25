@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -7,7 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outputDir = resolve(root, 'test-suite-results');
 mkdirSync(outputDir, { recursive: true });
 if (existsSync(resolve(root, '.env.test.local'))) process.loadEnvFile(resolve(root, '.env.test.local'));
-const secrets = ['E2E_AUTHOR_PASSWORD', 'E2E_ADMIN_PASSWORD'].flatMap((key) => {
+const secrets = ['E2E_READER_PASSWORD', 'E2E_AUTHOR_PASSWORD', 'E2E_ADMIN_PASSWORD'].flatMap((key) => {
   const value = process.env[key];
   return value ? [value, JSON.stringify(value).slice(1, -1)] : [];
 });
@@ -35,10 +35,14 @@ function redactArtifacts(directory) {
 }
 
 const steps = [
-  { name: 'unit', cli: 'vitest/vitest.mjs', args: ['run', '--pool=forks', '--maxWorkers=1'] },
+  { name: 'unit', cli: 'vitest/vitest.mjs', args: ['run', '--pool=threads', '--maxWorkers=1'] },
   { name: 'lint', cli: 'eslint/bin/eslint.js', args: ['.', '--format', 'json'] },
   { name: 'build', cli: 'next/dist/bin/next', args: ['build'] },
-  { name: 'e2e', cli: '@playwright/test/cli.js', args: ['test'], env: { PLAYWRIGHT_SERVER_MODE: 'production' } },
+  {
+    name: 'e2e', cli: '@playwright/test/cli.js',
+    args: ['test', '--reporter=list,html,json'],
+    env: { PLAYWRIGHT_SERVER_MODE: 'production', PLAYWRIGHT_JSON_OUTPUT_FILE: resolve(outputDir, 'browser.json') },
+  },
 ];
 const retryFailed = process.argv.includes('--retry-failed');
 const rerun = new Set((process.argv.find((arg) => arg.startsWith('--rerun='))?.slice('--rerun='.length) ?? '').split(',').filter(Boolean));
@@ -68,6 +72,10 @@ for (const step of steps) {
     continue;
   }
   console.log(`\nRunning ${step.name} checks...`);
+  if (step.name === 'e2e') {
+    rmSync(resolve(outputDir, 'browser.json'), { force: true });
+    rmSync(resolve(outputDir, 'public-request-budget.json'), { force: true });
+  }
   const startedAt = new Date().toISOString();
   const started = Date.now();
   const log = createWriteStream(resolve(outputDir, `${step.name}.log`));
@@ -104,6 +112,15 @@ for (const step of steps) {
     for (const directory of ['test-results', 'playwright-report', 'test-suite-results']) redactArtifacts(resolve(root, directory));
   }
   const result = { name: step.name, status: exitCode === 0 ? 'passed' : 'failed', exitCode, startedAt, durationMs: Date.now() - started };
+  if (step.name === 'e2e') {
+    try {
+      const { stats } = JSON.parse(readFileSync(resolve(outputDir, 'browser.json'), 'utf8'));
+      const { expected: passed, unexpected: failed, flaky, skipped } = stats;
+      result.tests = { discovered: passed + failed + flaky + skipped, passed, failed, flaky, skipped };
+    } catch {
+      console.log('Browser execution did not produce a readable result. See test-suite-results/e2e.log.');
+    }
+  }
   if (step.name === 'lint') {
     try {
       const files = JSON.parse(readFileSync(resolve(outputDir, 'lint.log'), 'utf8'));

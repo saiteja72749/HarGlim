@@ -6,7 +6,7 @@
  * reloads when it comes back into focus, at most once per `FOCUS_REFRESH_MS`.
  */
 
-export type LiveTopic = "site-content" | "publish-packages" | "author-data" | "categories" | "books";
+export type LiveTopic = "site-content" | "publish-packages" | "author-data" | "categories" | "books" | "account-access" | "reviews" | "spotlights";
 
 const CHANNEL = "harglim-live-sync";
 const LOCAL_EVENT = "harglim-live-change";

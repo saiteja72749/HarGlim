@@ -1,4 +1,6 @@
 "use client";
+import { adminRows } from "@/lib/admin-account-api";
+import { ErrorState } from "@/components/ui/error-state";
 import type { Book } from "@/types";
 import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
@@ -45,21 +47,22 @@ export default function AdminInventoryPage() {
   const [ledgerTimeline, setLedgerTimeline] = useState<InventoryEntry[]>([]);
   const [loadingTimeline, setLoadingTimeline] = useState(false);
 
+  const [lowStockFailed, setLowStockFailed] = useState(false);
+
+  const [reservationsFailed, setReservationsFailed] = useState(false);
+
+  const [timelineFailed, setTimelineFailed] = useState(false);
+
   // Fetch Low Stock Books
   const fetchLowStock = useCallback(async () => {
     setLoadingLowStock(true);
+    setLowStockFailed(false);
     try {
-      const res = await api.get("/admin/operations/inventory/low-stock").catch(() => null);
-      let items = res?.data?.data?.books || res?.data?.books || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];
-      if (items.length === 0) {
-        // Fallback: query books with stock <= 5
-        const booksRes = await api.get("/books", { params: { limit: 100 } }).catch(() => null);
-        const bList = booksRes?.data?.data?.books || (Array.isArray(booksRes?.data?.data) ? booksRes.data.data : []) || [];
-        items = bList.filter((b: Book) => typeof b.stock === "number" && b.stock <= 5);
-      }
-      setLowStockBooks(items);
+      const { data } = await api.get("/admin/operations/inventory/low-stock", { params: { limit: 100 }, cache: "no-store" });
+      setLowStockBooks(adminRows<Book>(data, "books", "lowStock", "lowStockBooks"));
     } catch (err) {
-      console.warn("Low stock fetch notice:", describeApiError(err));
+      console.warn("Failed to load low-stock alerts:", describeApiError(err));
+      setLowStockFailed(true);
     } finally {
       setLoadingLowStock(false);
     }
@@ -68,12 +71,13 @@ export default function AdminInventoryPage() {
   // Fetch Reservations
   const fetchReservations = useCallback(async () => {
     setLoadingReservations(true);
+    setReservationsFailed(false);
     try {
-      const res = await api.get("/admin/operations/inventory/reservations").catch(() => null);
-      const items = res?.data?.data?.reservations || res?.data?.reservations || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];
-      setReservations(Array.isArray(items) ? items : []);
+      const { data } = await api.get("/admin/operations/inventory/reservations", { cache: "no-store" });
+      setReservations(adminRows<InventoryReservation>(data, "reservations"));
     } catch (err) {
-      console.warn("Reservations fetch notice:", describeApiError(err));
+      console.warn("Failed to load stock reservations:", describeApiError(err));
+      setReservationsFailed(true);
     } finally {
       setLoadingReservations(false);
     }
@@ -82,12 +86,13 @@ export default function AdminInventoryPage() {
   // Fetch Timeline Ledger
   const fetchTimeline = useCallback(async () => {
     setLoadingTimeline(true);
+    setTimelineFailed(false);
     try {
-      const res = await api.get("/admin/operations/ledger/timeline").catch(() => null);
-      const items = res?.data?.data?.timeline || res?.data?.timeline || (Array.isArray(res?.data?.data) ? res.data.data : []) || [];
-      setLedgerTimeline(Array.isArray(items) ? items : []);
+      const { data } = await api.get("/admin/operations/ledger/inventory", { params: { limit: 100 }, cache: "no-store" });
+      setLedgerTimeline(adminRows<InventoryEntry>(data, "entries", "events", "ledger", "timeline"));
     } catch (err) {
-      console.warn("Ledger timeline fetch notice:", describeApiError(err));
+      console.warn("Failed to load inventory ledger:", describeApiError(err));
+      setTimelineFailed(true);
     } finally {
       setLoadingTimeline(false);
     }
@@ -119,7 +124,7 @@ export default function AdminInventoryPage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={(value) => { if (value === "low-stock" || value === "reservations" || value === "timeline") setActiveTab(value); }}>
-        <TabsList className="bg-[#E2E6DF]/60 p-1">
+        <TabsList className="h-auto max-w-full flex-wrap justify-start gap-1 bg-[#E2E6DF]/60 p-1">
           <TabsTrigger value="low-stock" className="text-xs font-bold gap-1.5">
             <AlertTriangle className="h-3.5 w-3.5" />
             <span>Low Stock Alerts ({lowStockBooks.length})</span>
@@ -136,8 +141,9 @@ export default function AdminInventoryPage() {
 
         {/* Tab 1: Low Stock Alerts */}
         <TabsContent value="low-stock" className="space-y-4 pt-4">
+          {lowStockFailed ? <ErrorState title="Could not load low-stock alerts" onRetry={fetchLowStock} /> : (
           <Card className="border border-[#E2E6DF] bg-white rounded-2xl shadow-2xs overflow-hidden">
-            <div className="overflow-x-auto">
+            <div>
               <Table>
                 <TableHeader className="bg-[#F8F9F7]">
                   <TableRow>
@@ -203,12 +209,14 @@ export default function AdminInventoryPage() {
               </Table>
             </div>
           </Card>
+          )}
         </TabsContent>
 
         {/* Tab 2: Reservations */}
         <TabsContent value="reservations" className="space-y-4 pt-4">
+          {reservationsFailed ? <ErrorState title="Could not load stock reservations" onRetry={fetchReservations} /> : (
           <Card className="border border-[#E2E6DF] bg-white rounded-2xl shadow-2xs overflow-hidden">
-            <div className="overflow-x-auto">
+            <div>
               <Table>
                 <TableHeader className="bg-[#F8F9F7]">
                   <TableRow>
@@ -237,7 +245,7 @@ export default function AdminInventoryPage() {
                       <TableRow key={r._id || r.id} className="text-xs">
                         <TableCell className="font-mono font-bold text-[#0F3D3E]">{r._id || r.id}</TableCell>
                         <TableCell>{r.book?.title || r.bookTitle || "Catalog Book"}</TableCell>
-                        <TableCell className="text-center font-bold">{r.quantity || 1}</TableCell>
+                        <TableCell className="text-center font-bold">{r.quantity ?? "Unavailable"}</TableCell>
                         <TableCell>
                           <Badge className="bg-blue-500/15 text-blue-800 text-[10px]">{r.status || "HELD"}</Badge>
                         </TableCell>
@@ -251,12 +259,14 @@ export default function AdminInventoryPage() {
               </Table>
             </div>
           </Card>
+          )}
         </TabsContent>
 
         {/* Tab 3: Timeline Ledger */}
         <TabsContent value="timeline" className="space-y-4 pt-4">
+          {timelineFailed ? <ErrorState title="Could not load inventory ledger" onRetry={fetchTimeline} /> : (
           <Card className="border border-[#E2E6DF] bg-white rounded-2xl shadow-2xs overflow-hidden">
-            <div className="overflow-x-auto">
+            <div>
               <Table>
                 <TableHeader className="bg-[#F8F9F7]">
                   <TableRow>
@@ -286,12 +296,12 @@ export default function AdminInventoryPage() {
                         <TableCell className="text-[#5C6E6E]">
                           {item.createdAt ? new Date(item.createdAt).toLocaleString() : "Recent"}
                         </TableCell>
-                        <TableCell className="font-bold text-[#0F3D3E]">{item.type || item.event || "STOCK_ADJUST"}</TableCell>
+                        <TableCell className="font-bold text-[#0F3D3E]">{item.type || item.event || "Unavailable"}</TableCell>
                         <TableCell>{item.book?.title || item.bookId || "N/A"}</TableCell>
                         <TableCell className="text-center font-mono font-bold">
                           {item.delta > 0 ? `+${item.delta}` : item.delta}
                         </TableCell>
-                        <TableCell className="text-[#5C6E6E]">{item.reason || "Manual update"}</TableCell>
+                        <TableCell className="text-[#5C6E6E]">{item.reason || "Not recorded"}</TableCell>
                       </TableRow>
                     ))
                   )}
@@ -299,6 +309,7 @@ export default function AdminInventoryPage() {
               </Table>
             </div>
           </Card>
+          )}
         </TabsContent>
       </Tabs>
     </div>

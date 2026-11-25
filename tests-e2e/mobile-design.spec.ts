@@ -56,7 +56,7 @@ test('compact cards fit every width and cart actions remain available on book de
   await cards.getByRole('link', { name: available.title, exact: true }).click();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(available.title);
   await expect(page.getByRole('button', { name: 'Save to wishlist' })).toBeVisible();
-  await expect(page.getByText(/customer reviews|rating unavailable|no ratings yet/i)).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Reader reviews' })).toHaveCount(0);
   const button = page.getByRole('button', { name: 'Add to Cart', exact: true }).first();
   await expect(button).toBeEnabled();
   expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
@@ -97,7 +97,7 @@ test('a live book detail page fits all requested viewports', async ({ page }) =>
   }
 });
 
-test('the homepage carousel advances and keeps arrows and swipe available', async ({ page, context }) => {
+test('the manual homepage shelf supports arrows, keyboard and swipe without looping', async ({ page, context }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const response = page.waitForResponse((item) => {
     const url = new URL(item.url());
@@ -136,15 +136,15 @@ test('the homepage carousel advances and keeps arrows and swipe available', asyn
     const shelfBox = (await shelf.boundingBox())!;
     expect((await previous.boundingBox())!.x).toBeLessThan(shelfBox.x);
     expect((await next.boundingBox())!.x).toBeGreaterThan(shelfBox.x + shelfBox.width);
-    await page.mouse.move(0, 0);
-    await expect.poll(() => shelf.evaluate((node) => node.scrollLeft), { timeout: 10_000 }).toBeGreaterThan(4);
-    await page.getByRole('button', { name: 'Pause book carousel' }).click();
-    await expect(page.getByRole('button', { name: 'Resume book carousel' })).toBeVisible();
-    await shelf.evaluate((node) => { node.scrollLeft = 0; });
-    await next.click();
+    await expect(previous).toBeDisabled();
+    await expect(page.getByRole('button', { name: /pause|resume book carousel/i })).toHaveCount(0);
+    await next.press('Enter');
     await expect.poll(() => shelf.evaluate((node) => node.scrollLeft)).toBeGreaterThan(0);
     await previous.click();
-    await expect.poll(() => shelf.evaluate((node) => node.scrollLeft)).toBeLessThan(2);
+    await expect(previous).toBeDisabled();
+    await shelf.evaluate(node => node.scrollTo({ left: node.scrollWidth, behavior: 'instant' }));
+    await expect(next).toBeDisabled();
+    await shelf.evaluate(node => node.scrollTo({ left: 0, behavior: 'instant' }));
   }
   await page.setViewportSize({ width: 390, height: 844 });
   await shelf.scrollIntoViewIfNeeded();
@@ -165,6 +165,25 @@ test('the homepage carousel advances and keeps arrows and swipe available', asyn
   await expect(publishBanner.getByRole('heading')).toHaveText(/\S/);
   await expect(publishBanner.getByRole('link')).toHaveText(/\S/);
   await expect(publishBanner.getByRole('link')).toHaveAttribute('href', '/publish');
+});
+
+test('a real book keeps server metadata without public ratings and review counts', async ({ page }) => {
+  const books = backendList(await backendGet('/books?limit=3'), 'books');
+  const book = books.find(item => item.slug);
+  test.skip(!book, 'No published book with a slug was returned.');
+  const reviewRequests: string[] = [];
+  page.on('request', request => {
+    const pathname = new URL(request.url()).pathname;
+    if (/\/reviews(?:\/|$)/.test(pathname)) reviewRequests.push(pathname);
+  });
+  await page.goto(`/books/${encodeURIComponent(book.slug)}`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { level: 1, name: book.title, exact: true })).toBeVisible();
+  await page.getByRole('contentinfo').scrollIntoViewIfNeeded();
+  await expect(page.getByRole('region', { name: 'Reader reviews' })).toHaveCount(0);
+  await expect(page.getByText(/\b\d+(?:\.\d+)? out of 5\b|\b\d+ reviews?\b/i)).toHaveCount(0);
+  const structuredData = await page.locator('script[type="application/ld+json"]').allTextContents();
+  expect(structuredData.join('')).not.toMatch(/"aggregateRating"|"reviewCount"/);
+  expect(reviewRequests).toEqual([]);
 });
 
 test('reduced motion keeps route content visible without a long transition', async ({ page }) => {

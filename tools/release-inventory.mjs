@@ -2,7 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
 
-const document = JSON.parse(fs.readFileSync('fulldetailedapi.md', 'utf8').replace(/^\uFEFF/, ''));
+const contractPath = process.env.HARGLIM_OPENAPI_PATH || 'fulldetailedapi.md';
+const document = JSON.parse(fs.readFileSync(contractPath, 'utf8').replace(/^\uFEFF/, ''), (key, value) =>
+  key === 'example' || key === 'examples' ? undefined : value
+);
 const files = [];
 function walk(directory) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -47,10 +50,10 @@ for (const file of files) {
     if (ts.isCallExpression(node)) {
       const target = node.expression.getText(source);
       const match = target.match(/^(?:api|axios)\.(get|post|put|patch|delete)$/);
-      const helper = ['fetchPublicCollection', 'fetchRecord'].includes(target);
+      const helper = ['fetchPublicCollection', 'fetchRecord', 'getPublic', 'rawGet'].includes(target);
       const first = node.arguments[0];
       if ((match || target === 'fetch' || helper) && first) {
-        const init = (helper ? (target === 'fetchPublicCollection' ? node.arguments[3] : undefined) : node.arguments[1])?.getText(source) || '';
+        const init = node.arguments[target === 'fetchPublicCollection' ? 3 : 1]?.getText(source) || '';
         const method = (match?.[1] || init.match(/method:\s*['"](\w+)['"]/)?.[1] || 'get').toUpperCase();
         for (const { literal, url } of pathCandidates(first, source)) {
         const documented = literal ? routes.get(`${method} ${normalize(url)}`) : undefined;
@@ -100,6 +103,7 @@ for (const screen of screens) {
 fs.mkdirSync('api-audit', { recursive: true });
 fs.writeFileSync('api-audit/release-workflow-inventory.json', JSON.stringify({
   generatedAt: new Date().toISOString(),
+  contractPath,
   scope: 'Static inventory. Documented schemas do not prove deployed behavior, authorization, or successful transactional workflows. JSX button attributes require manual context review.',
   screens, calls, modules, schemas: document.components?.schemas,
 }, null, 2) + '\n');

@@ -1,4 +1,6 @@
 "use client";
+import { adminResponse, adminRows } from "@/lib/admin-account-api";
+import { publishedNumber } from "@/lib/book-presentation";
 import { populated } from "@/lib/order-status";
 import type { OrderRecord } from "@/types/commerce-api";
 import { scheduleRequest } from "@/lib/schedule-request";
@@ -25,14 +27,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
 type DashboardData = {
-  pendingPaymentsCount: number;
-  processingOrdersCount: number;
-  pendingAuthorsCount: number;
-  pendingPublishRequests: number;
-  activeAuthorsCount: number;
-  totalBooks: number;
-  recentOrders: OrderRecord[];
-  recentAuthors: { _id?: string; email?: string; fullName?: string; id?: string; penName?: string; status?: string }[];
+  pendingPaymentsCount: number | null;
+  processingOrdersCount: number | null;
+  pendingAuthorsCount: number | null;
+  totalBooks: number | null;
+  recentOrders: OrderRecord[] | null;
+  recentAuthors: { _id?: string; email?: string; fullName?: string; id?: string; penName?: string; status?: string }[] | null;
 };
 
 export default function AdminDashboard() {
@@ -44,22 +44,29 @@ export default function AdminDashboard() {
     setLoading(true);
     setError(false);
     try {
-      const dashRes = await api.get("/admin/dashboard", { cache: "no-store" });
-      const dashData = dashRes.data?.data || dashRes.data || {};
-      const opCounts = dashData.operationalCounts || {};
-      const ordersArr = dashData.recentOrders || dashData.orders || [];
-      const authorsArr = dashData.recentAuthors || dashData.recentAuthorApplications || dashData.authorApplications || [];
-
+      const { data } = await api.get("/admin/dashboard", { cache: "no-store" });
+      adminResponse(data);
+      const dashboard = data?.data ?? data;
+      const counts = dashboard?.operationalCounts ?? {};
+      const recentOrders = dashboard?.recentOrders ?? dashboard?.orders;
+      const recentAuthors = dashboard?.recentAuthorApplications ?? dashboard?.authorApplications;
+      const [orders, authors] = await Promise.all([
+        Array.isArray(recentOrders) && recentOrders.length
+          ? recentOrders
+          : api.get("/admin/orders", { params: { limit: 5, sort: "-createdAt" }, cache: "no-store" })
+            .then(({ data }) => adminRows<OrderRecord>(data, "orders")).catch(() => null),
+        Array.isArray(recentAuthors) && recentAuthors.length
+          ? recentAuthors
+          : api.get("/admin/author-applications", { cache: "no-store" })
+            .then(({ data }) => adminRows<NonNullable<DashboardData["recentAuthors"]>[number]>(data, "applications")).catch(() => null),
+      ]);
       setDashboardData({
-        ...dashData,
-        pendingPaymentsCount: opCounts.paymentsAwaitingVerification ?? dashData.pendingPaymentsCount ?? dashData.pendingOrders ?? 0,
-        processingOrdersCount: opCounts.ordersRequiringAction ?? dashData.processingOrdersCount ?? dashData.processingOrders ?? 0,
-        pendingAuthorsCount: opCounts.pendingAuthorApplications ?? dashData.pendingAuthorsCount ?? dashData.pendingApplications ?? 0,
-        pendingPublishRequests: opCounts.pendingPublishRequests ?? 0,
-        activeAuthorsCount: opCounts.activeAuthors ?? 0,
-        totalBooks: opCounts.publishedBooks ?? dashData.totalBooks ?? dashData.booksCount ?? 0,
-        recentOrders: Array.isArray(ordersArr) ? ordersArr.slice(0, 5) : [],
-        recentAuthors: Array.isArray(authorsArr) ? authorsArr.slice(0, 5) : [],
+        pendingPaymentsCount: publishedNumber(counts.paymentsAwaitingVerification ?? dashboard?.pendingPaymentsCount),
+        processingOrdersCount: publishedNumber(counts.ordersRequiringAction ?? dashboard?.processingOrdersCount ?? dashboard?.processingOrders),
+        pendingAuthorsCount: publishedNumber(counts.pendingAuthorApplications ?? dashboard?.pendingAuthorsCount ?? dashboard?.pendingApplications),
+        totalBooks: publishedNumber(counts.publishedBooks ?? dashboard?.totalBooks ?? dashboard?.booksCount),
+        recentOrders: orders?.slice(0, 5) ?? null,
+        recentAuthors: authors?.slice(0, 5) ?? null,
       });
     } catch (err) {
       console.error("Failed to fetch admin dashboard data:", describeApiError(err));
@@ -92,12 +99,12 @@ export default function AdminDashboard() {
   }
 
   const {
-    pendingPaymentsCount = 0,
-    processingOrdersCount = 0,
-    pendingAuthorsCount = 0,
-    totalBooks = 0,
-    recentOrders = [],
-    recentAuthors = [],
+    pendingPaymentsCount = null,
+    processingOrdersCount = null,
+    pendingAuthorsCount = null,
+    totalBooks = null,
+    recentOrders = null,
+    recentAuthors = null,
   } = dashboardData || {};
 
   return (
@@ -123,7 +130,7 @@ export default function AdminDashboard() {
                   Pending Payments
                 </p>
                 <p className="text-3xl font-serif font-bold text-amber-950 mt-1">
-                  {pendingPaymentsCount}
+                  {pendingPaymentsCount ?? "Unavailable"}
                 </p>
                 <p className="text-[11px] text-amber-800 mt-1 font-medium">Require UTR Verification</p>
               </div>
@@ -143,7 +150,7 @@ export default function AdminDashboard() {
                   Orders in Processing
                 </p>
                 <p className="text-3xl font-serif font-bold text-blue-950 mt-1">
-                  {processingOrdersCount}
+                  {processingOrdersCount ?? "Unavailable"}
                 </p>
                 <p className="text-[11px] text-blue-800 mt-1 font-medium">Currently Printing / Packing</p>
               </div>
@@ -163,7 +170,7 @@ export default function AdminDashboard() {
                   Pending Author Requests
                 </p>
                 <p className="text-3xl font-serif font-bold text-purple-950 mt-1">
-                  {pendingAuthorsCount}
+                  {pendingAuthorsCount ?? "Unavailable"}
                 </p>
                 <p className="text-[11px] text-purple-800 mt-1 font-medium">Awaiting Editorial Review</p>
               </div>
@@ -183,7 +190,7 @@ export default function AdminDashboard() {
                   Total Books Catalog
                 </p>
                 <p className="text-3xl font-serif font-bold text-emerald-950 mt-1">
-                  {totalBooks}
+                  {totalBooks ?? "Unavailable"}
                 </p>
                 <p className="text-[11px] text-emerald-800 mt-1 font-medium">Published & Active</p>
               </div>
@@ -265,10 +272,10 @@ export default function AdminDashboard() {
       </div>
 
       {/* 3. RECENT ACTIVITY PREVIEWS */}
-      <div className="grid gap-8 lg:grid-cols-2">
+      <div className="grid gap-8 xl:grid-cols-2">
         {/* Recent Orders Overview */}
         <Card className="bg-white border border-[#E2E6DF] shadow-xs rounded-2xl overflow-hidden">
-          <CardHeader className="p-5 bg-[#F8F9F7] border-b border-[#E2E6DF] flex flex-row items-center justify-between">
+          <CardHeader className="p-5 bg-[#F8F9F7] border-b border-[#E2E6DF] flex flex-row flex-wrap items-center justify-between">
             <CardTitle className="text-base font-serif font-bold text-[#0F3D3E]">
               Recent Orders
             </CardTitle>
@@ -279,7 +286,7 @@ export default function AdminDashboard() {
             </Button>
           </CardHeader>
           <CardContent className="p-5">
-            {recentOrders.length > 0 ? (
+            {recentOrders?.length ? (
               <div className="space-y-3">
                 {recentOrders.map((order) => {
                   const id = order.orderNumber || order._id || order.id;
@@ -316,14 +323,14 @@ export default function AdminDashboard() {
                 })}
               </div>
             ) : (
-              <p className="text-xs text-[#5C6E6E] py-6 text-center">No orders recorded yet.</p>
+              <p className="text-xs text-[#5C6E6E] py-6 text-center">{recentOrders ? "No orders recorded yet." : "Recent orders could not load."}</p>
             )}
           </CardContent>
         </Card>
 
         {/* Recent Author Applications */}
         <Card className="bg-white border border-[#E2E6DF] shadow-xs rounded-2xl overflow-hidden">
-          <CardHeader className="p-5 bg-[#F8F9F7] border-b border-[#E2E6DF] flex flex-row items-center justify-between">
+          <CardHeader className="p-5 bg-[#F8F9F7] border-b border-[#E2E6DF] flex flex-row flex-wrap items-center justify-between">
             <CardTitle className="text-base font-serif font-bold text-[#0F3D3E]">
               Recent Author Requests
             </CardTitle>
@@ -334,7 +341,7 @@ export default function AdminDashboard() {
             </Button>
           </CardHeader>
           <CardContent className="p-5">
-            {recentAuthors.length > 0 ? (
+            {recentAuthors?.length ? (
               <div className="space-y-3">
                 {recentAuthors.map((author) => (
                   <div
@@ -362,7 +369,7 @@ export default function AdminDashboard() {
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-[#5C6E6E] py-6 text-center">No author requests recorded.</p>
+              <p className="text-xs text-[#5C6E6E] py-6 text-center">{recentAuthors ? "No author requests recorded." : "Recent author requests could not load."}</p>
             )}
           </CardContent>
         </Card>

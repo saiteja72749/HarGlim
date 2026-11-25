@@ -1,5 +1,8 @@
 "use client";
 
+import { adminResponse, adminRows } from "@/lib/admin-account-api";
+import { ErrorState } from "@/components/ui/error-state";
+import { notifyLiveChange } from "@/lib/live-sync";
 import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
@@ -32,22 +35,23 @@ type ModeratedReview = { _id: string; id?: string; rating?: number; status?: str
 export default function AdminReviewsPage() {
   const [reviews, setReviews] = useState<ModeratedReview[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [statusFilter, setStatusFilter] = useState("pending");
   const [searchQuery, setSearchQuery] = useState("");
   const [actionInProgressId, setActionInProgressId] = useState<string | null>(null);
 
   const fetchReviews = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const params: Record<string, string | number> = { limit: 50 };
       if (statusFilter !== "all") params.status = statusFilter;
 
-      const { data } = await api.get("/admin/reviews", { params });
-      const items = data?.data?.reviews || (Array.isArray(data?.data) ? data.data : []) || (Array.isArray(data) ? data : []);
-      setReviews(Array.isArray(items) ? items : []);
+      const { data } = await api.get("/admin/reviews", { params, cache: "no-store" });
+      setReviews(adminRows<ModeratedReview>(data, "reviews"));
     } catch (err) {
       console.warn("Reviews fetch notice:", describeApiError(err));
-      setReviews([]);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -59,11 +63,11 @@ export default function AdminReviewsPage() {
   const handleModerate = async (reviewId: string, newStatus: "approved" | "rejected") => {
     setActionInProgressId(reviewId);
     try {
-      await api.patch(`/admin/reviews/${reviewId}/status`, { status: newStatus });
-      toast.success(`Review ${newStatus === "approved" ? "approved" : "rejected"}!`);
-      setReviews((prev) =>
-        prev.map((r) => ((r._id || r.id) === reviewId ? { ...r, status: newStatus } : r))
-      );
+      const { data } = await api.patch(`/admin/reviews/${encodeURIComponent(reviewId)}/status`, { status: newStatus });
+      adminResponse(data);
+      notifyLiveChange("reviews");
+      await fetchReviews();
+      toast.success(newStatus === "approved" ? "Review approved." : "Review rejected.");
     } catch (caughtError) {
       const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to moderate review.");
@@ -77,9 +81,11 @@ export default function AdminReviewsPage() {
     if (!window.confirm("Are you sure you want to permanently delete this review?")) return;
     setActionInProgressId(reviewId);
     try {
-      await api.delete(`/admin/reviews/${reviewId}`);
+      const { data } = await api.delete(`/admin/reviews/${encodeURIComponent(reviewId)}`);
+      adminResponse(data);
+      notifyLiveChange("reviews");
+      await fetchReviews();
       toast.success("Review deleted successfully.");
-      setReviews((prev) => prev.filter((r) => (r._id || r.id) !== reviewId));
     } catch (caughtError) {
       const err = describeApiError(caughtError);
       toast.error(err.response?.data?.message || "Failed to delete review.");
@@ -140,7 +146,7 @@ export default function AdminReviewsPage() {
 
       {/* Reviews Table */}
       <Card className="border border-[#E2E6DF] bg-white rounded-2xl shadow-2xs overflow-hidden">
-        <div className="overflow-x-auto">
+        <div>
           <Table>
             <TableHeader className="bg-[#F8F9F7]">
               <TableRow>
@@ -160,6 +166,10 @@ export default function AdminReviewsPage() {
                     <p className="text-xs text-[#5C6E6E] mt-2">Loading reviews queue...</p>
                   </TableCell>
                 </TableRow>
+              ) : loadError ? (
+                <TableRow><TableCell colSpan={6} className="whitespace-normal">
+                  <ErrorState title="Could not load reviews" onRetry={fetchReviews} />
+                </TableCell></TableRow>
               ) : filteredReviews.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="h-32 text-center text-xs text-[#5C6E6E]">

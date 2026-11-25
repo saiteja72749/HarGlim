@@ -3,9 +3,11 @@
 import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import api from "@/lib/api";
+import { accountActive, accountId, accountRole, adminResponse, adminRows, adminUserRecord, verifyAdminAccount } from "@/lib/admin-account-api";
+import { notifyLiveChange } from "@/lib/live-sync";
 import { announceInvite, resendAuthorInvite } from "@/lib/admin-authors";
 import { ErrorState } from "@/components/ui/error-state";
 import {
@@ -67,16 +69,21 @@ const getStatusColor = (status: string) => {
 };
 
 const getRoleColor = (role: string) => {
-  switch (role) {
-    case "Admin":
+  switch (role.toLowerCase()) {
+    case "admin":
       return "bg-primary text-primary-foreground";
-    case "Author":
+    case "author":
       return "bg-blue-500/10 text-blue-600";
-    case "User":
+    case "reader":
       return "bg-muted text-muted-foreground";
     default:
       return "bg-muted text-muted-foreground";
   }
+};
+
+const accountStatus = (user: AdminUser) => {
+  const active = accountActive(user);
+  return active === undefined ? "Unavailable" : active ? "Active" : "Suspended";
 };
 
 type AdminUser = {
@@ -95,6 +102,8 @@ type AdminUser = {
 };
 
 export default function AdminUsersPage() {
+  const pendingAccounts = useRef(new Set<string>());
+  const pendingCreate = useRef(false);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -113,9 +122,8 @@ export default function AdminUsersPage() {
         params.isActive = statusFilter === "Active" ? "true" : "false";
       }
 
-      const { data } = await api.get("/admin/users", { params });
-      const items = data?.data?.users || (Array.isArray(data?.data) ? data.data : []) || (Array.isArray(data) ? data : []);
-      setUsers(Array.isArray(items) ? items : []);
+      const { data } = await api.get("/admin/users", { params, cache: "no-store" });
+      setUsers(adminRows<AdminUser>(data, "users").filter(user => Boolean(accountId(user))));
     } catch (err) {
       console.error("Failed to fetch admin users:", describeApiError(err));
       setError(true);
@@ -132,9 +140,9 @@ export default function AdminUsersPage() {
     const matchesSearch =
       name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       email.toLowerCase().includes(searchQuery.toLowerCase());
-    const userRole = (user.role || "user").toLowerCase();
+    const userRole = accountRole(user.role);
     const matchesRole = roleFilter === "all" || userRole === roleFilter.toLowerCase();
-    const userStatus = user.status || (user.isActive !== false ? "Active" : "Suspended");
+    const userStatus = accountStatus(user);
     const matchesStatus = statusFilter === "all" || userStatus.toLowerCase() === statusFilter.toLowerCase();
     return matchesSearch && matchesRole && matchesStatus;
   });
@@ -155,6 +163,7 @@ export default function AdminUsersPage() {
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (pendingCreate.current) return;
     // An author needs no password: leaving it empty emails them a set-password invitation.
     const inviteAuthor = createForm.role === "author" && !createForm.password;
     if (!createForm.name.trim() || !createForm.email.trim() || (!createForm.password && !inviteAuthor)) {
@@ -162,6 +171,7 @@ export default function AdminUsersPage() {
       return;
     }
 
+    pendingCreate.current = true;
     setIsSubmittingCreate(true);
     try {
       const payload = {
@@ -172,25 +182,17 @@ export default function AdminUsersPage() {
         isActive: Boolean(createForm.isActive),
       };
 
-      const res = await api.post("/admin/users", payload);
-      let createdUser =
-        res.data?.data?.user ||
-        res.data?.user ||
-        res.data?.data;
-      announceInvite(createdUser);
-
-      if (!createdUser) {
-        createdUser = {
-          _id: `user-${Date.now()}`,
-          name: createForm.name.trim(),
-          email: createForm.email.trim(),
-          role: createForm.role,
-          isActive: createForm.isActive,
-          status: createForm.isActive ? "Active" : "Suspended",
-        };
-      }
-
-      toast.success(`User "${createForm.name}" created successfully! 🎉`);
+      const { data } = await api.post("/admin/users", payload);
+      const created = adminUserRecord(data);
+      const id = accountId(created);
+      if (!id) throw new Error("The backend did not return a confirmed account ID. Refresh Users & Accounts before retrying.");
+      await verifyAdminAccount(id, payload);
+      announceInvite({
+        email: typeof created.email === "string" ? created.email : payload.email,
+        invited: created.invited === true,
+        emailSent: typeof created.emailSent === "boolean" ? created.emailSent : undefined,
+      });
+      toast.success(`User "${createForm.name}" created.`);
       setIsCreateModalOpen(false);
       setCreateForm({
         name: "",
@@ -206,9 +208,10 @@ export default function AdminUsersPage() {
       if (err.response?.status === 409) {
         toast.error("A user with this email address already exists (409 Conflict).");
       } else {
-        toast.error(err.response?.data?.message || "Failed to create user.");
+        toast.error(err.response?.data?.message || err.message);
       }
     } finally {
+      pendingCreate.current = false;
       setIsSubmittingCreate(false);
     }
   };
@@ -236,26 +239,31 @@ export default function AdminUsersPage() {
       toast.error("Password must be at least 6 characters long.");
       return;
     }
-    const targetUserId = resetPasswordUser.id || resetPasswordUser._id;
+    const targetUserId = accountId(resetPasswordUser);
+    if (!targetUserId || pendingAccounts.current.has(targetUserId)) return;
+    pendingAccounts.current.add(targetUserId);
     setIsSubmittingReset(true);
     try {
-      await api.post(`/admin/users/${targetUserId}/reset-password`, {
+      const { data } = await api.post(`/admin/users/${encodeURIComponent(targetUserId)}/reset-password`, {
         password: newPasswordInput,
       });
+      adminResponse(data);
       toast.success(`Password reset successfully for ${resetPasswordUser.name}! 🔑`);
       setResetPasswordUser(null);
       setNewPasswordInput("");
     } catch (caughtError) {
       const err = describeApiError(caughtError);
       console.error("Password reset error:", describeApiError(err));
-      toast.error(err.response?.data?.message || "Failed to reset password.");
+      toast.error(err.response?.data?.message || err.message);
     } finally {
+      pendingAccounts.current.delete(targetUserId);
       setIsSubmittingReset(false);
     }
   };
 
   const handleDeleteUser = async (id: string, name: string) => {
-    if (currentUserId && (id === currentUserId || String(id) === String(currentUserId))) {
+    if (!id || pendingAccounts.current.has(id)) return;
+    if (id === currentUserId) {
       toast.error("You cannot delete or deactivate your own logged-in account.");
       return;
     }
@@ -267,17 +275,22 @@ export default function AdminUsersPage() {
     ) {
       return;
     }
+    pendingAccounts.current.add(id);
     setDeletingId(id);
     try {
-      await api.delete(`/admin/users/${id}`);
+      const { data } = await api.delete(`/admin/users/${encodeURIComponent(id)}`);
+      adminResponse(data);
+      await verifyAdminAccount(id, { isActive: false });
+      notifyLiveChange("account-access", false);
 
       toast.success(`User "${name}" deactivated (soft deleted) successfully.`);
       await fetchUsers();
     } catch (caughtError) {
       const err = describeApiError(caughtError);
       console.error("Failed to delete user:", describeApiError(err));
-      toast.error(err.response?.data?.message || "Failed to deactivate user.");
+      toast.error(err.response?.data?.message || err.message);
     } finally {
+      pendingAccounts.current.delete(id);
       setDeletingId(null);
     }
   };
@@ -287,24 +300,36 @@ export default function AdminUsersPage() {
     setEditForm({
       name: user.name || user.fullName || "",
       email: user.email || "",
-      role: (user.role || "user").toLowerCase(),
-      status: user.status || (user.isActive !== false ? "Active" : "Suspended"),
+      role: accountRole(user.role),
+      status: accountStatus(user),
     });
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
-    const userId = editingUser.id || editingUser._id;
+    const userId = accountId(editingUser);
+    if (!userId || pendingAccounts.current.has(userId)) return;
+    if (userId === currentUserId) {
+      toast.error("Ask another administrator to change your account role or status.");
+      return;
+    }
+    const role = accountRole(editForm.role);
+    if (!["reader", "author", "admin", "visitor"].includes(role) || !["Active", "Suspended"].includes(editForm.status)) {
+      toast.error("Select a valid role and account status.");
+      return;
+    }
+    pendingAccounts.current.add(userId);
     setIsSubmittingEdit(true);
 
     try {
       // PATCH /admin/users/{id} accepts role and isActive/status only; name and email are
       // owned by the user's own profile, so they are shown read-only in this form.
-      await api.patch(`/admin/users/${userId}`, {
-        role: editForm.role.toLowerCase(),
-        isActive: editForm.status === "Active",
-      });
+      const expected = { role, isActive: editForm.status === "Active" };
+      const { data } = await api.patch(`/admin/users/${encodeURIComponent(userId)}`, expected);
+      adminResponse(data);
+      await verifyAdminAccount(userId, expected);
+      notifyLiveChange("account-access", false);
 
       toast.success(`User details for "${editForm.name}" updated successfully!`);
       setEditingUser(null);
@@ -312,30 +337,33 @@ export default function AdminUsersPage() {
     } catch (caughtError) {
       const err = describeApiError(caughtError);
       console.error("Failed to update user details:", describeApiError(err));
-      toast.error(err.response?.data?.message || "Failed to update user details in backend.");
+      toast.error(err.response?.data?.message || err.message);
     } finally {
+      pendingAccounts.current.delete(userId);
       setIsSubmittingEdit(false);
     }
   };
 
   const handleSuspend = async (id: string, currentStatus: string) => {
-    const isSuspending = currentStatus === "Active";
-    const newStatus = isSuspending ? "Suspended" : "Active";
+    if (!id || pendingAccounts.current.has(id) || currentStatus === "Unavailable") return;
+    if (id === currentUserId) {
+      toast.error("Ask another administrator to change your account status.");
+      return;
+    }
+    const isActive = currentStatus === "Suspended";
+    pendingAccounts.current.add(id);
     try {
-      // Documented: PATCH /admin/users/{id}/status with UserStatusRequest { isActive }.
-      // (Suspending is how admins block an author now that dashboard entitlements don't gate access.)
-      await api.patch(`/admin/users/${id}/status`, { isActive: !isSuspending }).catch((err) => {
-        if (err?.response?.status === 404 || err?.response?.status === 405) {
-          return api.put(`/admin/users/${id}`, { isActive: !isSuspending });
-        }
-        throw err;
-      });
-
-      toast.success(`User status updated to ${newStatus}`);
+      const { data } = await api.patch(`/admin/users/${encodeURIComponent(id)}/status`, { isActive });
+      adminResponse(data);
+      await verifyAdminAccount(id, { isActive });
+      notifyLiveChange("account-access", false);
+      toast.success(isActive ? "Account activated." : "Account suspended.");
       await fetchUsers();
-    } catch (err) {
-      console.error("Failed to update user status:", describeApiError(err));
-      toast.error("Failed to update user status");
+    } catch (caughtError) {
+      const error = describeApiError(caughtError);
+      toast.error(error.response?.data.message || error.message);
+    } finally {
+      pendingAccounts.current.delete(id);
     }
   };
 
@@ -395,7 +423,7 @@ export default function AdminUsersPage() {
               </div>
               <div>
                 <p className="text-2xl font-bold">
-                  {users.filter((u) => u.status !== "Suspended").length}
+                  {users.filter((u) => accountActive(u) === true).length}
                 </p>
                 <p className="text-sm text-muted-foreground">Active</p>
               </div>
@@ -410,7 +438,7 @@ export default function AdminUsersPage() {
               </div>
               <div>
                 <p className="text-2xl font-bold">
-                  {users.filter((u) => u.role === "Author").length}
+                  {users.filter((u) => accountRole(u.role) === "author").length}
                 </p>
                 <p className="text-sm text-muted-foreground">Authors</p>
               </div>
@@ -425,7 +453,7 @@ export default function AdminUsersPage() {
               </div>
               <div>
                 <p className="text-2xl font-bold">
-                  {users.filter((u) => u.status === "Suspended").length}
+                  {users.filter((u) => accountActive(u) === false).length}
                 </p>
                 <p className="text-sm text-muted-foreground">Suspended</p>
               </div>
@@ -454,7 +482,7 @@ export default function AdminUsersPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Roles</SelectItem>
-                <SelectItem value="User">User</SelectItem>
+                <SelectItem value="reader">Reader</SelectItem>
                 <SelectItem value="Author">Author</SelectItem>
                 <SelectItem value="Admin">Admin</SelectItem>
               </SelectContent>
@@ -477,7 +505,7 @@ export default function AdminUsersPage() {
       {/* Users Table */}
       <Card>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
+          <div>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -492,11 +520,11 @@ export default function AdminUsersPage() {
               </TableHeader>
               <TableBody>
                 {filteredUsers.map((user, index) => {
-                  const status = user.status || "Active";
-                  const role = user.role || "User";
+                  const status = accountStatus(user);
+                  const role = accountRole(user.role) || "Unavailable";
                   return (
                     <motion.tr
-                      key={user.id || user._id}
+                      key={accountId(user)}
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ delay: index * 0.05 }}
@@ -518,9 +546,9 @@ export default function AdminUsersPage() {
                       <TableCell>
                         <Badge className={getRoleColor(role)}>{role}</Badge>
                       </TableCell>
-                      <TableCell className="text-right">{user.orders || 0}</TableCell>
+                      <TableCell className="text-right">{user.orders ?? "Unavailable"}</TableCell>
                       <TableCell className="text-right">
-                        ₹{(user.spent || 0).toLocaleString()}
+                        {user.spent == null ? "Unavailable" : `₹${user.spent.toLocaleString("en-IN")}`}
                       </TableCell>
                       <TableCell>
                         {(user.createdAt || user.joinDate) ? new Date(user.createdAt || user.joinDate || "").toLocaleDateString() : "Unavailable"}
@@ -544,12 +572,12 @@ export default function AdminUsersPage() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => handleDeleteUser(user.id || user._id, user.name || "User")}
-                          disabled={deletingId === (user.id || user._id)}
+                          onClick={() => handleDeleteUser(accountId(user), user.name || "User")}
+                          disabled={deletingId === (accountId(user))}
                           title="Delete User"
                           className="h-8 w-8 text-destructive hover:bg-destructive/10"
                         >
-                          {deletingId === (user.id || user._id) ? (
+                          {deletingId === (accountId(user)) ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <Trash2 className="h-4 w-4" />
@@ -577,7 +605,7 @@ export default function AdminUsersPage() {
                             {String(role).toLowerCase() === "author" && (
                               <DropdownMenuItem
                                 onClick={() =>
-                                  resendAuthorInvite(user.id || user._id).catch((err: unknown) =>
+                                  resendAuthorInvite(accountId(user)).catch((err: unknown) =>
                                     toast.error(describeApiError(err).response?.data.message || "Could not resend the invitation.")
                                   )
                                 }
@@ -596,14 +624,15 @@ export default function AdminUsersPage() {
                                   ? "text-amber-600"
                                   : "text-emerald-600"
                               }
-                              onClick={() => handleSuspend(user.id || user._id, status)}
+                              disabled={status === "Unavailable" || accountId(user) === currentUserId}
+                              onClick={() => handleSuspend(accountId(user), status)}
                             >
                               <Ban className="mr-2 h-4 w-4" />
                               {status !== "Suspended" ? "Suspend Account" : "Activate Account"}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-destructive font-semibold"
-                              onClick={() => handleDeleteUser(user.id || user._id, user.name || "User")}
+                              onClick={() => handleDeleteUser(accountId(user), user.name || "User")}
                             >
                               <Trash2 className="mr-2 h-4 w-4" />
                               Delete User
@@ -676,9 +705,10 @@ export default function AdminUsersPage() {
                       <SelectValue placeholder="Role" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="user">User / Reader</SelectItem>
+                      <SelectItem value="reader">Reader</SelectItem>
                       <SelectItem value="author">Author</SelectItem>
                       <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="visitor">Visitor</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
