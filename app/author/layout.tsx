@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, BookOpen, CircleDollarSign, FileText, LayoutDashboard, Menu, UserCircle } from "lucide-react";
+import { BarChart3, BookOpen, CircleDollarSign, FilePlus2, FileText, LayoutDashboard, Menu, UserCircle } from "lucide-react";
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -13,6 +13,7 @@ import { useState } from "react";
 const links = [
   { href: "/author", label: "Overview", icon: LayoutDashboard },
   { href: "/author/books", label: "My Books", icon: BookOpen },
+  { href: "/author/manuscripts/new", label: "Submit Manuscript", icon: FilePlus2 },
   { href: "/author/manuscripts", label: "Manuscripts", icon: FileText },
   { href: "/author/analytics", label: "Performance & Analytics", icon: BarChart3 },
   { href: "/author/royalties", label: "Royalties", icon: CircleDollarSign },
@@ -21,6 +22,8 @@ const links = [
 
 function StudioNavigation({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
+  const active = links.find((link) => pathname === link.href) ??
+    links.find((link) => link.href !== "/author" && pathname.startsWith(link.href + "/"));
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
 
@@ -32,7 +35,7 @@ function StudioNavigation({ onNavigate }: { onNavigate?: () => void }) {
       </div>}
       <nav aria-label="Author Studio" className="space-y-1">
         {links.map(({ href, label, icon: Icon }) => {
-          const selected = pathname === href || (href !== "/author" && pathname.startsWith(href + "/"));
+          const selected = active?.href === href;
           return <Link key={href} href={href} aria-current={selected ? "page" : undefined} onNavigate={onNavigate}
             className={cn("flex min-h-11 items-center gap-3 rounded-lg border-l-4 px-3 text-sm font-medium focus-visible:outline-white",
               selected ? "border-secondary bg-white/10 text-secondary" : "border-transparent text-white hover:bg-white/10")}>

@@ -1,11 +1,12 @@
 import bundleAnalyzer from '@next/bundle-analyzer'
 import { IMAGE_HOSTS } from './config/image-hosts.mjs'
+import { API_URL } from './config/backend.mjs'
 
 const withBundleAnalyzer = bundleAnalyzer({
   enabled: process.env.ANALYZE === 'true',
 })
 
-const apiOrigin = new URL(process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api').origin
+const apiOrigin = new URL(API_URL).origin
 
 /** @type {import('next').NextConfig} */
 
@@ -39,6 +40,7 @@ const nextConfig = {
       { source: '/author/add-book', destination: '/author/manuscripts/new', permanent: true },
       { source: '/author/book-performance', destination: '/author/analytics#performance', permanent: true },
       { source: '/author/royalty-settlements', destination: '/author/royalties#settlements', permanent: true },
+      { source: '/checkout/cart', destination: '/cart', permanent: true },
       { source: '/categories/:slug', destination: '/books?category=:slug', permanent: true },
       { source: '/categories', destination: '/books', permanent: true },
       // Same page as /reset-password: invitation emails may say "set password".

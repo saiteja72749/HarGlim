@@ -2,9 +2,10 @@
 
 import type { PaymentRecord, InvoiceRecord, OrderRecord } from "@/types/commerce-api";
 import { scheduleRequest } from "@/lib/schedule-request";
+import { onLiveChange } from "@/lib/live-sync";
 import { describeApiError } from "@/lib/api-error";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   CreditCard,
@@ -155,6 +156,8 @@ const getFriendlyStatus = (status: string | undefined) => {
 
 export default function PaymentsPage() {
   const { user } = useAuthStore();
+  const userId = user?._id || user?.id;
+  const paymentRequest = useRef<AbortController | null>(null);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -164,8 +167,11 @@ export default function PaymentsPage() {
   const [orderNumbers, setOrderNumbers] = useState<Record<string, string>>({});
 
   const fetchPayments = useCallback(async () => {
-    if (!user?._id && !user?.id) return;
-    const userId = user._id || user.id;
+    if (!userId) return;
+    paymentRequest.current?.abort();
+    const controller = new AbortController();
+    paymentRequest.current = controller;
+    const signal = controller.signal;
 
     setLoading(true);
     setError(false);
@@ -173,9 +179,10 @@ export default function PaymentsPage() {
       // Filtering happens client-side: the backend status values (PAYMENT_VERIFIED, QR_GENERATED...)
       // don't match the old filter values (VERIFIED, INTENT_CREATED...), so server filtering returned nothing.
       const [res, ordersRes] = await Promise.all([
-        api.get(`/users/${userId}/payments`, { params: { page: 1, limit: 100 }, cache: "no-store" }),
-        api.get(`/users/${userId}/orders`, { params: { limit: 100 } }).catch(() => null),
+        api.get(`/users/${userId}/payments`, { params: { page: 1, limit: 100 }, signal, cache: "no-store" }),
+        api.get(`/users/${userId}/orders`, { params: { limit: 100 }, signal }).catch(() => null),
       ]);
+      if (signal.aborted) return;
       const list = extractList<PaymentRecord>(res.data, "payments").sort(
         (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
       );
@@ -188,17 +195,22 @@ export default function PaymentsPage() {
       });
       setOrderNumbers(numbers);
     } catch (caughtError) {
+      if (signal.aborted) return;
       const err = describeApiError(caughtError);
       console.warn("Failed to fetch user payments:", describeApiError(err));
       setPayments([]);
       setError(true);
       toast.error(err?.response?.data?.message || "Could not load your payments. Please try again.");
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  }, [user]);
+  }, [userId]);
 
-  useEffect(() => scheduleRequest(fetchPayments), [fetchPayments]);
+  useEffect(() => {
+    const cancel = scheduleRequest(fetchPayments);
+    const unsubscribe = onLiveChange("reader-payments", () => void fetchPayments());
+    return () => { cancel(); unsubscribe(); paymentRequest.current?.abort(); };
+  }, [fetchPayments]);
 
   const filteredPayments = payments.filter((payment) => {
     const payId = (payment._id || payment.id || "").toLowerCase();

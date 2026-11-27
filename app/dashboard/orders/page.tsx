@@ -4,6 +4,7 @@ import type { OrderRecord, PaymentRecord, InvoiceRecord } from "@/types/commerce
 import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
+import { onLiveChange } from "@/lib/live-sync";
 import { Suspense, useRef, useState, useEffect, useCallback } from "react";
 import Image from '@/components/ui/backend-image';
 import Link from "next/link";
@@ -167,7 +168,9 @@ function OrdersContent() {
   const focusedOrder = useSearchParams().get("orderId");
   const inFlightUtr = useRef(new Set<string>());
 
+  const userId = useAuthStore((state) => state.user?._id || state.user?.id);
   const { user } = useAuthStore();
+  const orderRequest = useRef<AbortController | null>(null);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -191,8 +194,10 @@ function OrdersContent() {
   };
 
   const fetchOrders = useCallback(async () => {
-    if (!user?._id && !user?.id) return;
-    const userId = user._id || user.id;
+    if (!userId || (useAuthStore.getState().user?._id || useAuthStore.getState().user?.id) !== userId) return;
+    orderRequest.current?.abort();
+    const controller = new AbortController();
+    orderRequest.current = controller;
     setLoading(true);
     setError(false);
 
@@ -200,7 +205,7 @@ function OrdersContent() {
       // Backend paginates both lists (default limit 10). Without an explicit limit,
       // shipments for older orders were never returned, so their tracking ID was missing.
       // no-store: tracking is assigned by admin at any time; skip the 30s GET cache.
-      const listConfig = { params: { limit: 100 }, cache: "no-store" as const };
+      const listConfig = { params: { limit: 100 }, cache: "no-store" as const, signal: controller.signal };
       const [ordersRes, shipmentsRes, paymentsRes] = await Promise.allSettled([
         api.get(`/users/${userId}/orders`, listConfig),
         api.get(`/users/${userId}/shipments`, listConfig),
@@ -209,6 +214,7 @@ function OrdersContent() {
         api.get(`/users/${userId}/payments`, listConfig),
       ]);
 
+      if (controller.signal.aborted) return;
       if (ordersRes.status !== "fulfilled") {
         throw ordersRes.reason;
       }
@@ -221,20 +227,35 @@ function OrdersContent() {
       setPaymentsByOrder(indexPaymentsByOrder(payments));
       setOrders(mergeShipmentsIntoOrders(list, shipments));
     } catch (err) {
+      if (controller.signal.aborted) return;
       console.error("Failed to fetch user orders:", describeApiError(err));
       setError(true);
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
-  }, [user]);
+  }, [userId]);
 
-  useEffect(() => scheduleRequest(fetchOrders), [fetchOrders]);
+  useEffect(() => {
+    const cancel = scheduleRequest(fetchOrders);
+    return () => { cancel(); orderRequest.current?.abort(); };
+  }, [fetchOrders]);
 
   // On expand: GET /orders/{_id}/tracking returns { shipment, trackingHistory }.
   // 404 just means the shipment isn't created yet (before payment verification + invoice).
   const [trackingByOrder, setTrackingByOrder] = useState<
     Record<string, { state: "loading" | "ready" | "none"; history: ReturnType<typeof getTrackingHistory> }>
   >({});
+  useEffect(() => onLiveChange("shipments", (reason) => {
+    if (reason === "change") {
+      setTrackingByOrder({});
+      setExpandedOrder(null);
+    }
+    void fetchOrders();
+  }, 60_000), [fetchOrders]);
+  useEffect(() => onLiveChange("reader-payments", (reason) => {
+    if (reason === "change") void fetchOrders();
+  }), [fetchOrders]);
+
   const loadOrderShipment = async (order: OrderRecord) => {
     const orderMongoId = String(order._id || order.id || "");
     if (!orderMongoId || trackingByOrder[orderMongoId]?.state === "loading") return;

@@ -1,8 +1,8 @@
-import { formatINR } from "@/lib/author-dashboard";
-import type { ManualRoyaltyStatement } from "@/lib/manual-royalties";
+import { formatManualRoyalty, type ManualRoyaltyStatement } from "@/lib/manual-royalties";
 
 /** Read-only statement table; shared shape with the author's Royalties page. */
 export function ManualRoyaltyTable({ statement }: { statement: ManualRoyaltyStatement }) {
+  const format = (amount: number) => formatManualRoyalty(amount, statement.currency);
   return (
     <div className="overflow-x-auto rounded-lg border border-[#E2E6DF]">
       <table className="w-full text-left text-xs">
@@ -18,9 +18,9 @@ export function ManualRoyaltyTable({ statement }: { statement: ManualRoyaltyStat
           {statement.items.map((item, i) => (
             <tr key={`${item.bookId || item.bookTitle}-${i}`}>
               <td className="p-2 font-medium text-[#0F3D3E]">{item.bookTitle}</td>
-              <td className="p-2 text-right tabular-nums">{formatINR(item.royaltyPerBook)}</td>
+              <td className="p-2 text-right tabular-nums">{format(item.royaltyPerBook)}</td>
               <td className="p-2 text-right tabular-nums">{item.unitsSold.toLocaleString("en-IN")}</td>
-              <td className="p-2 text-right tabular-nums font-semibold text-emerald-700">{formatINR(item.totalRoyalty)}</td>
+              <td className="p-2 text-right tabular-nums font-semibold text-emerald-700">{format(item.totalRoyalty)}</td>
             </tr>
           ))}
         </tbody>
@@ -28,7 +28,7 @@ export function ManualRoyaltyTable({ statement }: { statement: ManualRoyaltyStat
           <tr>
             <td className="p-2" colSpan={2}>Total</td>
             <td className="p-2 text-right tabular-nums">{statement.totalUnits.toLocaleString("en-IN")}</td>
-            <td className="p-2 text-right tabular-nums text-emerald-700">{formatINR(statement.totalRoyalty)}</td>
+            <td className="p-2 text-right tabular-nums text-emerald-700">{format(statement.totalRoyalty)}</td>
           </tr>
         </tfoot>
       </table>

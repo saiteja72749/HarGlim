@@ -1,10 +1,11 @@
 ﻿"use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, Search, ShoppingCart, User } from "lucide-react";
+import { Menu, Search, ShoppingCart } from "lucide-react";
 import Image from "@/components/ui/backend-image";
+import { AuthorAvatar } from "@/components/authors/author-avatar";
 import logo from "@/public/logo.png";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,7 +33,6 @@ const navLinks = [
 ];
 
 export function Navbar() {
-  const headerRef = useRef<HTMLElement>(null);
   const { content } = useSiteContent();
   const pathname = usePathname();
   const [openPath, setOpenPath] = useState<string | null>(null);
@@ -43,31 +43,18 @@ export function Navbar() {
   const account = hydrated && isAuthenticated ? user : null;
   const isHiddenRoute = /^\/(admin|author|login|register)(\/|$)/.test(pathname ?? "");
 
-  useEffect(() => {
-    const header = headerRef.current;
-    if (!header) return;
-    const update = () => document.documentElement.style.setProperty("--site-header-height", `${header.offsetHeight}px`);
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(header);
-    return () => {
-      observer.disconnect();
-      document.documentElement.style.removeProperty("--site-header-height");
-    };
-  }, [isHiddenRoute]);
-
   if (isHiddenRoute) return null;
 
   const role = account?.role;
   const dashboard = role === "admin" ? { href: "/admin", label: "Admin Dashboard" }
     : role === "author" ? { href: "/author", label: "Author Studio" }
     : { href: "/dashboard", label: "Reader Dashboard" };
-  const profile = role === "admin" ? "/admin/users" : role === "author" ? "/author/settings" : "/dashboard/profile";
   const redirect = pathname && pathname !== "/" ? `?redirect=${encodeURIComponent(pathname)}` : "";
   const accountLinks = account ? [
     dashboard,
-    ...(role === "admin" ? [] : [{ href: "/dashboard/orders", label: "My Orders" }]),
-    { href: profile, label: role === "author" ? "Profile Settings" : "Profile" },
+    ...(role === "reader" || role === "author" ? [{ href: "/dashboard/orders", label: "My Orders" }] : []),
+    ...(role === "reader" ? [{ href: "/dashboard/profile", label: "Profile" }] : []),
+    ...(role === "author" ? [{ href: "/author/settings", label: "Profile Settings" }] : []),
   ] : [
     { href: `/login${redirect}`, label: "Login" },
     { href: `/register${redirect}`, label: "Register" },
@@ -92,7 +79,7 @@ export function Navbar() {
   });
 
   return (
-    <header ref={headerRef} className="sticky top-0 z-40 border-b border-border bg-background">
+    <header className="relative z-40 shrink-0 border-b border-border bg-background">
       {hydrated && content?.announcementActive && content.announcementText && (
         <p className="bg-primary px-4 py-2 text-center text-sm font-medium text-primary-foreground [overflow-wrap:anywhere]">
           {content.announcementText}
@@ -120,7 +107,7 @@ export function Navbar() {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="size-11" aria-label={account ? `Account for ${account.name}` : "Account"}>
-                <User aria-hidden="true" />
+                <AuthorAvatar author={account ?? {}} className="size-7 text-xs" sizes="28px" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" sideOffset={8} collisionPadding={12} className="z-50 w-56 max-w-[calc(100vw-1.5rem)]">

@@ -31,6 +31,14 @@ const fields = [
   { id: "country", label: "Country", autoComplete: "country-name" },
 ] as const;
 
+type CheckoutBody = {
+  items: { book: string; quantity: number }[];
+  shippingAddress: Omit<typeof emptyAddress, "addressLine2"> & { addressLine2?: string };
+  customerEmail: string;
+  customerPhone: string;
+  paymentMethod: "UPI";
+};
+
 type ConfirmedOrder = {
   id: string;
   number: string;
@@ -58,6 +66,7 @@ function CheckoutForm() {
   const [saveAsDefault, setSaveAsDefault] = useState(false);
   const addressEdited = useRef(false);
   const busy = useRef(false);
+  const checkoutAttempt = useRef<{ body: CheckoutBody; key: string; ownerId?: string }>(null);
   const [submitting, setSubmitting] = useState(false);
   const [order, setOrder] = useState<ConfirmedOrder | null>(null);
   const [uncertainResponse, setUncertain] = useState(false);
@@ -92,10 +101,13 @@ function CheckoutForm() {
     setAddress({ ...emptyAddress, ...saved, fullName: saved?.fullName || name, email: saved?.email || email });
   };
 
-  const confirmOrder = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (busy.current || order || uncertain || !items.length) return;
-    const shippingAddress = {
+  const confirmOrder = async (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+    const ownerId = user?._id || user?.id;
+    const previous = checkoutAttempt.current;
+    const retry = event ? null : previous;
+    if (busy.current || order || (!retry && (uncertain || !items.length)) || (retry && retry.ownerId !== ownerId)) return;
+    const shippingAddress = retry?.body.shippingAddress ?? {
       fullName: address.fullName.trim(), email: address.email.trim(), phone: address.phone.trim(),
       addressLine1: address.addressLine1.trim(), addressLine2: address.addressLine2.trim(),
       city: address.city.trim(), state: address.state.trim(), postalCode: address.postalCode.trim(), country: address.country.trim(),
@@ -117,13 +129,17 @@ function CheckoutForm() {
     setSubmitting(true);
     setError("");
     try {
-      const { data } = await api.post("/orders", {
-        items: items.map((item) => ({ book: item.book._id || item.book.id, quantity: item.quantity })),
+      const body: CheckoutBody = retry?.body ?? {
+        items: items.map((item) => ({ book: item.book._id || item.book.id || "", quantity: item.quantity })),
         shippingAddress: { ...shippingAddress, addressLine2: shippingAddress.addressLine2 || undefined },
         customerEmail: shippingAddress.email,
         customerPhone: shippingAddress.phone,
         paymentMethod: "UPI",
-      });
+      };
+      const sameRequest = previous?.ownerId === ownerId && JSON.stringify(previous?.body) === JSON.stringify(body);
+      const attempt = sameRequest && previous ? previous : { body, ownerId, key: `checkout-${globalThis.crypto.randomUUID()}` };
+      checkoutAttempt.current = attempt;
+      const { data } = await api.post("/orders", attempt.body, { headers: { "Idempotency-Key": attempt.key } });
       const envelope = record(data);
       const payload = record(envelope.data ?? data);
       const createdOrder = record(payload.order ?? payload);
@@ -148,14 +164,14 @@ function CheckoutForm() {
       });
       window.history.replaceState(null, "", `/checkout/checkout?orderId=${encodeURIComponent(id)}`);
       // Keep any quantities added to the cart while the order request was pending.
-      const ordered = new Map(items.map(({ book, quantity }) => [book._id, quantity]));
+      const ordered = new Map(attempt.body.items.map(({ book, quantity }) => [book, quantity]));
       useCartStore.setState((state) => ({
         items: state.items.flatMap((item) => {
-          const remaining = item.quantity - (ordered.get(item.book._id) || 0);
+          const remaining = item.quantity - (ordered.get(item.book._id || item.book.id || "") || 0);
           return remaining > 0 ? [{ ...item, quantity: remaining }] : [];
         }),
       }));
-      if (saveAsDefault && addresses) {
+      if (!retry && saveAsDefault && addresses) {
         try {
           const latest = await fetchSavedAddresses();
           const next = withDefaultAddress(latest, { ...shippingAddress, _id: selectedAddressId || undefined });
@@ -170,7 +186,7 @@ function CheckoutForm() {
     } catch (cause) {
       const failure = describeApiError(cause);
       const status = failure.response?.status;
-      if (!status || status >= 500 || status === 408) {
+      if (!status || status >= 500 || status === 408 || record(failure.response?.data).error === "CHECKOUT_RETRY_REQUIRED") {
         setUncertain(true);
         setError(orderRecoveryMessage);
         window.history.replaceState(null, "", "/checkout/checkout?orderCheck=1");
@@ -211,7 +227,7 @@ function CheckoutForm() {
     if (createdId) {
       router.replace(`/dashboard/orders?orderId=${encodeURIComponent(createdId)}`);
     } else if (!recoverOrder && !items.length) {
-      router.replace("/checkout/cart");
+      router.replace("/cart");
     }
   }, [createdId, hydrated, items.length, order, recoverOrder, router]);
 
@@ -276,7 +292,7 @@ function CheckoutForm() {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
-      <Link href="/checkout/cart" className="inline-flex min-h-11 items-center text-sm underline">Back to cart</Link>
+      <Link href="/cart" className="inline-flex min-h-11 items-center text-sm underline">Back to cart</Link>
       <h1 className="mb-6 font-serif text-[clamp(2rem,5vw,3rem)] font-semibold">Checkout</h1>
       <form onSubmit={confirmOrder} className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <section className="min-w-0 space-y-5 rounded-2xl border bg-card p-4 sm:p-6" aria-labelledby="shipping-heading">
@@ -325,7 +341,12 @@ function CheckoutForm() {
           <p className="text-sm text-muted-foreground">You’ll see the final payable amount before paying. Harglim verifies the UPI reference after submission.</p>
           {(error || recoverOrder) && <p role="alert" className="text-sm text-red-700">{error || orderRecoveryMessage}</p>}
           {uncertain
-            ? <Button asChild variant="outline" className="w-full"><Link href={ordersHref}>Check My Orders</Link></Button>
+            ? <div className="space-y-2">
+                {uncertainResponse && <Button type="button" className="w-full" disabled={submitting} onClick={() => void confirmOrder()}>
+                  {submitting ? "Confirming order?" : "Retry order confirmation"}
+                </Button>}
+                <Button asChild variant="outline" className="w-full"><Link href={ordersHref}>Check My Orders</Link></Button>
+              </div>
             : <Button type="submit" className="w-full min-h-11" disabled={submitting}>{submitting ? "Confirming order…" : "Confirm Order"}</Button>}
         </aside>
       </form>

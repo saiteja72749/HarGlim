@@ -109,39 +109,57 @@ test('the manual homepage shelf supports arrows, keyboard and swipe without loop
   const books = backendList(await result.json(), 'books');
   test.skip(!books.length, 'No published books returned by the real API.');
   const shelf = page.getByRole('list', { name: 'Books from the catalog' });
+  const skipLink = page.getByRole('link', { name: 'Skip to content' });
+  await expect(skipLink).toHaveCSS('opacity', '0');
+  await page.keyboard.press('Tab');
+  await expect(skipLink).toBeFocused();
+  await expect(skipLink).toHaveCSS('opacity', '1');
+  await page.keyboard.press('Tab');
+  await expect(skipLink).toHaveCSS('opacity', '0');
   await expect(page.getByText('Reader Favorites', { exact: true })).toHaveCount(0);
-  const links = shelf.locator('[data-book-card] a');
+  await expect(page.getByRole('heading', { name: 'Browse by Category' })).toHaveCount(0);
+  const links = shelf.locator('a[data-home-book]');
+  await expect(shelf.getByRole('button')).toHaveCount(0);
+  await expect(page.locator('header').first()).toBeVisible();
+  const positions = await page.evaluate(() => ({
+    headerBottom: document.querySelector('header')!.getBoundingClientRect().bottom,
+    heroTop: document.querySelector('main section')!.getBoundingClientRect().top,
+  }));
+  expect(positions.headerBottom).toBeLessThanOrEqual(positions.heroTop);
   await expect(links.first()).toBeVisible();
   const hrefs = await links.evaluateAll((elements) => elements.map((element) => element.getAttribute('href')));
   expect(hrefs.length).toBeGreaterThan(0);
   expect(hrefs.length).toBeLessThanOrEqual(10);
   expect(new Set(hrefs).size).toBe(hrefs.length);
-  for (const width of [320, 375, 390, 430, 768, 1024, 1280, 1440, 1920]) {
+  for (const [width, count] of [[320, 2], [375, 2], [390, 2], [430, 2], [768, 4], [1024, 5], [1280, 6], [1440, 7], [1920, 8]]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth), `Home at ${width}px`).toBeLessThanOrEqual(width);
-  }
-  await page.setViewportSize({ width: 1280, height: 900 });
-  const next = page.getByRole('button', { name: 'Next books', exact: true });
-  if (await shelf.evaluate((node) => node.scrollWidth > node.clientWidth)) {
-    await shelf.scrollIntoViewIfNeeded();
-    const visibleSlides = await shelf.evaluate((node) => {
+    const fullyVisible = await shelf.evaluate((node) => {
       const viewport = node.getBoundingClientRect();
       return [...node.children].filter((slide) => {
         const box = slide.getBoundingClientRect();
         return box.left >= viewport.left - 1 && box.right <= viewport.right + 1;
       }).length;
     });
-    expect(visibleSlides).toBe(3);
+    expect(fullyVisible, `Full cards at ${width}px`).toBe(Math.min(hrefs.length, count));
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const next = page.getByRole('button', { name: 'Next books', exact: true });
+  if (await shelf.evaluate((node) => node.scrollWidth > node.clientWidth)) {
+    await shelf.scrollIntoViewIfNeeded();
     const previous = page.getByRole('button', { name: 'Previous books', exact: true });
     const shelfBox = (await shelf.boundingBox())!;
-    expect((await previous.boundingBox())!.x).toBeLessThan(shelfBox.x);
-    expect((await next.boundingBox())!.x).toBeGreaterThan(shelfBox.x + shelfBox.width);
+    expect(shelfBox.width).toBeGreaterThan(1100);
+    expect((await next.boundingBox())!.y).toBeLessThan(shelfBox.y);
     await expect(previous).toBeDisabled();
     await expect(page.getByRole('button', { name: /pause|resume book carousel/i })).toHaveCount(0);
     await next.press('Enter');
     await expect.poll(() => shelf.evaluate((node) => node.scrollLeft)).toBeGreaterThan(0);
     await previous.click();
     await expect(previous).toBeDisabled();
+    await shelf.focus();
+    await shelf.press('ArrowRight');
+    await expect.poll(() => shelf.evaluate((node) => node.scrollLeft)).toBeGreaterThan(0);
     await shelf.evaluate(node => node.scrollTo({ left: node.scrollWidth, behavior: 'instant' }));
     await expect(next).toBeDisabled();
     await shelf.evaluate(node => node.scrollTo({ left: 0, behavior: 'instant' }));

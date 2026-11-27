@@ -1,3 +1,3 @@
-import CartPage from "@/app/checkout/cart/page";
+import CartView from "./cart-view";
 
-export default CartPage;
+export default CartView;

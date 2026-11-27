@@ -474,9 +474,9 @@ export default function ProfilePage() {
               >
                 Cancel
               </Button>
-              <Button
+              {(canSave || isLoading) && <Button
                 type="submit"
-                disabled={isLoading || !canSave}
+                disabled={isLoading}
                 className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-medium h-11 px-8 rounded-xl shadow-xs text-xs gap-2"
               >
                 {isLoading ? (
@@ -485,7 +485,7 @@ export default function ProfilePage() {
                   <Save className="h-4 w-4 text-[#D4AF37]" />
                 )}
                 <span>Save changes</span>
-              </Button>
+              </Button>}
             </div></>}
           </div>
         </div>

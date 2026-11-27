@@ -7,7 +7,7 @@ const reader = { _id: readerId, name: "Test Reader", email: "reader@example.inva
 const book = { _id: bookId, title: "Fixture book", slug: "fixture-book", price: 400, format: "paperback", stock: 5 };
 const viewportWidths = [320, 375, 390, 430, 768, 1024, 1280, 1440, 1920];
 
-async function mockReader(page: Page, options: { orderError?: boolean; paidAccess?: boolean } = {}) {
+async function mockReader(page: Page, options: { orderError?: boolean; orderErrorOnce?: boolean; paidAccess?: boolean } = {}) {
   await page.addInitScript(({ reader, book }) => {
     if (!localStorage.getItem("auth-storage")) {
       localStorage.setItem("auth-storage", JSON.stringify({ state: { user: reader, token: "fixture-token", isAuthenticated: true }, version: 0 }));
@@ -18,13 +18,14 @@ async function mockReader(page: Page, options: { orderError?: boolean; paidAcces
   }, { reader, book });
 
   const requests = { orders: 0, utr: 0, addresses: 0 };
+  const orderAttempts: { key: string | undefined; body: unknown }[] = [];
   let submitted = false;
   let paymentVerified = false;
   let savedReader = reader;
   const corsHeaders = {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "access-control-allow-headers": "authorization, content-type",
+    "access-control-allow-headers": "authorization, content-type, idempotency-key",
   };
   const order = { _id: orderId, orderNumber: "TEST-ORDER", totalPrice: 475, shippingPrice: 75, isPaid: false, items: [{ book, quantity: 1 }] };
   await page.route("**/api/**", async (route) => {
@@ -52,7 +53,8 @@ async function mockReader(page: Page, options: { orderError?: boolean; paidAcces
     if (pathname.endsWith("/orders") && method === "POST") {
       requests.orders++;
       expect(route.request().postDataJSON()).toMatchObject({ items: [{ book: bookId, quantity: 1 }], paymentMethod: "UPI" });
-      if (options.orderError) return json(null, 500);
+      orderAttempts.push({ key: route.request().headers()["idempotency-key"], body: route.request().postDataJSON() });
+      if (options.orderError || (options.orderErrorOnce && requests.orders === 1)) return json(null, 500);
       return json({ order, payment: { amount: 475, upiUrl: "upi://pay?pa=fixture%40example&pn=Fixture%20Merchant&am=475.00" } }, 201);
     }
     if (pathname.endsWith("/verify-payment") && method === "PUT") {
@@ -67,7 +69,7 @@ async function mockReader(page: Page, options: { orderError?: boolean; paidAcces
     if (pathname.endsWith("/author-application")) return json(null);
     return json([]);
   });
-  return { requests, verifyPayment: () => { paymentVerified = true; } };
+  return { requests, orderAttempts, verifyPayment: () => { paymentVerified = true; } };
 }
 
 async function fillAddress(page: Page) {
@@ -112,6 +114,48 @@ test("manual UPI checkout uses the server total and a UTR remains pending", asyn
   await expect(page.getByRole("heading", { name: "Payment Verified" })).toBeVisible();
 });
 
+test("reader collections use backend pages and show each returned book once", async ({ page }) => {
+  await mockReader(page);
+  const second = { ...book, _id: "100000000000000000000009", title: "Second page book", format: "ebook", slug: "second-page-book" };
+  await page.route(/\/api\/users\/[^/]+\/(?:library|wishlist)\?/, async (route) => {
+    const headers = {
+      "access-control-allow-origin": "*",
+      "access-control-allow-headers": "authorization",
+      "access-control-allow-methods": "GET, OPTIONS",
+    };
+    if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers });
+    const url = new URL(route.request().url());
+    const pageNumber = Number(url.searchParams.get("page"));
+    const isLibrary = url.pathname.endsWith("/library");
+    if (isLibrary) expect(url.searchParams.get("format")).toBe("digital");
+    const result = pageNumber === 2 ? second : { ...book, format: isLibrary ? "ebook" : "paperback" };
+    return route.fulfill({ headers, json: {
+      success: true, data: [{ book: result }, result],
+      pagination: { total: 25, page: pageNumber, pages: 2, limit: 24 },
+    } });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const collection of ["wishlist", "library"]) {
+    await page.goto(`/dashboard/${collection}`);
+    await expect(page.getByText("Fixture book", { exact: true })).toHaveCount(1);
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+    await expect(page.getByText("Second page book", { exact: true })).toHaveCount(1);
+    await expect(page.getByText("Fixture book", { exact: true })).toHaveCount(0);
+  }
+});
+
+test("reader profile shows Save changes only for valid edits", async ({ page }) => {
+  await mockReader(page);
+  await page.goto("/dashboard/profile");
+  await page.getByRole("button", { name: "Edit profile" }).click();
+  const save = page.getByRole("button", { name: "Save changes" });
+  await expect(save).toHaveCount(0);
+  await page.getByLabel(/full name/i).fill("Updated Reader");
+  await expect(save).toBeVisible();
+  await page.getByLabel(/full name/i).fill("Test Reader");
+  await expect(save).toHaveCount(0);
+});
+
 test("an ambiguous order result prompts reconciliation before another order", async ({ page }) => {
   const { requests } = await mockReader(page, { orderError: true });
   await page.goto("/checkout/checkout");
@@ -126,6 +170,20 @@ test("an ambiguous order result prompts reconciliation before another order", as
   await expect(page.getByRole("link", { name: "Check My Orders" })).toHaveAttribute("href", "/dashboard/orders");
   await expect(page.getByRole("main").getByRole("alert")).toContainText("Check My Orders");
   expect(requests.orders).toBe(1);
+});
+
+test("checkout retries an uncertain submission with the original key and address", async ({ page }) => {
+  const { orderAttempts } = await mockReader(page, { orderErrorOnce: true });
+  await page.goto("/checkout/checkout");
+  await fillAddress(page);
+  await page.getByRole("button", { name: "Confirm Order" }).click();
+  await expect(page.getByRole("button", { name: "Retry order confirmation" })).toBeVisible();
+  await page.getByLabel("Address line 1").fill("A different draft address");
+  await page.getByRole("button", { name: "Retry order confirmation" }).click();
+  await expect(page.getByRole("heading", { name: "Complete payment" })).toBeVisible();
+  expect(orderAttempts).toHaveLength(2);
+  expect(orderAttempts[0].key).toMatch(/^checkout-/);
+  expect(orderAttempts[1]).toEqual(orderAttempts[0]);
 });
 
 test("paid author access requires server payment details", async ({ page }) => {

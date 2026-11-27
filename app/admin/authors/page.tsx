@@ -4,14 +4,16 @@ import { describeApiError, record } from "@/lib/api-error";
 import { accountActive, adminResponse, adminRows } from "@/lib/admin-account-api";
 
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import api from "@/lib/api";
 import { normalizeAuthorDashboard, type AuthorDashboardSummary } from "@/lib/author-dashboard";
+import { AdminAuthorProfileForm } from "@/components/authors/admin-author-profile-form";
 import { AuthorSalesPanel } from "@/components/authors/author-sales-panel";
 import { useAuthStore } from "@/store/auth-store";
 import { isPaidAuthorDashboardEnabled } from "@/lib/author-access";
 import { ErrorState } from "@/components/ui/error-state";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import {
   Feather,
   Search,
@@ -59,6 +61,8 @@ export default function AdminAuthorsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearch = useDebouncedValue(searchQuery);
+  const authorRequest = useRef<AbortController | null>(null);
   const [page] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, pages: 1, limit: 20 });
 
@@ -67,35 +71,45 @@ export default function AdminAuthorsPage() {
   const [authorDetail, setAuthorDetail] = useState<AuthorDetail | null>(null);
   const [authorSales, setAuthorSales] = useState<AuthorDashboardSummary | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [editingPublicProfile, setEditingPublicProfile] = useState(false);
 
   // Fetch Authors List via GET /api/admin/users?role=author
   const fetchAuthors = useCallback(async () => {
+    authorRequest.current?.abort();
+    const controller = new AbortController();
+    authorRequest.current = controller;
     setLoading(true);
     setError(false);
     try {
       const params: Record<string, string | number> = { role: "author", page, limit: 20 };
-      if (searchQuery.trim()) params.search = searchQuery.trim();
+      if (deferredSearch.trim()) params.search = deferredSearch.trim();
 
-      const { data } = await api.get("/admin/users", { params, cache: "no-store" });
+      const { data } = await api.get("/admin/users", { params, cache: "no-store", signal: controller.signal });
+      if (controller.signal.aborted) return;
       setAuthors(adminRows<AuthorSummary>(data, "users"));
 
       if (data?.pagination) {
         setPagination(data.pagination);
       }
     } catch (err) {
+      if (controller.signal.aborted) return;
       console.error("Failed to fetch authors list:", describeApiError(err));
       setError(true);
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
-  }, [page, searchQuery]);
+  }, [page, deferredSearch]);
 
-  useEffect(() => scheduleRequest(fetchAuthors), [fetchAuthors]);
+  useEffect(() => {
+    const cancel = scheduleRequest(fetchAuthors);
+    return () => { cancel(); authorRequest.current?.abort(); };
+  }, [fetchAuthors]);
 
   // Open Author Detail Drawer
   const openAuthorDetail = async (author: AuthorSummary) => {
     const aId = author._id || author.id;
     if (!aId) return;
+    setEditingPublicProfile(false);
     setSelectedAuthorId(aId);
     setLoadingDetail(true);
     setAuthorDetail(null);
@@ -309,6 +323,12 @@ export default function AdminAuthorsPage() {
                 </div>
               ) : (
                 <>
+                  {editingPublicProfile
+                    ? <AdminAuthorProfileForm key={selectedAuthorId} id={selectedAuthorId} onSaved={() => {
+                        setEditingPublicProfile(false);
+                        void fetchAuthors();
+                      }} />
+                    : <Button type="button" variant="outline" onClick={() => setEditingPublicProfile(true)}>Edit Public Profile</Button>}
                   {/* Metric Summary Cards */}
                   <div className="grid grid-cols-3 gap-3">
                     <div className="p-3.5 rounded-xl bg-[#F8F9F7] border border-[#E2E6DF] text-center">

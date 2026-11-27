@@ -17,54 +17,60 @@ import { ErrorState } from "@/components/ui/error-state";
 import type { Book } from "@/types";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
-import { extractList } from "@/lib/tracking";
+import { parseReaderCollection } from "@/lib/reader-collections";
 import { useEffect } from "react";
 type WishlistBook = Book & { cover?: string };
 
 export default function WishlistPage() {
-  const { user } = useAuthStore();
+  const userId = useAuthStore((state) => state.user?._id || state.user?.id);
   const [items, setItems] = useState<WishlistBook[]>([]);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState<number | null>(null);
+  const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const pendingRemovals = useRef(new Set<string>());
   const [removing, setRemoving] = useState<string[]>([]);
   const { addItem } = useCartStore();
 
-  const fetchWishlist = useCallback(async () => {
-    if (!user?._id && !user?.id) return;
-    const userId = user._id || user.id;
+  const fetchWishlist = useCallback(async (signal: AbortSignal) => {
+    if (!userId) return;
     setLoading(true);
     setError(false);
     try {
-      const { data } = await api.get(`/users/${userId}/wishlist`, { params: { limit: 100 }, cache: "no-store" });
-      const wishlistData = extractList<WishlistBook & { book?: WishlistBook | string }>(data, "wishlist");
-      // Entries may be books or { book: {...} } join rows; DELETE needs the *book* id.
-      setItems(
-        wishlistData
-          .map((entry) => (entry?.book && typeof entry.book === "object" ? { ...entry.book } : entry))
-          .filter((book) => book && (book._id || book.id))
-      );
+      const { data } = await api.get(`/users/${userId}/wishlist`, { params: { page, limit: 24 }, signal, cache: "no-store" });
+      if (signal.aborted) return;
+      const result = parseReaderCollection<WishlistBook>(data, "wishlist");
+      setPages(result.pages);
+      setTotal(result.total);
+      if (page > result.pages) setPage(result.pages);
+      else setItems(result.books);
     } catch (err) {
+      if (signal.aborted) return;
       console.error("Failed to fetch wishlist:", describeApiError(err));
       setError(true);
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
-  }, [user]);
+  }, [userId, page]);
 
-  useEffect(() => scheduleRequest(fetchWishlist), [fetchWishlist]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const cancel = scheduleRequest(() => fetchWishlist(controller.signal));
+    return () => { cancel(); controller.abort(); };
+  }, [fetchWishlist, revision]);
 
   const removeFromWishlist = async (id: string) => {
-    if ((!user?._id && !user?.id) || pendingRemovals.current.has(id)) return;
+    if (!userId || pendingRemovals.current.has(id)) return;
     pendingRemovals.current.add(id);
     setRemoving((current) => [...current, id]);
-    const userId = user._id || user.id;
     try {
       const { data } = await api.delete(`/users/${userId}/wishlist/${id}`);
       if (data?.success === false) throw new Error("Wishlist change was not accepted.");
-      setItems((current) => current.filter((item) => (item._id || item.id) !== id));
       toast.success("Removed from wishlist");
+      setRevision((value) => value + 1);
     } catch {
       toast.error("Failed to remove from wishlist");
     } finally {
@@ -96,9 +102,9 @@ export default function WishlistPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold lg:text-3xl">My Wishlist</h1>
-          <p className="text-muted-foreground mt-1">
-            {items.length} item{items.length !== 1 ? "s" : ""} saved
-          </p>
+          {!loading && !error && total !== null && <p className="text-muted-foreground mt-1">
+            {total} item{total !== 1 ? "s" : ""} saved
+          </p>}
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -126,7 +132,7 @@ export default function WishlistPage() {
         <ErrorState
           title="Could not load wishlist"
           message="We encountered an error loading your wishlist."
-          onRetry={fetchWishlist}
+          onRetry={() => setRevision((value) => value + 1)}
         />
       ) : loading ? (
         <div className="flex justify-center items-center h-48">
@@ -272,6 +278,13 @@ export default function WishlistPage() {
             </Button>
           </CardContent>
         </Card>
+      )}
+      {!loading && !error && pages > 1 && (
+        <nav aria-label="Collection pages" className="flex items-center justify-center gap-3">
+          <Button variant="outline" disabled={page <= 1 || removing.length > 0} onClick={() => setPage(page - 1)}>Previous</Button>
+          <span className="text-sm text-muted-foreground">Page {page} of {pages}</span>
+          <Button variant="outline" disabled={page >= pages || removing.length > 0} onClick={() => setPage(page + 1)}>Next</Button>
+        </nav>
       )}
     </div>
   );

@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import { cache } from 'react';
+import { isRejectedEnvelope } from '@/lib/api-error';
+import { API_URL } from '@/config/backend.mjs';
 
 /** The backend answered 404: the record does not exist. */
 export const MISSING = 'missing' as const;
@@ -13,12 +15,12 @@ export const notFoundMetadata: Metadata = { title: { absolute: 'Page Not Found |
  * and null on network or server errors so the page still renders and loads the data itself.
  */
 const readRecord = cache(async (path: string): Promise<Record<string, unknown> | null | typeof MISSING> => {
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
   const res = await fetch(`${API_URL}${path}`, { next: { revalidate: 300, tags: path === '/content' ? ['public-content'] : undefined }, signal: AbortSignal.timeout(15_000) }).catch(() => null);
   if (res?.status === 404) return MISSING;
   if (!res?.ok) return null;
   try {
     const data = await res.json();
+    if (isRejectedEnvelope(data)) return null;
     const value: unknown = data?.data ?? data;
     return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
   } catch {

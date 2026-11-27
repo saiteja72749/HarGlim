@@ -99,7 +99,7 @@ test('real royalty totals and CSV export agree with backend history', async ({ p
 });
 
 test('publisher statements and payout settlements load from real APIs', async ({ page }) => {
-  const statements = backendList(await backendGet('/authors/me/manual-royalties?limit=100', session), 'statements').filter((statement) => statement.status !== 'VOID');
+  const statements = backendList(await backendGet('/authors/me/manual-royalties?limit=100', session), 'statements');
   const settlements = backendList(await backendGet('/authors/me/royalty-settlements?limit=100', session), 'settlements');
   await page.goto('/author/royalties#settlements', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('tab', { name: `Payout History (${settlements.length})` })).toHaveAttribute('aria-selected', 'true');
@@ -132,7 +132,7 @@ test('an author account exposes exactly the four intended actions and the Studio
   await drawer.focus();
   await page.keyboard.press('Enter');
   const nav = page.getByRole('dialog').getByRole('navigation', { name: 'Author Studio' });
-  await expect(nav.getByRole('link')).toHaveText(['Overview', 'My Books', 'Manuscripts', 'Performance & Analytics', 'Royalties', 'Author Profile']);
+  await expect(nav.getByRole('link')).toHaveText(['Overview', 'My Books', 'Submit Manuscript', 'Manuscripts', 'Performance & Analytics', 'Royalties', 'Author Profile']);
   await page.keyboard.press('Escape');
   await expect(drawer).toBeFocused();
 });

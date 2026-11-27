@@ -5,7 +5,7 @@ export interface Book {
   authorName?: string;
   featured?: boolean;
   slug: string;
-  author: { _id: string; name: string; email?: string; fullName?: string; role?: string; id?: string } | string;
+  author: { _id: string; name: string; email?: string; fullName?: string; role?: string; id?: string; profilePicture?: string | null; profileImage?: string | null } | string;
   category: { _id: string; name: string; slug: string } | string;
   description: string;
   coverImage: string;
@@ -50,7 +50,7 @@ export interface Author {
   role?: string;
   bio?: string;
   profileImage?: string;
-  profilePicture?: string;
+  profilePicture?: string | null;
   createdAt?: string;
   updatedAt?: string;
   totalSales?: number;

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware';
 import { Role, UserContextData } from '@/types';
 import { record } from '@/lib/api-error';
+import { API_URL } from '@/config/backend.mjs';
 
 export interface User {
   _id: string;
@@ -123,13 +124,13 @@ export const createAuthStore = (getStorage: () => StateStorage = () => window.lo
         const session = get();
         let revocation: Promise<unknown> = Promise.resolve();
         if (options?.revoke !== false && typeof window !== 'undefined' && (session.token || session.refreshToken)) {
-          const apiURL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
-          revocation = fetch(`${apiURL}/auth/logout`, {
+          revocation = fetch(`${API_URL}/auth/logout`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...(session.token ? { Authorization: `Bearer ${session.token}` } : {}) },
             body: JSON.stringify({ refreshToken: session.refreshToken || undefined }),
             signal: AbortSignal.timeout(15_000),
             keepalive: true,
+            redirect: 'error',
           }).then((response) => {
             if (!response.ok) console.warn('The backend session could not be revoked.');
           }).catch(() => console.warn('The backend session could not be revoked.'));

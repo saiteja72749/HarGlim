@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import useSWR from 'swr';
 import { useAuthStore } from '@/store/auth-store';
 import { describeApiError, type ApiFailure } from '@/lib/api-error';
@@ -11,6 +11,9 @@ export function useApiResource<T>(key: string | readonly unknown[] | null, fetch
   const userId = useAuthStore((state) => state.user?._id || state.user?.id);
   const scopedKey = key === null || (privateResource && !token) ? null
     : privateResource ? ['authenticated', userId, token, key] : ['public', key];
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const active = scopedKey !== null;
+  useEffect(() => () => clearTimeout(retryTimer.current), [active, token, userId]);
   const resource = useSWR<T, ApiFailure>(scopedKey, async () => {
     try {
       const data = await fetcher();
@@ -22,7 +25,17 @@ export function useApiResource<T>(key: string | readonly unknown[] | null, fetch
     dedupingInterval: 15_000,
     revalidateOnFocus: false,
     revalidateOnReconnect: true,
-    shouldRetryOnError: false,
+    shouldRetryOnError: (error) => error.response?.status === 429,
+    onErrorRetry(error, _key, _config, revalidate, options) {
+      if (options.retryCount > 1 || !error.retryAt) return;
+      const delay = Math.max(1000, error.retryAt - Date.now());
+      if (delay > 120_000) return;
+      clearTimeout(retryTimer.current);
+      retryTimer.current = setTimeout(() => {
+        if (privateResource && useAuthStore.getState().token !== token) return;
+        void revalidate({ ...options, dedupe: true });
+      }, delay);
+    },
     keepPreviousData: !privateResource,
   });
   const mutate = resource.mutate;

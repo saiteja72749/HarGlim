@@ -5,7 +5,12 @@ import { BookOpen } from 'lucide-react';
 import Image from '@/components/ui/backend-image';
 import { cn } from '@/lib/utils';
 
-export function CompactBookCover({ source, horizontal }: { source?: string; horizontal: boolean }) {
+export function CompactBookCover({ source, horizontal, sizes, priority }: {
+  source?: string;
+  horizontal: boolean;
+  sizes?: string;
+  priority?: boolean;
+}) {
   const [failedSource, setFailedSource] = useState<string>();
   const hasCover = source && failedSource !== source && /^(https?:\/\/|\/(?!\/))/.test(source);
 
@@ -16,7 +21,8 @@ export function CompactBookCover({ source, horizontal }: { source?: string; hori
           src={source}
           alt=""
           fill
-          sizes={horizontal ? '56px' : '(max-width: 479px) 45vw, 208px'}
+          sizes={sizes ?? (horizontal ? '56px' : '(max-width: 479px) 45vw, 208px')}
+          preload={priority}
           className="object-contain p-2"
           onError={() => setFailedSource(source)}
         />

@@ -180,7 +180,7 @@ function BooksContent({ initialQuery = '', initialCategory = '', initialTag = 'a
   };
 
   const clearFilters = () => {
-    updateURL({ category: "", sort: "", tag: "", featured: "", bestseller: "", newRelease: "", q: "", search: "", format: "", minPrice: "", maxPrice: "", minRating: "" });
+    updateURL({ category: "", sort: "", tag: "", featured: "", bestseller: "", newRelease: "", q: "", search: "", format: "", minPrice: "", maxPrice: "" });
     setSearchQuery("");
     setCurrentPage(1);
   };

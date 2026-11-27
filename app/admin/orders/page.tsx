@@ -5,10 +5,10 @@ import { approveAdminPayment, rejectAdminPayment } from "@/lib/admin-payments-ap
 import { populated } from "@/lib/order-status";
 import { scheduleRequest } from "@/lib/schedule-request";
 import type { OrderRecord, OrderItem, ShipmentRecord } from "@/types/commerce-api";
-import { describeApiError } from "@/lib/api-error";
+import { UnconfirmedWriteError, writeOutcomeUncertain, describeApiError } from "@/lib/api-error";
 import { cn, getSafeExternalUrl } from "@/lib/utils";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import api from "@/lib/api";
 import { resolveCourierTrackingUrl } from "@/lib/couriers";
 import {
@@ -22,6 +22,9 @@ import {
   normalizeShipmentStatus,
   shipmentBelongsToOrder,
 } from "@/lib/tracking";
+import { CourierPicker, useCourierCapabilities } from "@/components/admin/courier-picker";
+import { canEnterTracking } from "@/lib/courier-capabilities";
+import { notifyLiveChange } from "@/lib/live-sync";
 import { assignCourier, fetchSavedShipment } from "@/lib/shipment-actions";
 import { ErrorState } from "@/components/ui/error-state";
 import {
@@ -270,7 +273,11 @@ export default function AdminOrdersPage() {
   const [trackingModalOpen, setTrackingModalOpen] = useState(false);
   const [selectedOrderForTracking, setSelectedOrderForTracking] = useState<OrderRecord | null>(null);
   const [trackingNumberInput, setTrackingNumberInput] = useState("");
-  const [courierInput, setCourierInput] = useState("India Post");
+  const [courierInput, setCourierInput] = useState("");
+  const [provider, setProvider] = useState("");
+  const couriers = useCourierCapabilities(trackingModalOpen);
+  const trackingPending = useRef(false);
+  const [trackingUnconfirmed, setTrackingUnconfirmed] = useState(false);
   const [trackingUrlInput, setTrackingUrlInput] = useState("");
   const [isSubmittingTracking, setIsSubmittingTracking] = useState(false);
   const [markDispatched, setMarkDispatched] = useState(true);
@@ -398,9 +405,9 @@ export default function AdminOrdersPage() {
       toast.error("No order selected.");
       return;
     }
-    const isDigital = courierInput.toLowerCase().includes("digital");
-    if (!isDigital && !trackingNumberInput.trim() && !trackingUrlInput.trim()) {
-      toast.error("Please enter either a Tracking ID or a Tracking URL.");
+    if (trackingPending.current || trackingUnconfirmed || couriers.error || !couriers.data?.some((item) => item.provider === provider && canEnterTracking(item))) return;
+    if (!courierInput.trim() || (!trackingNumberInput.trim() && !trackingUrlInput.trim())) {
+      toast.error("Enter the courier service and a tracking number or URL.");
       return;
     }
 
@@ -416,12 +423,11 @@ export default function AdminOrdersPage() {
       return;
     }
 
+    trackingPending.current = true;
     setIsSubmittingTracking(true);
 
     try {
-      // Tracking numbers must be unique across shipments; digital deliveries get a per-order reference.
-      const finalTrackingNumber =
-        trackingNumberInput.trim() || (isDigital ? `DIGITAL-${selectedOrderForTracking.orderNumber || orderMongoId.slice(-8)}` : "");
+      const finalTrackingNumber = trackingNumberInput.trim();
       const resolvedTrackingUrl =
         getSafeExternalUrl(enteredTrackingUrl) ||
         (finalTrackingNumber ? resolveCourierTrackingUrl(courierInput, finalTrackingNumber) : "");
@@ -453,18 +459,15 @@ export default function AdminOrdersPage() {
         return;
       }
 
-      // provider must be "manual" (courier adapters are placeholders); the backend builds the
-      // tracking URL for India Post / Delhivery / BlueDart / DTDC / Ekart.
       const currentStatus = await assignCourier(
         shipment,
         {
-          provider: "manual",
+          provider,
           courierName: courierInput.trim(),
           serviceName: courierInput.trim(),
           trackingNumber: finalTrackingNumber,
           trackingUrl: resolvedTrackingUrl || undefined,
         },
-        "admin-orders"
       );
 
       // Mark it dispatched via the shipment (COURIER_ASSIGNED -> IN_TRANSIT). The backend then
@@ -485,12 +488,13 @@ export default function AdminOrdersPage() {
       if (markDispatched) {
         const saved = await fetchSavedShipment(shipmentId);
         if (!["IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED"].includes(normalizeShipmentStatus(saved.status))) {
-          throw new Error("The shipment dispatch could not be confirmed. Refresh Shipments before retrying.");
+          throw new UnconfirmedWriteError("Courier tracking was saved. Dispatch could not be confirmed. Check Shipments before retrying.");
         }
       }
+      if (markDispatched) notifyLiveChange("shipments");
       toast.success(
         markDispatched
-          ? `${courierInput} tracking saved and order marked Shipped.`
+          ? "Tracking saved and shipment confirmed in transit."
           : `${courierInput} tracking saved. Mark it in transit from Shipments & Courier when it leaves.`
       );
       setTrackingModalOpen(false);
@@ -498,6 +502,7 @@ export default function AdminOrdersPage() {
       setTrackingUrlInput("");
       fetchOrders();
     } catch (caughtError) {
+      if (writeOutcomeUncertain(caughtError)) { setTrackingUnconfirmed(true); void fetchOrders(); }
       const err = describeApiError(caughtError);
       const status = err.response?.status;
       toast.error(
@@ -506,6 +511,7 @@ export default function AdminOrdersPage() {
           : err.response?.data?.message || err.message
       );
     } finally {
+      trackingPending.current = false;
       setIsSubmittingTracking(false);
     }
   };
@@ -787,7 +793,9 @@ export default function AdminOrdersPage() {
                                 setSelectedOrderForTracking(order);
                                 const existing = extractTrackingInfo(order);
                                 setTrackingNumberInput(existing.trackingNumber);
-                                setCourierInput(existing.courierName || "India Post");
+                                setCourierInput(existing.courierName || "");
+                                setProvider("");
+                                setTrackingUnconfirmed(false);
                                 setTrackingUrlInput(existing.trackingUrl);
                                 setTrackingModalOpen(true);
                               }}
@@ -838,6 +846,9 @@ export default function AdminOrdersPage() {
               <label className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
                 Courier Service / Delivery Plan *
               </label>
+              {trackingUnconfirmed && <p role="alert">Check the saved shipment before retrying this change.</p>}
+              <CourierPicker resource={couriers} value={provider} disabled={isSubmittingTracking}
+                select={(courier) => { setProvider(courier.provider); if (!courierInput && courier.provider !== "manual") setCourierInput(courier.label); }} />
               <Input aria-label="Courier service" value={courierInput} onChange={(event) => setCourierInput(event.target.value)} placeholder="Courier from your shipment booking" className="border-[#E2E6DF] rounded-xl h-11 text-xs font-semibold" />
             </div>
 
@@ -845,15 +856,11 @@ export default function AdminOrdersPage() {
               <label className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E] flex items-center justify-between">
                 <span>Tracking ID / Consignment Number</span>
                 <span className="text-[10px] text-muted-foreground font-normal">
-                  {courierInput.toLowerCase().includes("digital") ? "Optional for digital" : "Optional if URL provided"}
+                  Optional if URL provided
                 </span>
               </label>
               <Input
-                placeholder={
-                  courierInput.toLowerCase().includes("digital")
-                    ? "DIGITAL-FULFILLMENT (Optional)"
-                    : "e.g. SP123456789IN or DEL987654321"
-                }
+                placeholder="Tracking number"
                 value={trackingNumberInput}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -902,7 +909,7 @@ export default function AdminOrdersPage() {
               </Button>
               <Button
                 type="submit"
-                disabled={isSubmittingTracking}
+                disabled={isSubmittingTracking || trackingUnconfirmed || couriers.loading || Boolean(couriers.error) || !couriers.data?.some((item) => item.provider === provider && canEnterTracking(item))}
                 className="bg-[#0F3D3E] text-white hover:bg-[#174C4D]"
               >
                 {isSubmittingTracking ? "Saving..." : markDispatched ? "Save Tracking & Mark Shipped" : "Save Tracking"}

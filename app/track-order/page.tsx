@@ -16,7 +16,7 @@ import { getSafeExternalUrl } from "@/lib/utils";
 import { getShipmentLabel, getTrackingHistory, normalizeShipmentStatus } from "@/lib/tracking";
 
 /**
- * Public order tracking: GET /orders/track/{orderNumber} (no login).
+ * Order tracking: GET /orders/track/{orderNumber} requires the owner or an admin.
  * Uses the public order number (e.g. HM-0B282DEA), never the courier AWB.
  */
 
@@ -45,7 +45,7 @@ function TrackOrderContent() {
 
   const [input, setInput] = useState(initial);
   const [result, setResult] = useState<OrderRecord | null>(null);
-  const [state, setState] = useState<"idle" | "loading" | "found" | "notfound" | "error">("idle");
+  const [state, setState] = useState<"idle" | "loading" | "found" | "notfound" | "signin" | "error">("idle");
 
   const lookup = useCallback(async (orderNumber: string) => {
     const value = orderNumber.trim().toUpperCase();
@@ -58,7 +58,7 @@ function TrackOrderContent() {
       setState("found");
     } catch (caughtError) {
       const err = describeApiError(caughtError);
-      setState(err?.response?.status === 404 ? "notfound" : "error");
+      setState(err.response?.status === 401 ? "signin" : err.response?.status === 404 ? "notfound" : "error");
     }
   }, []);
 
@@ -114,6 +114,15 @@ function TrackOrderContent() {
           <div className="rounded-2xl border border-[#E2E6DF] bg-white p-6 text-sm text-[#5C6E6E]">
             We couldn&apos;t find an order with that number. Check it against your order confirmation, or sign in to see{" "}
             <Link href="/dashboard/orders" className="underline text-[#0F3D3E] font-semibold">My Orders</Link>.
+          </div>
+        )}
+
+        {state === "signin" && (
+          <div role="alert" className="space-y-2">
+            <p>Sign in with the account used to place the order.</p>
+            <Button asChild>
+              <Link href={`/login?redirect=${encodeURIComponent(`/track-order?orderNumber=${encodeURIComponent(input.trim().toUpperCase())}`)}`}>Sign in</Link>
+            </Button>
           </div>
         )}
 

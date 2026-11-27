@@ -1,5 +1,10 @@
 "use client";
 
+import { BookLanguageField } from "@/components/books/book-language-field";
+import { bookLanguageApiError, bookLanguageError, normalizeBookLanguage } from "@/lib/book-language";
+import { verifyAuthorBookLanguage } from "@/lib/author-manuscript";
+import { PublishingTermsField, usePublishingTerms } from "@/components/authors/publishing-terms-field";
+import { termsConflict } from "@/lib/publishing-terms";
 import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useRef } from "react";
@@ -37,8 +42,10 @@ import { manuscriptFileError, submitAuthorManuscript, uploadAuthorManuscript } f
 
 export default function NewManuscriptPage() {
   const router = useRouter();
+  const terms = usePublishingTerms();
   const [isLoading, setIsLoading] = useState(false);
   const pending = useRef(false);
+  const [languageError, setLanguageError] = useState<string>();
   const [needsReconciliation, setNeedsReconciliation] = useState(false);
   const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -52,12 +59,12 @@ export default function NewManuscriptPage() {
 
   const [formData, setFormData] = useState({
     title: "",
+    language: "",
     category: "",
     synopsis: "",
     targetAudience: "",
     estimatedWordCount: "",
     previouslyPublished: false,
-    agreeToTerms: false,
   });
 
   // Step 1: Fetch live publish packages from GET /api/publish-packages
@@ -128,10 +135,10 @@ export default function NewManuscriptPage() {
       return;
     }
 
-    if (!formData.agreeToTerms) {
-      toast.error("Please agree to the terms and conditions");
-      return;
-    }
+    if (!terms.ready) return;
+    const invalidLanguage = bookLanguageError(formData.language);
+    if (invalidLanguage) { toast.error(invalidLanguage); return; }
+    setLanguageError(undefined);
 
     pending.current = true;
     setUploadPercent(null);
@@ -144,6 +151,7 @@ export default function NewManuscriptPage() {
     // The legacy POST /publish-requests is NOT used: it creates a request the author can
     // never list, so submissions vanished from the Manuscripts page.
     try {
+      if (!await terms.confirm()) return;
       // 1. Upload manuscript (field name "document"; response data.url)
       let fileUrl = uploadedFileUrl;
       if (!fileUrl) {
@@ -156,6 +164,7 @@ export default function NewManuscriptPage() {
 
       // 2. Create the draft once. Fields outside the backend schema go into the
       //    description so the editorial team still sees them.
+      const language = normalizeBookLanguage(formData.language);
       let bookId = draftBookId;
       if (!bookId) {
         const extraLines = [
@@ -167,6 +176,7 @@ export default function NewManuscriptPage() {
         operation = "create";
         const createRes = await api.post("/authors/me/books", {
           title: formData.title.trim(),
+          language,
           description,
           category: formData.category,
         });
@@ -176,6 +186,8 @@ export default function NewManuscriptPage() {
         createdId = bookId;
         setDraftBookId(bookId);
       }
+
+      if (language) await verifyAuthorBookLanguage(bookId, language);
 
       // 3. Submit the draft for editorial review
       operation = "submit";
@@ -189,6 +201,9 @@ export default function NewManuscriptPage() {
       toast.success("Manuscript submitted for editorial review! 📚");
       router.push("/author/manuscripts");
     } catch (caughtError) {
+      if (operation === "submit" && termsConflict(caughtError)) { await terms.refresh(); toast.error("Review the current publishing terms before trying again."); return; }
+      const fieldError = bookLanguageApiError(caughtError);
+      if (fieldError) { setLanguageError(fieldError); toast.error(fieldError); return; }
       const error = describeApiError(caughtError);
       const message = error?.response?.data?.message || error?.message || "Failed to submit manuscript request.";
       const status = error.response?.status;
@@ -239,6 +254,8 @@ export default function NewManuscriptPage() {
                       placeholder="Enter manuscript title"
                     />
                   </div>
+                  <BookLanguageField value={formData.language} readOnly={Boolean(draftBookId) || isLoading} serverError={languageError}
+                    onChange={(event) => { setLanguageError(undefined); handleChange(event); }} />
 
                   <div className="space-y-2">
                     <Label htmlFor="category">
@@ -467,37 +484,13 @@ export default function NewManuscriptPage() {
             >
               <Card>
                 <CardContent className="p-6 space-y-4">
-                  <div className="flex items-start space-x-2">
-                    <Checkbox
-                      id="agreeToTerms"
-                      checked={formData.agreeToTerms}
-                      onCheckedChange={(checked) =>
-                        setFormData({
-                          ...formData,
-                          agreeToTerms: checked as boolean,
-                        })
-                      }
-                    />
-                    <Label
-                      htmlFor="agreeToTerms"
-                      className="font-normal text-sm leading-relaxed"
-                    >
-                      <span>
-                        I agree to the{" "}
-                        <Link href="/terms" target="_blank" className="text-primary hover:underline">
-                          Terms and Conditions
-                        </Link>{" "}
-                        and confirm this is my original work
-                      </span>
-                    </Label>
-                  </div>
-
+                  <PublishingTermsField terms={terms} disabled={isLoading} />
                   {isLoading && uploadPercent !== null && <p role="status" className="text-sm">File upload {uploadPercent}%</p>}
                   {needsReconciliation && <Link href="/author/manuscripts" className="inline-flex min-h-11 items-center underline">Check Manuscripts</Link>}
                   <Button
                     type="submit"
                     className="w-full gap-2"
-                    disabled={isLoading || needsReconciliation}
+                    disabled={!terms.ready || isLoading || needsReconciliation}
                   >
                     {isLoading ? (
                       <Loader2 className="h-4 w-4 animate-spin" />

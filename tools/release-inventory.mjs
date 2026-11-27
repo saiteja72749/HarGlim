@@ -3,6 +3,7 @@ import path from 'node:path';
 import ts from 'typescript';
 
 const contractPath = process.env.HARGLIM_OPENAPI_PATH || 'fulldetailedapi.md';
+const outputPath = process.env.HARGLIM_INVENTORY_PATH || 'api-audit/release-workflow-inventory.json';
 const document = JSON.parse(fs.readFileSync(contractPath, 'utf8').replace(/^\uFEFF/, ''), (key, value) =>
   key === 'example' || key === 'examples' ? undefined : value
 );
@@ -100,8 +101,8 @@ for (const screen of screens) {
   traverse(screen.file);
   screen.potentialSharedServiceCalls = calls.filter((call) => call.file !== screen.file && visited.has(call.file)).map(({ file, line, owner, method, path }) => ({ file, line, owner, method, path }));
 }
-fs.mkdirSync('api-audit', { recursive: true });
-fs.writeFileSync('api-audit/release-workflow-inventory.json', JSON.stringify({
+fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+fs.writeFileSync(outputPath, JSON.stringify({
   generatedAt: new Date().toISOString(),
   contractPath,
   scope: 'Static inventory. Documented schemas do not prove deployed behavior, authorization, or successful transactional workflows. JSX button attributes require manual context review.',

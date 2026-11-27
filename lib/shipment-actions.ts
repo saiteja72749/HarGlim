@@ -1,7 +1,9 @@
 import api from "@/lib/api";
 import { adminResponse } from "@/lib/admin-account-api";
-import { record } from "@/lib/api-error";
-import { extractTrackingInfo, getShipmentStatusPath, normalizeShipmentStatus } from "@/lib/tracking";
+import { record, UnconfirmedWriteError } from "@/lib/api-error";
+import { extractTrackingInfo, normalizeShipmentStatus } from "@/lib/tracking";
+import type { components } from "@/types/openapi.generated";
+import { notifyLiveChange } from "@/lib/live-sync";
 
 export async function fetchSavedShipment(id: string) {
   const { data } = await api.get(`/admin/shipments/${encodeURIComponent(id)}`, { cache: "no-store" });
@@ -13,37 +15,31 @@ export async function fetchSavedShipment(id: string) {
   return shipment;
 }
 
-/**
- * POST /admin/shipments/{_id}/assign-courier, also for correcting the AWB of a shipment that is
- * already on its way. If the backend resets such a shipment to COURIER_ASSIGNED, the progress
- * steps it already had are replayed so the order does not slide back from Shipped.
- */
-export async function assignCourier(shipment: { _id?: string; id?: string; status?: unknown }, payload: Record<string, unknown>, source: string) {
+export async function assignCourier(shipment: { _id?: string; id?: string; status?: unknown }, payload: components["schemas"]["CourierAssignRequest"]) {
   const shipmentId = shipment?._id || shipment?.id;
   if (!shipmentId) throw new Error("The shipment has no backend ID.");
   const before = normalizeShipmentStatus(shipment?.status);
 
   const { data } = await api.post(`/admin/shipments/${encodeURIComponent(shipmentId)}/assign-courier`, payload);
   adminResponse(data);
-  const saved = await fetchSavedShipment(shipmentId);
+  const saved = await fetchSavedShipment(shipmentId).catch(() => {
+    throw new UnconfirmedWriteError("The API acknowledged the courier save, but readback failed. Check Shipments before retrying.");
+  });
   const tracking = extractTrackingInfo(saved);
   const expectedNumber = typeof payload.trackingNumber === "string" ? payload.trackingNumber.trim().toUpperCase() : "";
-  const expectedProvider = typeof payload.courierName === "string" ? payload.courierName.trim().toLowerCase() : "";
+  const expectedService = payload.courierName?.trim().toLowerCase();
+  const savedProvider = record(saved.courier).provider ?? saved.provider;
   if ((expectedNumber && tracking.trackingNumber.toUpperCase() !== expectedNumber)
-    || (expectedProvider && tracking.courierName.toLowerCase() !== expectedProvider)) {
-    throw new Error("The saved courier details could not be confirmed. Refresh Shipments before retrying.");
+    || (expectedService && tracking.courierName.toLowerCase() !== expectedService)
+    || (payload.provider && savedProvider !== payload.provider)
+    || (payload.trackingUrl && tracking.trackingUrl !== payload.trackingUrl)) {
+    throw new UnconfirmedWriteError("The saved courier details could not be confirmed. Refresh Shipments before retrying.");
   }
   const after = normalizeShipmentStatus(saved.status);
 
-  const steps = getShipmentStatusPath(after, before);
-  for (const status of steps) {
-    const { data } = await api.post(`/admin/shipments/${encodeURIComponent(shipmentId)}/update-status`, {
-      status,
-      description: "Tracking details corrected",
-      occurredAt: new Date().toISOString(),
-      metadata: { source },
-    });
-    adminResponse(data);
+  if (["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY"].includes(before) && after === "COURIER_ASSIGNED") {
+    throw new UnconfirmedWriteError("Tracking was saved, but the shipment status regressed. Check the shipment history before making another change.");
   }
-  return steps.length ? before : after;
+  notifyLiveChange("shipments");
+  return after;
 }

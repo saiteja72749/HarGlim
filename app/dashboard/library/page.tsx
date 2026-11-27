@@ -1,6 +1,5 @@
 "use client";
 import type { Book } from "@/types";
-import { scheduleRequest } from "@/lib/schedule-request";
 import { describeApiError } from "@/lib/api-error";
 
 
@@ -23,60 +22,49 @@ import {
 import { ErrorState } from "@/components/ui/error-state";
 import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
-import { extractList } from "@/lib/tracking";
+import { parseReaderCollection } from "@/lib/reader-collections";
 
 type LibraryBook = Partial<Book> & { cover?: string; purchasedAt?: string; orderNumber?: string };
-type LibraryEntry = LibraryBook & { book?: LibraryBook | string; order?: { orderNumber?: string } };
 
 export default function LibraryPage() {
-  const { user } = useAuthStore();
+  const userId = useAuthStore((state) => state.user?._id || state.user?.id);
   const [libraryBooks, setLibraryBooks] = useState<LibraryBook[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [formatFilter, setFormatFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  const fetchLibrary = useCallback(async () => {
-    if (!user?._id && !user?.id) return;
-    const userId = user._id || user.id;
+  const [revision, setRevision] = useState(0);
+  const fetchLibrary = useCallback(async (signal: AbortSignal) => {
+    if (!userId) return;
     setLoading(true);
     setError(false);
     try {
-      const { data } = await api.get(`/users/${userId}/library`, { params: { limit: 100 }, cache: "no-store" });
-      const library = extractList<LibraryEntry>(data, "library");
-      const booksData = library.length ? library : extractList<LibraryEntry>(data, "books");
-      // Entries may be books or { book, purchasedAt, order } rows.
-      setLibraryBooks(
-        booksData
-          .map((entry) =>
-            entry?.book && typeof entry.book === "object"
-              ? { ...entry.book, purchasedAt: entry.purchasedAt || entry.createdAt, orderNumber: entry.order?.orderNumber || entry.orderNumber }
-              : entry
-          )
-          .filter((book) => book && (book._id || book.id || book.title))
-      );
+      const { data } = await api.get(`/users/${userId}/library`, {
+        params: { page, limit: 24, q: searchQuery.trim() || undefined, format: formatFilter === "all" ? "digital" : formatFilter },
+        signal, cache: "no-store",
+      });
+      if (signal?.aborted) return;
+      const result = parseReaderCollection<LibraryBook>(data, "library");
+      setPages(result.pages);
+      if (page > result.pages) setPage(result.pages);
+      else setLibraryBooks(result.books);
     } catch (err) {
+      if (signal?.aborted) return;
       console.error("Failed to fetch library:", describeApiError(err));
       setError(true);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
-  }, [user]);
+  }, [userId, page, searchQuery, formatFilter]);
 
-  useEffect(() => scheduleRequest(fetchLibrary), [fetchLibrary]);
-
-  const filteredBooks = libraryBooks.filter((book) => {
-    const format = String(book.format || "").toLowerCase().replace(/[\s-]/g, "");
-    if (format !== "ebook" && format !== "audiobook") return false;
-    const title = (book.title || "").toLowerCase();
-    const author = ((book.author && typeof book.author === "object") ? book.author?.name : (typeof book.author === "string" ? book.author : ""))?.toLowerCase() || "";
-    const query = searchQuery.trim().toLowerCase();
-
-    const matchesSearch = title.includes(query) || author.includes(query);
-    // Backend formats are lowercase enums (paperback / hardcover / ebook / audiobook).
-    const matchesFormat = formatFilter === "all" || format === formatFilter;
-    return matchesSearch && matchesFormat;
-  });
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => void fetchLibrary(controller.signal), 250);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [fetchLibrary, revision]);
 
   return (
     <div className="space-y-8 max-w-6xl mx-auto">
@@ -97,13 +85,14 @@ export default function LibraryPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#5C6E6E]" />
               <Input
                 aria-label="Search library"
-                placeholder="Search by title or author"
+                placeholder="Search by title"
+                maxLength={100}
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
                 className="pl-9 bg-white border-[#E2E6DF]"
               />
             </div>
-            <Select value={formatFilter} onValueChange={setFormatFilter}>
+            <Select value={formatFilter} onValueChange={(value) => { setFormatFilter(value); setPage(1); }}>
               <SelectTrigger aria-label="Filter library by format" className="w-full sm:w-44 bg-white border-[#E2E6DF]">
                 <Filter className="mr-2 h-4 w-4 text-[#5C6E6E]" />
                 <SelectValue placeholder="Format" />
@@ -123,15 +112,15 @@ export default function LibraryPage() {
         <ErrorState
           title="Unable to load library"
           message="We couldn't fetch your library books right now. Please try again."
-          onRetry={fetchLibrary}
+          onRetry={() => setRevision((value) => value + 1)}
         />
       ) : loading ? (
         <div className="flex justify-center py-20">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#0F3D3E]" />
         </div>
-      ) : filteredBooks.length > 0 ? (
+      ) : libraryBooks.length > 0 ? (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filteredBooks.map((book, index) => (
+          {libraryBooks.map((book, index) => (
             <motion.div
               key={book.id || book._id || index}
               initial={{ opacity: 0, y: 15 }}
@@ -187,6 +176,13 @@ export default function LibraryPage() {
             </Button>
           </CardContent>
         </Card>
+      )}
+      {!loading && !error && pages > 1 && (
+        <nav aria-label="Collection pages" className="flex items-center justify-center gap-3">
+          <Button variant="outline" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</Button>
+          <span className="text-sm text-muted-foreground">Page {page} of {pages}</span>
+          <Button variant="outline" disabled={page >= pages} onClick={() => setPage(page + 1)}>Next</Button>
+        </nav>
       )}
     </div>
   );

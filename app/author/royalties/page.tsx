@@ -40,6 +40,7 @@ function AuthorRoyaltiesContent() {
   const [settlements, setSettlements] = useState<RoyaltySettlement[]>([]);
   // Royalty statements the publisher entered by hand (Admin → Manual Royalties).
   const [manualStatements, setManualStatements] = useState<ManualRoyaltyStatement[]>([]);
+  const [manualFailed, setManualFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   // "/author/royalties#settlements" (sidebar: Royalty Settlements) opens the settlements tab.
   const hash = useHashSection(!loading);
@@ -55,18 +56,20 @@ function AuthorRoyaltiesContent() {
   const closeSettlement = useCallback(() => setOpenSettlementId(null), []);
 
   const fetchRoyalties = useCallback(async () => {
-    if (!user) return;
+    const authorId = user?._id ?? user?.id;
+    if (!authorId) return;
     setLoading(true);
     try {
       const [royaltiesRes, settlementsRes, manualRes, payoutRes] = await Promise.allSettled([
         fetchRoyaltyHistory(),
         fetchAuthorLedgerRows<RoyaltySettlement>("royalty-settlements", "settlements"),
-        listMyManualRoyalties(),
+        listMyManualRoyalties(authorId),
         api.get("/authors/me/dashboard", { cache: "no-store" }),
       ]);
       const dashboard = payoutRes.status === "fulfilled" ? record(payoutRes.value.data?.data ?? payoutRes.value.data) : {};
       setPayoutSummary(record(dashboard.royalties));
-      setManualStatements(manualRes.status === "fulfilled" ? manualRes.value.filter((m) => m.status !== "VOID") : []);
+      setManualFailed(manualRes.status === "rejected");
+      if (manualRes.status === "fulfilled") setManualStatements(manualRes.value);
       setProblem(
         authorPanelProblem([
           { label: "royalty history", result: royaltiesRes },
@@ -94,7 +97,7 @@ function AuthorRoyaltiesContent() {
   }, [user]);
 
   useEffect(() => scheduleRequest(fetchRoyalties), [fetchRoyalties]);
-  useEffect(() => onLiveChange("author-data", fetchRoyalties), [fetchRoyalties]);
+  useEffect(() => onLiveChange("royalty-statements", fetchRoyalties), [fetchRoyalties]);
 
   // The server's total (accruedKnown); never summed in the browser.
   const totalEarnings = summaryData?.totalRoyalty;
@@ -355,7 +358,12 @@ function AuthorRoyaltiesContent() {
               </div>
 
             </div>
-            {manualStatements.length === 0 ? (
+            {manualFailed ? (
+              <div role="alert" className="space-y-2 p-4 text-sm">
+                <p>Publisher statements could not load.</p>
+                <Button variant="outline" onClick={() => void fetchRoyalties()}>Retry</Button>
+              </div>
+            ) : manualStatements.length === 0 ? (
               <div className="py-16 text-center text-[#5C6E6E]">
                 <p className="text-xs">Sales and royalty details the publisher shares about your books (for example book fair or Amazon sales) appear here.</p>
               </div>
@@ -370,6 +378,7 @@ function AuthorRoyaltiesContent() {
                           : "Royalty statement"}
                         {m.createdAt ? ` · recorded ${new Date(m.createdAt).toLocaleDateString("en-IN")}` : ""}
                       </span>
+                      {m.status === "VOID" && <Badge variant="outline">Voided</Badge>}
                       {m.note && <span className="italic">{m.note}</span>}
                     </div>
                     <ManualRoyaltyTable statement={m} />

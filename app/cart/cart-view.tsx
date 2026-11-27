@@ -97,7 +97,7 @@ function CartItemRow({ item }: { item: CartItem }) {
   );
 }
 
-export default function CartPage() {
+export default function CartView() {
   const router = useRouter();
   const hydrated = useHydration();
   const items = useCartStore((state) => state.items);

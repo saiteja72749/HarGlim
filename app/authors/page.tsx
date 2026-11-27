@@ -7,7 +7,7 @@ import { describeApiError } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-import Image from '@/components/ui/backend-image';
+import { AuthorAvatar } from "@/components/authors/author-avatar";
 import { motion } from "framer-motion";
 import {
   BookOpen,
@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -54,7 +53,7 @@ export default function AuthorsPage() {
   }, []);
   useEffect(() => {
     const cancelInitial = scheduleRequest(fetchAuthors);
-    const unsubscribe = onLiveChange('author-data', (reason) => {
+    const unsubscribe = onLiveChange(['author-data', 'books'], (reason) => {
       if (reason === 'change') invalidateApiCache('/authors');
       void fetchAuthors();
     }, 60_000);
@@ -70,17 +69,13 @@ export default function AuthorsPage() {
     })
     .sort((a, b) => {
       if (sortBy === "books") {
-        return (publishedNumber(b.bookCount) ?? -1) - (publishedNumber(a.bookCount) ?? -1) || a.name.localeCompare(b.name);
+        return (publishedNumber(b.bookCount ?? b.booksCount) ?? -1) - (publishedNumber(a.bookCount ?? a.booksCount) ?? -1) || (a.name || "").localeCompare(b.name || "");
       }
       if (sortBy === "name") {
         return (a.name || "").localeCompare(b.name || "");
       }
       return 0;
     });
-
-  const featuredAuthor = authors.length > 0
-    ? [...authors].sort((a, b) => (b.bookCount || 0) - (a.bookCount || 0))[0]
-    : null;
 
   return (
     <div className="bg-[#F8F9F7] min-h-screen text-[#0F3D3E] font-sans">
@@ -106,62 +101,6 @@ export default function AuthorsPage() {
           </p>
         </div>
       </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* 2. FEATURED AUTHOR BANNER (Top Highlight Section) */}
-      {/* ------------------------------------------------------------------ */}
-      {featuredAuthor && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 relative z-20">
-          <div className="bg-white border-2 border-[#D4AF37]/40 rounded-3xl p-6 sm:p-8 shadow-xl grid grid-cols-1 md:grid-cols-12 gap-6 items-center overflow-hidden relative">
-            <div className="absolute top-0 left-0 w-2 h-full bg-[#D4AF37]" />
-
-            {/* Author Avatar / Initials */}
-            <div className="md:col-span-3 flex justify-center">
-              <div className="relative h-28 w-28 sm:h-32 sm:w-32 rounded-full overflow-hidden border-4 border-[#0F3D3E] shadow-md bg-[#0F3D3E] text-[#D4AF37] flex items-center justify-center font-serif font-bold text-4xl">
-                {featuredAuthor.profileImage ? (
-                  <Image
-                    src={featuredAuthor.profileImage}
-                    alt={featuredAuthor.name}
-                    fill
-                    className="object-cover"
-                  />
-                ) : (
-                  <span>{featuredAuthor.name.charAt(0).toUpperCase()}</span>
-                )}
-              </div>
-            </div>
-
-            {/* Bio Content */}
-            <div className="md:col-span-6 space-y-2 text-center md:text-left">
-              <div className="flex items-center justify-center md:justify-start gap-2">
-                <Badge className="bg-[#D4AF37] text-[#0F3D3E] font-serif font-bold text-xs">
-                  ⭐ Top Author Highlight
-                </Badge>
-                <span className="text-xs text-[#5C6E6E]">
-                  {publishedNumber(featuredAuthor.bookCount) === null ? "Book count unavailable" : `${featuredAuthor.bookCount} Published Works`}
-                </span>
-              </div>
-              <h2 className="text-2xl sm:text-3xl font-serif font-bold text-[#0F3D3E]">
-                {featuredAuthor.name}
-              </h2>
-              {featuredAuthor.bio?.trim() && <p className="line-clamp-3 text-sm leading-relaxed text-muted-foreground">{featuredAuthor.bio}</p>}
-            </div>
-
-            {/* Action CTA */}
-            <div className="md:col-span-3 text-center md:text-right">
-              <Button
-                asChild
-                className="bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] border border-[#D4AF37]/50 font-serif font-bold text-sm h-12 px-6 rounded-xl shadow-xs"
-              >
-                <Link href={`/authors/${featuredAuthor._id}`}>
-                  <span>Explore Works</span>
-                  <ArrowRight className="h-4 w-4 ml-2" />
-                </Link>
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ------------------------------------------------------------------ */}
       {/* 3. TOOLBAR: SEARCH & SORTING */}
@@ -227,31 +166,19 @@ export default function AuthorsPage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {filteredAuthors.map((author) => {
-              const count = publishedNumber(author.bookCount);
+              const count = publishedNumber(author.bookCount ?? author.booksCount);
 
               return (
                 <motion.div
-                  key={author._id}
+                  key={author._id || author.id}
                   className="group relative bg-white border border-[#E2E6DF] hover:border-[#D4AF37] rounded-2xl p-6 shadow-xs hover:shadow-xl transition-all duration-300 flex flex-col text-center justify-between cursor-pointer"
                 >
-                  <Link href={`/authors/${author._id}`} className="flex flex-col items-center h-full">
-                    {/* Avatar / Styled Initials Fallback */}
-                    <div className="relative w-24 h-24 mb-4 rounded-full overflow-hidden border-2 border-[#D4AF37]/50 shadow-sm bg-gradient-to-br from-[#0F3D3E] to-[#174C4D] text-[#D4AF37] flex items-center justify-center font-serif font-bold text-3xl group-hover:scale-105 transition-transform">
-                      {author.profileImage ? (
-                        <Image
-                          src={author.profileImage}
-                          alt={author.name}
-                          fill
-                          className="object-cover"
-                        />
-                      ) : (
-                        <span>{author.name.charAt(0).toUpperCase()}</span>
-                      )}
-                    </div>
+                  <Link href={`/authors/${encodeURIComponent(author._id || author.id || "")}`} prefetch={false} className="flex flex-col items-center h-full">
+                    <AuthorAvatar author={author} className="mb-4 size-24 border-2 border-[#D4AF37]/50 text-3xl" sizes="96px" />
 
                     {/* Author Name */}
                     <h3 className="mb-1 font-serif text-lg font-bold [overflow-wrap:anywhere]">
-                      {author.name}
+                      {author.name || "Author"}
                     </h3>
 
                     {/* Published Book Count Pill */}

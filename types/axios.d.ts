@@ -6,5 +6,6 @@ declare module 'axios' {
     cache?: 'no-store';
     publicRead?: boolean;
     _retry?: boolean;
+    startedAt?: number;
   }
 }

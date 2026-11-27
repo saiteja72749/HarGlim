@@ -41,6 +41,7 @@ import toast from "react-hot-toast";
 import { cn, getBookAuthorInfo } from "@/lib/utils";
 import api, { getPublic } from "@/lib/api";
 import { uniqueBooks } from "@/lib/catalog";
+import { AuthorAvatar } from "@/components/authors/author-avatar";
 import { onLiveChange } from "@/lib/live-sync";
 import { publishedNumber } from "@/lib/book-presentation";
 import { BookDescription } from "@/components/books/book-description";
@@ -106,7 +107,7 @@ export function BookDetailView({ initialBook }: { initialBook: Book | null }) {
       void fetchBookData(controller.signal);
     };
     reload();
-    const stop = onLiveChange("books", reload, 60_000);
+    const stop = onLiveChange(["books", "author-data"], reload, 60_000);
     return () => { stop(); controller.abort(); };
   }, [fetchBookData]);
 
@@ -213,7 +214,7 @@ export function BookDetailView({ initialBook }: { initialBook: Book | null }) {
       return;
     }
     addItem(book, Math.min(quantity, availableStock));
-    router.push("/checkout/cart");
+    router.push("/cart");
   };
 
 
@@ -348,7 +349,11 @@ export function BookDetailView({ initialBook }: { initialBook: Book | null }) {
               </h1>
 
               {/* Author */}
-              <div className="mt-2 flex items-center gap-2 text-sm font-sans">
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm font-sans">
+                <AuthorAvatar author={{
+                  ...(typeof book.author === "object" && author.hasProfile ? book.author : {}),
+                  name: author.name === "Author unavailable" ? "" : author.name,
+                }} className="size-8 text-xs" sizes="32px" />
                 <span className="text-[#5C6E6E]">By</span>
                 {author._id && author.hasProfile ? (
                   <Link
@@ -401,7 +406,7 @@ export function BookDetailView({ initialBook }: { initialBook: Book | null }) {
                   <Globe className="h-4 w-4 text-[#0F3D3E] shrink-0" />
                   <div>
                     <span className="text-[#5C6E6E] block text-[10px]">Language</span>
-                    <span className="font-bold text-[#0F3D3E]">{book.language || "Not provided"}</span>
+                    <span className="font-bold text-[#0F3D3E]">{book.language?.trim() || "Not provided"}</span>
                   </div>
                 </div>
                 <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#F8F9F7]">
@@ -624,7 +629,7 @@ export function BookDetailView({ initialBook }: { initialBook: Book | null }) {
                   </div>
                   <div>
                     <dt className="text-xs text-[#5C6E6E] uppercase tracking-wider font-bold">Language</dt>
-                    <dd className="font-semibold text-[#0F3D3E] mt-0.5">{book.language || "Not provided"}</dd>
+                    <dd className="font-semibold text-[#0F3D3E] mt-0.5">{book.language?.trim() || "Not provided"}</dd>
                   </div>
                   <div>
                     <dt className="text-xs text-[#5C6E6E] uppercase tracking-wider font-bold">ISBN</dt>

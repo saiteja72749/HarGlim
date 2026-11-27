@@ -3,15 +3,17 @@
 import { notifyLiveChange } from "@/lib/live-sync";
 import type { Book } from "@/types";
 import { scheduleRequest } from "@/lib/schedule-request";
-import { describeApiError } from "@/lib/api-error";
+import { parseCollectionPage } from "@/lib/catalog-data";
+import { describeApiError, mutationErrorMessage, record, writeOutcomeUncertain } from "@/lib/api-error";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { AlertTriangle, Ban, Loader2, Plus, Save, Trash2 } from "lucide-react";
+import { Ban, Loader2, Plus, Save, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/ui/error-state";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,9 +26,11 @@ import {
   createManualRoyalty,
   emptyRow,
   filledRows,
+  formatManualRoyalty,
   grandTotals,
-  isMissingEndpoint,
   listManualRoyalties,
+  manualRoyaltyAttempt,
+  type ManualRoyaltyAttempt,
   rowError,
   rowTotal,
   voidManualRoyalty,
@@ -44,7 +48,15 @@ const formatDate = (value: string) =>
 
 function ManualRoyaltiesPage() {
   const searchParams = useSearchParams();
-  const [authors, setAuthors] = useState<AuthorOption[]>([]);
+  const [authorSearch, setAuthorSearch] = useState("");
+  const [authorPage, setAuthorPage] = useState(1);
+  const [authorRevision, setAuthorRevision] = useState(0);
+  const [authorResult, setAuthorResult] = useState<{ key: string; authors: AuthorOption[]; pages: number } | { key: string; failed: true }>();
+  const authorKey = JSON.stringify([authorSearch.trim(), authorPage, authorRevision]);
+  const currentAuthors = authorResult?.key === authorKey ? authorResult : undefined;
+  const authors = currentAuthors && "authors" in currentAuthors ? currentAuthors.authors : [];
+  const authorPages = currentAuthors && "pages" in currentAuthors ? currentAuthors.pages : 1;
+  const [pickedAuthor, setPickedAuthor] = useState<AuthorOption>();
   const [authorId, setAuthorId] = useState(searchParams.get("authorId") || "");
   const [bookOptions, setBookOptions] = useState<{ authorId: string; items: BookOption[] }>();
   const books = bookOptions?.authorId === authorId ? bookOptions.items : [];
@@ -52,128 +64,235 @@ function ManualRoyaltiesPage() {
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
   const [note, setNote] = useState("");
+  const [replacementFor, setReplacementFor] = useState<string>();
+  const [attempt, setAttempt] = useState<ManualRoyaltyAttempt>();
+  const unconfirmedCreate = useRef(false);
+  const [retryAt, setRetryAt] = useState<number>();
+  const [statusFilter, setStatusFilter] = useState<"" | "RECORDED" | "VOID">("");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
   const [saving, setSaving] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
 
   const [statements, setStatements] = useState<ManualRoyaltyStatement[]>([]);
   const [loadingStatements, setLoadingStatements] = useState(false);
-  const [backendMissing, setBackendMissing] = useState(false);
+  const [statementError, setStatementError] = useState("");
+  const [statementPage, setStatementPage] = useState(1);
+  const [statementPages, setStatementPages] = useState(1);
+  const [statementRevision, setStatementRevision] = useState(0);
+  const [bookError, setBookError] = useState<string | null>(null);
+  const [writeError, setWriteError] = useState("");
+  const [uncertain, setUncertain] = useState(false);
+  const [voidingId, setVoidingId] = useState<string | null>(null);
+  const busy = useRef(false);
 
   useEffect(() => {
-    api
-      .get("/admin/users", { params: { role: "author", limit: 100 } })
-      .then((res) => {
-        const list = res?.data?.data?.users ?? res?.data?.data ?? [];
-        setAuthors(
-          (Array.isArray(list) ? list : []).map((a: { _id?: string; id?: string; name?: string; fullName?: string; email?: string }) => ({
-            id: String(a._id || a.id),
-            name: a.name || a.email || "Author",
-            email: a.email || "",
-          }))
-        );
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void api.get("/admin/users", {
+        params: { role: "author", page: authorPage, limit: 25, search: authorSearch.trim() || undefined },
+        signal: controller.signal, cache: "no-store",
+      }).then((res) => {
+        if (controller.signal.aborted) return;
+        const { items, pages } = parseCollectionPage<unknown>(res.data, "users");
+        const results = new Map<string, AuthorOption>();
+        for (const item of items) {
+          const author = record(item);
+          const id = author._id || author.id;
+          if (typeof id !== "string" || !/^[0-9a-f]{24}$/i.test(id)) throw new Error("The API returned an invalid author ID.");
+          const email = typeof author.email === "string" ? author.email : "";
+          results.set(id, { id, email, name: typeof author.name === "string" && author.name ? author.name : email || id });
+        }
+        if (pages !== null && authorPage > pages) setAuthorPage(pages);
+        else setAuthorResult({ key: authorKey, authors: [...results.values()], pages: pages ?? 1 });
       })
-      .catch(() => toast.error("Could not load the author list."));
-  }, []);
+      .catch(() => {
+        if (!controller.signal.aborted) setAuthorResult({ key: authorKey, failed: true });
+      });
+    }, 250);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [authorKey, authorPage, authorSearch]);
 
-  // The selected author's books feed each row's book picker (titles can still be typed freely).
+  // Each statement line references a book owned by the selected author.
   useEffect(() => {
     if (!authorId) return;
     const controller = new AbortController();
-    api
-      .get("/admin/books", { params: { author: authorId, limit: 100 }, signal: controller.signal })
-      .then(({ data }) => {
-        const items = data?.data?.books || (Array.isArray(data?.data) ? data.data : []);
+    const loadBooks = async () => {
+      const loadPage = async (page: number) => {
+        const { data } = await api.get("/admin/books", {
+          params: { author: authorId, page, limit: 100 }, signal: controller.signal, cache: "no-store",
+        });
+        return parseCollectionPage<Book>(data, "books");
+      };
+      try {
+        const first = await loadPage(1);
+        const items = [...first.items];
+        for (let page = 2; page <= (first.pages ?? 1); page++) {
+          if (controller.signal.aborted) return;
+          items.push(...(await loadPage(page)).items);
+        }
         if (controller.signal.aborted) return;
-        setBookOptions({ authorId, items: (Array.isArray(items) ? items : [])
-            .filter((b: Book) => bookAuthorId(b) === authorId)
-            .map((b: Book) => ({ id: String(b._id || b.id), title: b.title || "Untitled" })) });
-      })
-      .catch(() => { if (!controller.signal.aborted) setBookOptions({ authorId, items: [] }); });
+        setBookError(null);
+        const owned = items.filter((book) => (book._id || book.id) && typeof book.title === "string" && book.title.trim() && bookAuthorId(book) === authorId);
+        setBookOptions({ authorId, items: Array.from(new Map(owned.map((book) => {
+          const id = String(book._id || book.id);
+          return [id, { id, title: book.title }];
+        })).values()) });
+      } catch {
+        if (!controller.signal.aborted) setBookError(authorId);
+      }
+    };
+    void loadBooks();
     return () => controller.abort();
   }, [authorId]);
 
-  const loadStatements = useCallback(async () => {
-    setLoadingStatements(true);
-    try {
-      setStatements(await listManualRoyalties(authorId || undefined));
-      setBackendMissing(false);
-    } catch (err) {
-      if (isMissingEndpoint(err)) setBackendMissing(true);
-      setStatements([]);
-    } finally {
-      setLoadingStatements(false);
-    }
-  }, [authorId]);
+  const refreshStatements = useCallback(() => setStatementRevision((value) => value + 1), []);
+  useEffect(() => {
+    const controller = new AbortController();
+    const cancel = scheduleRequest(async () => {
+      setLoadingStatements(true);
+      setStatementError("");
+      try {
+        if (filterFrom && filterTo && filterFrom > filterTo) {
+          setStatementError("The start date must be on or before the end date.");
+          return;
+        }
+        const result = await listManualRoyalties({
+          authorId: authorId || undefined, status: statusFilter || undefined,
+          from: filterFrom ? `${filterFrom}T00:00:00.000Z` : undefined,
+          to: filterTo ? `${filterTo}T23:59:59.999Z` : undefined,
+        }, statementPage, controller.signal);
+        if (controller.signal.aborted) return;
+        setStatements(result.statements);
+        setStatementPages(result.pages);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setStatementError(mutationErrorMessage(error, "The statement list could not load. Please retry."));
+      } finally {
+        if (!controller.signal.aborted) setLoadingStatements(false);
+      }
+    });
+    return () => { cancel(); controller.abort(); };
+  }, [authorId, statementPage, statementRevision, statusFilter, filterFrom, filterTo]);
 
-  useEffect(() => scheduleRequest(loadStatements), [loadStatements]);
+  const selectAuthor = (id: string) => {
+    setStatementPage(1);
+    setReplacementFor(undefined);
+    setAuthorId(id);
+    setPickedAuthor(authors.find((author) => author.id === id));
+    setRows((current) => current.map((row) => row.bookId ? { ...row, bookId: "", bookTitle: "" } : row));
+    setStatements([]);
+  };
 
   const updateRow = (key: string, patch: Partial<ManualRoyaltyRow>) =>
     setRows((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)));
 
-  const setBookTitle = (key: string, title: string) => {
-    const match = books.find((b) => b.title.toLowerCase() === title.trim().toLowerCase());
-    updateRow(key, { bookTitle: title, bookId: match?.id || "" });
-  };
-
   const totals = useMemo(() => grandTotals(rows), [rows]);
-  const selectedAuthor = authors.find((a) => a.id === authorId);
+  const selectedAuthor = authors.find((a) => a.id === authorId) || (pickedAuthor?.id === authorId ? pickedAuthor : undefined);
 
   const resetForm = () => {
     setRows([emptyRow()]);
     setNote("");
+    setReplacementFor(undefined);
     setShowErrors(false);
   };
 
+  useEffect(() => {
+    if (!retryAt) return;
+    const timer = window.setTimeout(() => setRetryAt(undefined), Math.max(0, retryAt - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [retryAt]);
+
   const handleSave = async () => {
-    if (!authorId) {
-      toast.error("Select an author first.");
-      return;
-    }
-    const filled = filledRows(rows);
-    if (filled.length === 0) {
-      toast.error("Add at least one book row.");
-      return;
-    }
-    if (filled.some((row) => rowError(row))) {
-      setShowErrors(true);
-      toast.error("Fix the highlighted rows.");
-      return;
-    }
-    if (periodStart && periodEnd && periodStart > periodEnd) {
-      toast.error("Period start must be on or before period end.");
-      return;
+    if (busy.current || uncertain || retryAt) return;
+    let current = attempt;
+    if (!current) {
+      if (!/^[0-9a-f]{24}$/i.test(authorId)) {
+        toast.error("Select an author first.");
+        return;
+      }
+      const filled = filledRows(rows);
+      if (!filled.length || filled.some((row) => rowError(row) || !books.some((book) => book.id === row.bookId))) {
+        setShowErrors(true);
+        toast.error("Choose books from this author's catalog and enter valid rates and quantities.");
+        return;
+      }
+      if (periodStart && periodEnd && periodStart > periodEnd) {
+        toast.error("Period start must be on or before period end.");
+        return;
+      }
+      current = manualRoyaltyAttempt(buildPayload(authorId, rows, { periodStart, periodEnd, note, replacementFor }));
+      setAttempt(current);
     }
 
+    busy.current = true;
     setSaving(true);
+    setWriteError("");
     try {
-      const saved = await createManualRoyalty(buildPayload(authorId, rows, { periodStart, periodEnd, note }));
-      notifyLiveChange("author-data");
-      toast.success(`Royalty of ${formatINR(saved.totalRoyalty)} recorded for ${selectedAuthor?.name || "the author"}.`);
+      const saved = await createManualRoyalty(current);
+      notifyLiveChange("royalty-statements");
+      toast.success(`Royalty of ${formatManualRoyalty(saved.totalRoyalty, saved.currency)} recorded for ${saved.authorName || "the author"}.`);
+      unconfirmedCreate.current = false;
+      setAttempt(undefined);
       resetForm();
-      loadStatements();
-    } catch (caughtError) {
-      const err = describeApiError(caughtError);
-      toast.error(
-        isMissingEndpoint(err)
-          ? "The backend does not support manual royalties yet (POST /admin/manual-royalties)."
-          : err.response?.data.message || err.message
-      );
+      refreshStatements();
+    } catch (error) {
+      const failure = describeApiError(error);
+      const conflict = failure.response?.data.error === "MANUAL_ROYALTY_IDEMPOTENCY_CONFLICT";
+      if (conflict) {
+        setUncertain(true);
+        setWriteError("The backend reported a conflict for this submission. Check recorded statements before opening a new form.");
+      } else if (writeOutcomeUncertain(error) || failure.response?.status === 429 || unconfirmedCreate.current) {
+        unconfirmedCreate.current ||= writeOutcomeUncertain(error);
+        setRetryAt(failure.retryAt);
+        setWriteError(failure.response?.status === 429
+          ? "Please wait before retrying this statement."
+          : "The save outcome is unconfirmed. Retry this exact submission to retrieve or complete it safely.");
+      } else {
+        setAttempt(undefined);
+        setWriteError(mutationErrorMessage(error, "Could not record the royalty statement."));
+      }
+      refreshStatements();
     } finally {
+      busy.current = false;
       setSaving(false);
     }
   };
 
+  const replaceStatement = (statement: ManualRoyaltyStatement) => {
+    selectAuthor(statement.authorId);
+    setReplacementFor(statement.id);
+    setPeriodStart(statement.periodStart.slice(0, 10));
+    setPeriodEnd(statement.periodEnd.slice(0, 10));
+    setNote("");
+    setShowErrors(false);
+    setRows(statement.items.length ? statement.items.map((item) => ({
+      ...emptyRow(), bookId: item.bookId ?? "", bookTitle: item.bookTitle,
+      royaltyPerBook: String(item.royaltyPerBook), unitsSold: String(item.unitsSold),
+    })) : [emptyRow()]);
+  };
+
   const handleVoid = async (statement: ManualRoyaltyStatement) => {
-    const reason = window.prompt("Reason for voiding this royalty statement:", "Entered by mistake");
+    if (busy.current || uncertain || attempt) return;
+    const reason = window.prompt("Reason for voiding this royalty statement:")?.trim();
     if (!reason) return;
+    busy.current = true;
+    setVoidingId(statement.id);
+    setWriteError("");
     try {
       await voidManualRoyalty(statement.id, reason);
-      notifyLiveChange("author-data");
+      notifyLiveChange("royalty-statements");
       toast.success("Statement voided.");
-      loadStatements();
-    } catch (caughtError) {
-      const err = describeApiError(caughtError);
-      toast.error(err.response?.data.message || err.message);
+      refreshStatements();
+    } catch (error) {
+      setWriteError(mutationErrorMessage(error, "Could not void the statement."));
+      if (writeOutcomeUncertain(error)) {
+        setUncertain(true);
+        refreshStatements();
+      }
+    } finally {
+      busy.current = false;
+      setVoidingId(null);
     }
   };
 
@@ -191,29 +310,34 @@ function ManualRoyaltiesPage() {
         </Link>
       </div>
 
-      {backendMissing && (
-        <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-          <span>
-            The backend does not have the manual royalty API yet, so statements cannot be saved or listed. The table
-            below works and will save as soon as the backend adds it.
-          </span>
-        </div>
-      )}
+      {writeError && <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm">
+        <p>{writeError}</p>
+        {uncertain && <p>Review the refreshed statement list before starting another operation.</p>}
+      </div>}
 
       <Card className="border-[#E2E6DF]">
         <CardHeader>
-          <CardTitle className="text-lg text-[#0F3D3E]">New royalty statement</CardTitle>
+          <CardTitle className="text-lg text-[#0F3D3E]">{replacementFor ? "Replacement royalty statement" : "New royalty statement"}</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent>
+          <fieldset disabled={Boolean(attempt) || saving || Boolean(voidingId) || uncertain} className="min-w-0 space-y-5">
+          {replacementFor && <div className="flex flex-wrap items-center gap-2 text-sm">
+            <p>Replacing void statement <span className="font-mono break-all">{replacementFor}</span></p>
+            <Button type="button" variant="outline" size="sm" onClick={resetForm}>Cancel replacement</Button>
+          </div>}
           <div className="grid gap-4 md:grid-cols-3">
             <div className="space-y-2 md:col-span-1">
               <Label className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">Author *</Label>
-              <Select value={authorId} onValueChange={setAuthorId}>
-                <SelectTrigger className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl">
+              <Input aria-label="Search authors" placeholder="Search authors by name or email" maxLength={100}
+                value={authorSearch} onChange={(event) => { setAuthorSearch(event.target.value); setAuthorPage(1); }} />
+              <Select value={authorId} onValueChange={selectAuthor} disabled={saving || Boolean(voidingId) || Boolean(replacementFor) || Boolean(attempt)}>
+                <SelectTrigger aria-label="Statement author" className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl">
                   <SelectValue placeholder="Select an author" />
                 </SelectTrigger>
                 <SelectContent className="bg-white border-[#E2E6DF] max-h-72">
+                  {authorId && !authors.some((author) => author.id === authorId) && (
+                    <SelectItem value={authorId}>{selectedAuthor?.name || authorId}</SelectItem>
+                  )}
                   {authors.map((a) => (
                     <SelectItem key={a.id} value={a.id}>
                       {a.name}
@@ -222,6 +346,17 @@ function ManualRoyaltiesPage() {
                   ))}
                 </SelectContent>
               </Select>
+              {!currentAuthors && <p role="status" className="text-sm text-muted-foreground">Searching authors…</p>}
+              {currentAuthors && "failed" in currentAuthors && <div role="alert" className="space-y-2 text-sm">
+                <p>Could not load authors.</p>
+                <Button type="button" size="sm" variant="outline" onClick={() => setAuthorRevision((value) => value + 1)}>Retry author search</Button>
+              </div>}
+              {currentAuthors && "authors" in currentAuthors && !authors.length && <p role="status" className="text-sm text-muted-foreground">No matching authors.</p>}
+              {authorPages > 1 && <nav aria-label="Author search pages" className="flex items-center justify-between gap-2">
+                <Button type="button" size="sm" variant="outline" disabled={authorPage <= 1} onClick={() => setAuthorPage(authorPage - 1)}>Previous</Button>
+                <span className="text-xs">Page {authorPage} of {authorPages}</span>
+                <Button type="button" size="sm" variant="outline" disabled={authorPage >= authorPages} onClick={() => setAuthorPage(authorPage + 1)}>Next</Button>
+              </nav>}
               {authorId && <p className="text-[10px] font-mono text-[#5C6E6E] break-all">ID: {authorId}</p>}
             </div>
             <div className="space-y-2">
@@ -234,20 +369,15 @@ function ManualRoyaltiesPage() {
             </div>
           </div>
 
-          <datalist id="author-books">
-            {books.map((b) => (
-              <option key={b.id} value={b.title} />
-            ))}
-          </datalist>
-
-          <div className="overflow-x-auto rounded-xl border border-[#E2E6DF]">
+          {authorId && bookError === authorId && <p role="alert" className="text-sm text-destructive">The linked book list could not load.</p>}
+          <div role="region" aria-label="Statement lines" tabIndex={0} className="overflow-x-auto rounded-xl border border-[#E2E6DF]">
             <table className="w-full min-w-[640px] text-left text-sm">
               <thead className="bg-[#F8F9F7] text-[11px] font-bold uppercase tracking-wider text-[#5C6E6E]">
                 <tr>
                   <th className="p-3">Book name</th>
                   <th className="p-3 w-40">Royalty per book (100%)</th>
                   <th className="p-3 w-32">Total books sold</th>
-                  <th className="p-3 w-36 text-right">Total royalty</th>
+                  <th className="p-3 w-36 text-right">Estimated royalty</th>
                   <th className="p-3 w-12" />
                 </tr>
               </thead>
@@ -257,13 +387,14 @@ function ManualRoyaltiesPage() {
                   return (
                     <tr key={row.key} className={error ? "bg-rose-50/60" : undefined}>
                       <td className="p-2">
-                        <Input
-                          list="author-books"
-                          value={row.bookTitle}
-                          onChange={(e) => setBookTitle(row.key, e.target.value)}
-                          placeholder={books.length ? "Pick or type a book" : "Book name"}
-                          className="border-[#E2E6DF] rounded-lg"
-                        />
+                        <select aria-label="Author book" value={row.bookId} onChange={(event) => {
+                          const book = books.find((item) => item.id === event.target.value);
+                          updateRow(row.key, { bookId: book?.id ?? "", bookTitle: book?.title ?? "" });
+                        }} className="h-9 w-full rounded-lg border bg-background px-2">
+                          <option value="">Choose an author book</option>
+                          {row.bookId && !books.some((book) => book.id === row.bookId) && <option value={row.bookId} disabled>{row.bookTitle} (unavailable)</option>}
+                          {books.map((book) => <option key={book.id} value={book.id}>{book.title} ({book.id.slice(-6)})</option>)}
+                        </select>
                         {error && <p className="text-[10px] text-rose-700 mt-1">{error}</p>}
                         {!error && row.bookId && <p className="text-[10px] font-mono text-[#5C6E6E] mt-1">Book ID: {row.bookId}</p>}
                       </td>
@@ -310,10 +441,11 @@ function ManualRoyaltiesPage() {
             <Textarea id="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Book fair sales, Amazon sales for September" className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl" />
           </div>
 
-          <div className="flex justify-end">
-            <Button onClick={handleSave} disabled={saving || !authorId} className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white gap-2">
+          </fieldset>
+          <div className="mt-5 flex justify-end">
+            <Button onClick={handleSave} disabled={saving || Boolean(voidingId) || uncertain || Boolean(retryAt) || !authorId} className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white gap-2">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save royalty of {formatINR(totals.royalty)}
+              {attempt ? "Retry same submission" : "Save statement"}
             </Button>
           </div>
         </CardContent>
@@ -322,12 +454,25 @@ function ManualRoyaltiesPage() {
       <Card className="border-[#E2E6DF]">
         <CardHeader>
           <CardTitle className="text-lg text-[#0F3D3E]">
-            Recorded statements{selectedAuthor ? ` · ${selectedAuthor.name}` : ""}
+            Royalty statements{selectedAuthor ? ` · ${selectedAuthor.name}` : ""}
           </CardTitle>
         </CardHeader>
         <CardContent>
+          <div className="mb-4 grid gap-3 sm:grid-cols-3">
+            <label className="space-y-1 text-sm"><span>Status</span><select className="h-9 w-full rounded-lg border bg-background px-2" value={statusFilter}
+              onChange={(event) => { setStatusFilter(event.target.value as typeof statusFilter); setStatementPage(1); }}>
+              <option value="">All statuses</option><option value="RECORDED">Recorded</option><option value="VOID">Void</option>
+            </select></label>
+            <label className="space-y-1 text-sm"><span>Filter from (UTC)</span><Input type="date" value={filterFrom}
+              onChange={(event) => { setFilterFrom(event.target.value); setStatementPage(1); }} /></label>
+            <label className="space-y-1 text-sm"><span>Filter to (UTC)</span><Input type="date" value={filterTo}
+              onChange={(event) => { setFilterTo(event.target.value); setStatementPage(1); }} /></label>
+          </div>
+          {authorId && <Button type="button" variant="outline" className="mb-3" disabled={saving || Boolean(voidingId) || Boolean(attempt)} onClick={() => selectAuthor("")}>Show all statements</Button>}
           {loadingStatements ? (
             <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-[#5C6E6E]" /></div>
+          ) : statementError ? (
+            <ErrorState title="Statements could not load" message={statementError} onRetry={refreshStatements} />
           ) : statements.length === 0 ? (
             <p className="text-sm text-[#5C6E6E]">No manual royalty statements yet.</p>
           ) : (
@@ -341,14 +486,17 @@ function ManualRoyaltiesPage() {
                         {s.periodStart || s.periodEnd ? `${formatDate(s.periodStart)} – ${formatDate(s.periodEnd)} · ` : ""}
                         Recorded {formatDate(s.createdAt)}
                       </p>
+                      {s.replacementFor && <p className="text-xs break-all">Replaces {s.replacementFor}</p>}
                       {s.note && <p className="text-xs text-[#5C6E6E] mt-1 italic">{s.note}</p>}
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className={s.status === "VOID" ? "text-rose-700 border-rose-200" : "text-emerald-700 border-emerald-200"}>
                         {s.status.toLowerCase()}
                       </Badge>
-                      {s.status !== "VOID" && (
-                        <Button variant="ghost" size="sm" onClick={() => handleVoid(s)} className="h-7 gap-1 text-xs text-rose-700">
+                      {s.status === "VOID" ? (
+                        <Button variant="outline" size="sm" disabled={saving || Boolean(voidingId) || uncertain || Boolean(attempt)} onClick={() => replaceStatement(s)}>Replace void statement</Button>
+                      ) : (
+                        <Button variant="ghost" size="sm" disabled={saving || Boolean(voidingId) || uncertain || Boolean(attempt)} onClick={() => handleVoid(s)} className="h-7 gap-1 text-xs text-rose-700">
                           <Ban className="h-3.5 w-3.5" /> Void
                         </Button>
                       )}
@@ -357,6 +505,11 @@ function ManualRoyaltiesPage() {
                   <ManualRoyaltyTable statement={s} />
                 </div>
               ))}
+              {statementPages > 1 && <nav aria-label="Statement pages" className="flex flex-wrap items-center gap-2">
+                <Button variant="outline" disabled={statementPage <= 1} onClick={() => setStatementPage((page) => page - 1)}>Previous</Button>
+                <span className="text-sm">Page {statementPage} of {statementPages}</span>
+                <Button variant="outline" disabled={statementPage >= statementPages} onClick={() => setStatementPage((page) => page + 1)}>Next</Button>
+              </nav>}
             </div>
           )}
         </CardContent>

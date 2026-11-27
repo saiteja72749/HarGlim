@@ -10,7 +10,7 @@ describe('published book values', () => {
     expect(publishedNumber(0)).toBe(0);
   });
   it('preserves real zero values and stock reservations', () => {
-    const result = bookPresentation({ price: 0, mrp: 100, ratings: 0, rating: 5, reviewCount: 0, stock: 3, reservedStock: 3 });
-    expect(result).toMatchObject({ price: 0, rating: 0, reviewCount: 0, outOfStock: true });
+    const result = bookPresentation({ price: 0, mrp: 100, stock: 3, reservedStock: 3 });
+    expect(result).toMatchObject({ price: 0, outOfStock: true });
   });
 });

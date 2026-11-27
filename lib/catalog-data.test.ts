@@ -24,7 +24,7 @@ describe("deployed catalog contract", () => {
 
   it("handles deployed nested and top-level pagination", () => {
     expect(parseCollectionPage({ data: { books: [{ _id: "a" }], pagination: { totalPages: 2 } } }, "books").pages).toBe(2);
-    expect(parseCollectionPage({ data: [], pagination: { total: 0, pages: 0 } }, "books")).toEqual({ items: [], pages: 1 });
+    expect(parseCollectionPage({ data: [], pagination: { total: 0, pages: 0 } }, "books")).toEqual({ items: [], pages: 1, total: 0 });
   });
 
   it("rejects malformed responses instead of reporting empty results", () => {

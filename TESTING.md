@@ -1,10 +1,16 @@
 # Running the test suite
 
+Use `npm run generate:api-types` to regenerate the separate OpenAPI type file. Use the hand-written models for frontend-specific types and validate generic response envelopes at runtime.
+
+For the handover reports, download the live spec to `test-suite-results/handover-openapi-live.json`, set `HARGLIM_OPENAPI_PATH` and `HARGLIM_INVENTORY_PATH` to that spec and `test-suite-results/handover-inventory.json`, then run `node tools/release-inventory.mjs` and `node tools/handover-report.mjs`. The handover HTML dashboard is separate from the existing generated reports.
+
+The local Chromium tests under `tests-e2e/handover.spec.ts` intercept browser APIs for terms, metrics, readiness and courier capabilities. They abort writes. Use the separate production read evidence and authorized staging workflows to verify actual persistence.
+
 The current [frontend/API report](api-audit/frontend-api-report.html) pairs the contract inventory with validation results. Regenerate with `node tools/release-inventory.mjs` and `node tools/frontend-report.mjs` after checks finish. Contract examples are omitted from that report: JSON schemas describe types and required fields without fabricated business values.
 
-The generators use the checked-in contract by default. For an audit of the deployed contract, download [Swagger JSON](https://harglimpublish-backend.onrender.com/api/docs.json) into `test-suite-results/openapi-live.json` and set `HARGLIM_OPENAPI_PATH` to that file before running both generators.
+The generators use the checked-in contract by default. For an audit of the deployed contract, download [Swagger JSON](https://harglimpublish-backend.onrender.com/api/docs.json) into `test-suite-results/openapi-live.json` and set `HARGLIM_OPENAPI_PATH` to that file before running both generators. Set `HARGLIM_INVENTORY_PATH` to a separate output path when preserving existing inventory changes.
 
-Unit tests run in isolated Node workers. Authentication/cart persistence use Node's native Web Storage API with the test-only flags configured in `vitest.config.mts`; the backing file stays under ignored `test-suite-results/`. One worker and sequential files prevent storage interference. No DOM emulator or mocked storage/network service is used. Node 22.13 supports these flags ([official CLI reference](https://nodejs.org/download/release/v22.13.0/docs/api/cli.html#--experimental-webstorage)). Real Chromium integration tests cover browser authentication, cross-tab logout, cart interactions, debouncing and offline/reconnect recovery.
+Unit tests run in isolated Node workers. Authentication/cart persistence use Node's native Web Storage API with the test-only flags configured in `vitest.config.mts`; the backing file stays under ignored `test-suite-results/`. One worker and sequential files prevent storage interference. Storage tests use native Web Storage. Isolated response-handling tests use a synthetic Axios adapter or mock the client read/write calls. Node 22.13 supports these flags ([official CLI reference](https://nodejs.org/download/release/v22.13.0/docs/api/cli.html#--experimental-webstorage)). Real Chromium integration tests cover browser authentication, cross-tab logout, cart interactions, debouncing and offline/reconnect recovery.
 
 Use Node.js 22.13 or newer (the production build uses Node 22). Install dependencies with `npm ci`, then install the browser once with `npx playwright install chromium`. Reinstall Chromium after a Playwright upgrade. Vitest uses the ESM `vitest.config.mts` configuration.
 
@@ -49,7 +55,7 @@ npm run test:e2e
 | Area | Automated entry point | What to verify |
 | --- | --- | --- |
 | Public pages and storefront | `navigation.spec.ts`, `mobile-design.spec.ts`, `categories-integration.spec.ts`, `backend-integration.spec.ts` | Homepage and publishing call to action, catalog search and pagination, category relationships, book details without public rating or review widgets, authors, packages, Spotlight, CMS copy, login/register, and redirects. |
-| Card movement and transitions | `mobile-design.spec.ts`, `phase-one.spec.ts`, `author-dashboard.spec.ts` | Three full book cards at desktop width, manual arrows with defined endpoints, keyboard navigation, mobile swipe, reduced motion, drawer dismissal, focus restoration, and route transitions. |
+| Card movement and transitions | `mobile-design.spec.ts`, `phase-one.spec.ts`, `author-dashboard.spec.ts` | A full-width shelf with six cards at 1280px, native mobile scrolling, manual arrows with defined endpoints, keyboard navigation, mobile swipe, reduced motion, drawer dismissal, focus restoration, and route transitions. |
 | Request budget | `request-budget.spec.ts` | Single-browser counts, repeat requests, CORS preflights, response status, and latency to response headers for public navigation and multiple tabs. Browser measurements exclude Next.js server-to-backend requests and are not a capacity test. |
 | Reader account | `private-mobile-design.spec.ts`, `phase-one.spec.ts` | Dashboard, personal orders, payments and shipments, wishlist, library, profile, and author application status. Local checkout fixtures cover server totals, address validation, duplicate-click protection, UTR pending and verified states, and order recovery. |
 | Author Studio | `author-dashboard.spec.ts`, `private-mobile-design.spec.ts`, `auth-integration.spec.ts` | Assigned titles, dashboard totals, manuscript screens, analytics range, settings, royalty history, CSV, manual statements, settlements, session refresh and logout. |
@@ -86,7 +92,7 @@ Record each case as **Passed**, **Failed**, or **Blocked**. Mark a case blocked 
 
 ## Coverage and external dependencies
 
-Unit tests cover pure author access and publishing rules, dashboard normalization, royalties, cart state, tracking, content parsing, and other shared helpers. They do not replace HTTP responses. Pure helper tests explicitly use the Node environment; browser-state tests retain jsdom. Test files remain isolated.
+Unit tests cover pure author access and publishing rules, dashboard normalization, royalties, cart state, tracking, content parsing, and other shared helpers. They do not replace HTTP responses. Pure helper tests explicitly use the Node environment; browser-state tests use the configured Node Web Storage. Test files remain isolated.
 
 Author browser tests sign in to the real backend and use its genuine author session. Dashboard totals, catalog records, analytics, royalties, CSV export, statements, settings, and mobile navigation are verified against actual API responses. No request interception, synthetic sessions, invented books, or forced server errors are used. Missing author credentials fail the integration run rather than silently substituting fixtures. The admin check is explicitly skipped when no real admin account is configured.
 

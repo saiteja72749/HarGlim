@@ -3,7 +3,7 @@
 import { onLiveChange } from "@/lib/live-sync";
 import type { AuthorBook } from "@/types/author-api";
 import { scheduleRequest } from "@/lib/schedule-request";
-import { describeApiError, record } from "@/lib/api-error";
+import { describeApiError, record, writeOutcomeUncertain } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
@@ -60,6 +60,11 @@ import toast from "react-hot-toast";
 import { ErrorState } from "@/components/ui/error-state";
 import { getAuthorBookStage, type AuthorBookStage as Stage } from "@/lib/author-book-status";
 import { fetchPublicPackages, type PackageCard } from "@/lib/publish-packages";
+import { BookLanguageField } from "@/components/books/book-language-field";
+import { bookLanguageApiError, bookLanguageError, normalizeBookLanguage } from "@/lib/book-language";
+import { updateAuthorBookLanguage } from "@/lib/author-manuscript";
+import { PublishingTermsField, usePublishingTerms } from "@/components/authors/publishing-terms-field";
+import { termsConflict } from "@/lib/publishing-terms";
 import { submitAuthorManuscript, uploadAuthorManuscript } from "@/lib/author-manuscript";
 import { fetchAuthorBooks } from "@/lib/author-books";
 
@@ -92,6 +97,7 @@ const toItem = (book: AuthorBook) => {
     id: String(m._id || m.id),
     slug: book.slug,
     title: book.title || "Untitled Manuscript",
+    language: book.language ?? "",
     // category can be a populated object; never render it directly.
     category: text(request.genre) || text(m.genre) || text(m.category) || "Category unavailable",
     wordCount: Number(request.wordCount || m.wordCount || 0) || 0,
@@ -406,12 +412,17 @@ function SubmitForReviewDialog({
   onClose: () => void;
   onSubmitted: () => void;
 }) {
+  const terms = usePublishingTerms();
   const [packages, setPackages] = useState<PackageCard[]>([]);
   const [packageId, setPackageId] = useState("");
   const [wordCount, setWordCount] = useState(() => item.wordCount ? String(item.wordCount) : "");
   const [file, setFile] = useState<File | null>(null);
+  const [submissionUnconfirmed, setSubmissionUnconfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const pending = useRef(false);
+  const savedLanguage = useRef(normalizeBookLanguage(item.language));
+  const [language, setLanguage] = useState(item.language);
+  const [languageError, setLanguageError] = useState<string>();
   const [uploadPercent, setUploadPercent] = useState<number | null>(null);
 
   useEffect(() => {
@@ -428,7 +439,7 @@ function SubmitForReviewDialog({
 
   const handleSubmit = async () => {
     if (!item) return;
-    if (pending.current) return;
+    if (pending.current || submissionUnconfirmed || !terms.ready) return;
     const words = wordCount.trim() ? Number(wordCount) : undefined;
     if (words !== undefined && (!Number.isSafeInteger(words) || words < 1)) {
       toast.error("Please enter the word count.");
@@ -443,10 +454,19 @@ function SubmitForReviewDialog({
       return;
     }
 
+    const invalidLanguage = bookLanguageError(language);
+    if (invalidLanguage) { toast.error(invalidLanguage); return; }
+    setLanguageError(undefined);
     pending.current = true;
     setSubmitting(true);
     setUploadPercent(null);
     try {
+      if (!await terms.confirm()) return;
+      const normalized = normalizeBookLanguage(language);
+      if (normalized && normalized !== savedLanguage.current) {
+        await updateAuthorBookLanguage(item.id, normalized);
+        savedLanguage.current = normalized;
+      }
       const fileUrl = file ? await uploadAuthorManuscript(file, setUploadPercent) : item.fileUrl;
       await submitAuthorManuscript(item.id, {
         fileUrl,
@@ -457,6 +477,10 @@ function SubmitForReviewDialog({
       toast.success("Sent for editorial review.");
       onSubmitted();
     } catch (caughtError) {
+      if (termsConflict(caughtError)) { await terms.refresh(); toast.error("Review the current publishing terms before trying again."); return; }
+      const fieldError = bookLanguageApiError(caughtError);
+      if (fieldError) { setLanguageError(fieldError); toast.error(fieldError); return; }
+      if (writeOutcomeUncertain(caughtError)) setSubmissionUnconfirmed(true);
       const err = describeApiError(caughtError);
       toast.error(err?.response?.data?.message || err?.message || "Could not submit for review.");
     } finally {
@@ -532,12 +556,16 @@ function SubmitForReviewDialog({
           </div>
         </div>
 
+        <BookLanguageField value={language} readOnly={submitting} serverError={languageError}
+          onChange={(event) => { setLanguageError(undefined); setLanguage(event.target.value); }} />
+        <PublishingTermsField terms={terms} disabled={submitting} />
         {submitting && uploadPercent !== null && <p role="status" className="text-sm">File upload {uploadPercent}%</p>}
+        {submissionUnconfirmed && <p role="alert">Check the saved manuscript status before resubmitting.</p>}
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={submitting}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={submitting} className="gap-2">
+          <Button onClick={handleSubmit} disabled={submitting || submissionUnconfirmed || !terms.ready} className="gap-2">
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             Submit
           </Button>

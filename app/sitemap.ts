@@ -1,31 +1,33 @@
 import type { MetadataRoute } from 'next';
 import { siteConfig } from '@/config/site';
 import { lastModified } from '@/lib/seo-data';
+import { API_URL } from '@/config/backend.mjs';
+import { parseCollectionPage } from '@/lib/catalog-data';
+import { isRejectedEnvelope, record } from '@/lib/api-error';
 
 type PublicRecord = { slug?: string; _id?: string; updatedAt?: string };
 const publicCollections = ['books', 'authors'] as const;
-const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
 async function publicRecords(collection: typeof publicCollections[number]): Promise<PublicRecord[]> {
-  const base = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
   const records = new Map<string, PublicRecord>();
   try {
     for (let page = 1; page <= 1000; page++) {
-      const response = await fetch(`${base}/${collection}?page=${page}&limit=100`, { next: { revalidate: 3600 }, signal: AbortSignal.timeout(15000) });
+      const response = await fetch(`${API_URL}/${collection}?page=${page}&limit=100`, { next: { revalidate: 3600 }, signal: AbortSignal.timeout(15000) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const payload: unknown = await response.json();
-      const envelope = object(payload), data = object(envelope.data);
-      const items = [data[collection], envelope.data, envelope[collection], payload].find(Array.isArray);
-      if (!Array.isArray(items)) throw new Error('Invalid public list envelope');
+      if (isRejectedEnvelope(payload)) throw new Error('The backend rejected the public list request');
+      const { items, pages } = parseCollectionPage<unknown>(payload, collection);
       const previous = records.size;
       for (const item of items) {
-        const value = object(item);
+        const value = record(item);
         const key = typeof value._id === 'string' ? value._id : typeof value.slug === 'string' ? value.slug : null;
-        if (key) records.set(key, value as PublicRecord);
+        if (key) records.set(key, {
+          _id: typeof value._id === 'string' ? value._id : undefined,
+          slug: typeof value.slug === 'string' ? value.slug : undefined,
+          updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : undefined,
+        });
       }
-      const pagination = object(envelope.pagination ?? data.pagination);
-      const pages = pagination.pages ?? pagination.totalPages;
-      if (typeof pages === 'number' ? page >= pages : items.length < 100) break;
+      if (pages !== null ? page >= pages : items.length < 100) break;
       if (records.size === previous) throw new Error('Public pagination did not advance');
     }
   } catch (error) {

@@ -1,7 +1,9 @@
-import { describeApiError, record } from "@/lib/api-error";
+import { parseCollectionPage } from "@/lib/catalog-data";
+import { publishedNumber } from "@/lib/book-presentation";
+import { record, UnconfirmedWriteError } from "@/lib/api-error";
 import api from "@/lib/api";
 import { fetchAuthorLedgerRows } from "@/lib/author-royalties";
-import { adminResponse, adminRows } from "@/lib/admin-account-api";
+import { adminResponse } from "@/lib/admin-account-api";
 
 /**
  * Manual royalty statements: admin types, per book, the royalty per copy (100% of it goes to
@@ -44,7 +46,14 @@ export type ManualRoyaltyStatement = {
   totalUnits: number;
   totalRoyalty: number;
   createdAt: string;
+  replacementFor?: string;
+  currency: string;
 };
+
+export const formatManualRoyalty = (amount: number, currency: string) =>
+  /^[A-Z]{3}$/.test(currency)
+    ? new Intl.NumberFormat("en-IN", { style: "currency", currency }).format(amount)
+    : amount.toLocaleString("en-IN");
 
 let rowSeq = 0;
 export const emptyRow = (): ManualRoyaltyRow => ({
@@ -74,105 +83,145 @@ export const filledRows = (rows: ManualRoyaltyRow[]) =>
   rows.filter((row) => row.bookTitle.trim() || row.bookId || row.royaltyPerBook || row.unitsSold);
 
 export const rowError = (row: ManualRoyaltyRow): string | null => {
-  if (!row.bookTitle.trim()) return "Pick or type a book";
-  if (amount(row.royaltyPerBook) === 0) return "Royalty per book must be more than 0";
-  if (!Number.isInteger(Number(row.unitsSold)) || Number(row.unitsSold) < 1) return "Books sold must be a whole number of 1 or more";
+  if (!row.bookId || !row.bookTitle.trim()) return "Choose a book from the author's catalog";
+  if (!/^\d+(?:\.\d{1,2})?$/.test(row.royaltyPerBook) || amount(row.royaltyPerBook) === 0) return "Enter a positive amount with up to two decimal places";
+  if (!Number.isSafeInteger(Number(row.unitsSold)) || Number(row.unitsSold) < 1) return "Books sold must be a whole number of 1 or more";
   return null;
+};
+
+type StatementLineInput = { bookId: string; bookTitle: string; royaltyPerBook: number; unitsSold: number };
+export type ManualRoyaltyPayload = {
+  authorId: string; periodStart?: string; periodEnd?: string; note?: string; replacementFor?: string; items: StatementLineInput[];
 };
 
 export const buildPayload = (
   authorId: string,
   rows: ManualRoyaltyRow[],
-  extra: { periodStart?: string; periodEnd?: string; note?: string }
-) => ({
+  extra: { periodStart?: string; periodEnd?: string; note?: string; replacementFor?: string }
+): ManualRoyaltyPayload => ({
   authorId,
+  replacementFor: extra.replacementFor || undefined,
   periodStart: extra.periodStart ? new Date(`${extra.periodStart}T00:00:00.000Z`).toISOString() : undefined,
   periodEnd: extra.periodEnd ? new Date(`${extra.periodEnd}T23:59:59.999Z`).toISOString() : undefined,
   note: extra.note?.trim() || undefined,
   items: filledRows(rows).map((row) => ({
-    bookId: row.bookId || undefined,
+    bookId: row.bookId,
     bookTitle: row.bookTitle.trim(),
     royaltyPerBook: round2(amount(row.royaltyPerBook)),
     unitsSold: Math.floor(amount(row.unitsSold)),
   })),
 });
 
-export function normalizeStatement(input: unknown, authoritative = false): ManualRoyaltyStatement {
+export function manualRoyaltyAttempt(payload: ManualRoyaltyPayload) {
+  return { payload, idempotencyKey: `manual-royalty-${globalThis.crypto.randomUUID()}` };
+}
+
+export type ManualRoyaltyAttempt = ReturnType<typeof manualRoyaltyAttempt>;
+
+export function normalizeStatement(input: unknown): ManualRoyaltyStatement {
   const raw = record(input);
-  if (authoritative && (raw.totalRoyalty == null || raw.totalUnits == null)) throw new Error("The statement omitted its published totals.");
-  const items: ManualRoyaltyItem[] = (Array.isArray(raw?.items) ? raw.items : []).map(record).map((item) => {
+  const id = raw._id ?? raw.id;
+  const author = record(raw.author);
+  const replacement = record(raw.replacementFor);
+  const replacementFor = typeof raw.replacementFor === "string" ? raw.replacementFor : replacement._id ?? replacement.id;
+  const authorId = author._id ?? author.id ?? (typeof raw.author === "string" ? raw.author : raw.authorId);
+  const totalUnits = publishedNumber(raw.totalUnits);
+  const totalRoyalty = publishedNumber(raw.totalRoyalty);
+  if (typeof id !== "string" || !id || typeof authorId !== "string" || !authorId ||
+      typeof raw.status !== "string" || !raw.status || totalUnits === null || !Number.isSafeInteger(totalUnits) ||
+      totalRoyalty === null || !Array.isArray(raw.items)) {
+    throw new Error("The backend returned an incomplete royalty statement.");
+  }
+  const items = raw.items.map((value): ManualRoyaltyItem => {
+    const item = record(value);
     const book = record(item.book);
-    if (authoritative && item.totalRoyalty == null) throw new Error("The statement omitted a line total.");
-    const royaltyPerBook = amount(item?.royaltyPerBook);
-    const unitsSold = Math.floor(amount(item?.unitsSold));
+    const bookId = book._id ?? (typeof item.book === "string" ? item.book : item.bookId);
+    const royaltyPerBook = publishedNumber(item.royaltyPerBook);
+    const unitsSold = publishedNumber(item.unitsSold);
+    const lineTotal = publishedNumber(item.totalRoyalty);
+    if (royaltyPerBook === null || unitsSold === null || !Number.isSafeInteger(unitsSold) || lineTotal === null) {
+      throw new Error("A royalty statement line omitted its financial values.");
+    }
     return {
-      bookId: (typeof item.book === "object" ? book._id : item.book) || item.bookId ? String((typeof item.book === "object" ? book._id : item.book) || item.bookId) : null,
+      bookId: typeof bookId === "string" ? bookId : null,
       bookTitle: String(item.bookTitle || book.title || "Book unavailable"),
-      royaltyPerBook,
-      unitsSold,
-      totalRoyalty: item?.totalRoyalty != null ? amount(item.totalRoyalty) : round2(royaltyPerBook * unitsSold),
+      royaltyPerBook, unitsSold, totalRoyalty: lineTotal,
     };
   });
-  const author = record(raw.author);
   return {
-    id: String(raw?._id || raw?.id || ""),
-    authorId: String(author._id || author.id || (typeof raw.author === "string" ? raw.author : "") || raw.authorId || ""),
+    id, authorId, items, totalUnits, totalRoyalty,
     authorName: String(author.name || raw.authorName || ""),
     periodStart: String(raw.periodStart || ""),
     periodEnd: String(raw.periodEnd || ""),
     note: String(raw.note || ""),
-    status: String(raw?.status || "RECORDED").toUpperCase(),
-    items,
-    totalUnits: raw?.totalUnits != null ? amount(raw.totalUnits) : items.reduce((s, i) => s + i.unitsSold, 0),
-    totalRoyalty: raw?.totalRoyalty != null ? amount(raw.totalRoyalty) : round2(items.reduce((s, i) => s + i.totalRoyalty, 0)),
+    status: raw.status.toUpperCase(),
     createdAt: String(raw.createdAt || ""),
+    replacementFor: typeof replacementFor === "string" ? replacementFor : undefined,
+    currency: typeof raw.currency === "string" ? raw.currency : "INR",
   };
 }
 
-/** 404 = the backend has not shipped these routes yet. */
-export const isMissingEndpoint = (err: unknown) => describeApiError(err).response?.status === 404;
-
-export async function createManualRoyalty(payload: ReturnType<typeof buildPayload>) {
-  const { data } = await api.post("/admin/manual-royalties", payload);
+export async function createManualRoyalty({ payload, idempotencyKey }: ManualRoyaltyAttempt) {
+  const { data } = await api.post("/admin/manual-royalties", payload, { headers: { "Idempotency-Key": idempotencyKey } });
   const result = record(adminResponse(data));
   const created = record(result.statement ?? result);
-  const id = created._id || created.id;
-  if (typeof id !== "string" || !id) throw new Error("The backend didn't return a statement ID. Refresh the statement list before retrying.");
-  const saved = await fetchManualRoyalty(id);
-  if (saved.authorId !== payload.authorId || saved.status === "VOID") {
-    throw new Error("The saved statement could not be confirmed for this author. Refresh the statement list before retrying.");
+  const id = created._id ?? created.id;
+  if (typeof id !== "string" || !id) throw new UnconfirmedWriteError("The API acknowledged creation without returning a statement ID. Check the saved statements.");
+  const saved = await fetchManualRoyalty(id).catch((cause: unknown) => {
+    throw new UnconfirmedWriteError("The statement was acknowledged, but its saved record could not be verified.", { cause });
+  });
+  if (saved.authorId !== payload.authorId || saved.status !== "RECORDED" ||
+      saved.replacementFor !== payload.replacementFor || saved.items.length !== payload.items.length || payload.items.some((item, index) => {
+        const line = saved.items[index];
+        return line.bookId !== item.bookId || line.unitsSold !== item.unitsSold || line.royaltyPerBook !== item.royaltyPerBook;
+      })) {
+    throw new UnconfirmedWriteError("The saved statement did not match the submitted author or line items. Check the saved statements.");
   }
   return saved;
 }
 
-export async function listManualRoyalties(authorId?: string) {
+export type ManualRoyaltyFilters = { authorId?: string; status?: "RECORDED" | "VOID"; from?: string; to?: string };
+
+export async function listManualRoyalties(filters: ManualRoyaltyFilters, page: number, signal: AbortSignal) {
   const { data } = await api.get("/admin/manual-royalties", {
-    params: { limit: 100, ...(authorId ? { authorId } : {}) },
-    cache: "no-store",
+    params: { ...filters, page, limit: 20 },
+    cache: "no-store", signal,
   });
-  return adminRows(data, "statements").map((row) => normalizeStatement(row, true));
+  const result = parseCollectionPage<unknown>(data, "statements");
+  const statements = result.items.map(normalizeStatement);
+  if (statements.some((item) => (filters.authorId && item.authorId !== filters.authorId) ||
+    (filters.status && item.status !== filters.status))) {
+    throw new Error("The backend returned statements outside the requested filters.");
+  }
+  if (new Set(statements.map((item) => item.id)).size !== statements.length || result.pages === null) {
+    throw new Error("The backend returned invalid statement pagination.");
+  }
+  return { statements, pages: result.pages };
 }
 
 export async function voidManualRoyalty(id: string, reason: string) {
-  const { data } = await api.post(`/admin/manual-royalties/${encodeURIComponent(id)}/void`, { reason });
-  adminResponse(data);
+  await api.post(`/admin/manual-royalties/${encodeURIComponent(id)}/void`, { reason });
   const saved = await fetchManualRoyalty(id);
-  if (saved.status !== "VOID") throw new Error("The voided status could not be confirmed. Refresh the statement list before retrying.");
+  if (saved.status !== "VOID") throw new UnconfirmedWriteError("The API acknowledged the request, but the voided status could not be confirmed.");
 }
 
 async function fetchManualRoyalty(id: string) {
   try {
     const { data } = await api.get(`/admin/manual-royalties/${encodeURIComponent(id)}`, { cache: "no-store" });
     const result = record(adminResponse(data));
-    const saved = normalizeStatement(result.statement ?? result, true);
-    if (saved.id === id) return saved;
-  } catch {
-    // The write may already have committed even if the read failed.
+    const saved = normalizeStatement(result.statement ?? result);
+    if (saved.id !== id) throw new Error("Statement ID did not match.");
+    return saved;
+  } catch (cause) {
+    throw new UnconfirmedWriteError("The API acknowledged the request, but the saved statement could not be verified. Check the statement list.", { cause });
   }
-  throw new Error("The saved statement could not be confirmed. Refresh the statement list before retrying.");
 }
 
-export async function listMyManualRoyalties() {
+export async function listMyManualRoyalties(authorId: string) {
   const rows = await fetchAuthorLedgerRows<unknown>("manual-royalties", "statements");
-  return rows.map((row) => normalizeStatement(row, true));
+  const statements = rows.map(normalizeStatement);
+  if (statements.some((item) => item.authorId !== authorId) || new Set(statements.map((item) => item.id)).size !== statements.length) {
+    throw new Error("The backend returned an unexpected author or duplicate statement.");
+  }
+  return statements;
 }

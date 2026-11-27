@@ -83,9 +83,7 @@ function PaidDashboardAccessPurchase() {
       if (resData.purchase) {
         setPurchase(resData.purchase);
       }
-    } catch (caughtError) {
-      const err = describeApiError(caughtError);
-      console.warn("Failed to load dashboard access status:", err);
+    } catch {
       setLoadError(true);
     } finally {
       setLoading(false);

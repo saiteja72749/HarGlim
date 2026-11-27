@@ -36,6 +36,37 @@ test('the public author profile displays the saved name and biography', async ({
   }
 });
 
+test('directory and public author detail display a backend photo after reload', async ({ page }) => {
+  const authors = backendList(await backendGet('/authors?page=1&limit=100'), 'authors');
+  const author = authors.find(record => /^https?:\/\//.test(record.profilePicture || ""));
+  test.skip(!author, 'No real author with an uploaded photo is available.');
+  const path = `/authors/${encodeURIComponent(author._id || author.id)}`;
+  await page.goto('/authors', { waitUntil: 'domcontentloaded' });
+  const card = page.locator(`a[href="${path}"]`);
+  await expect(card.locator('img')).toHaveAttribute('src', /.+/);
+  await page.goto(path, { waitUntil: 'domcontentloaded' });
+  for (let pass = 0; pass < 2; pass++) {
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(author.name);
+    const image = page.locator('main img').first();
+    await expect(image).toBeVisible();
+    await expect.poll(() => image.evaluate((node: HTMLImageElement) => node.complete && node.naturalWidth > 0)).toBe(true);
+    const src = new URL((await image.getAttribute('src'))!, page.url());
+    expect(src.searchParams.get('url') ?? src.href).toBe(new URL(author.profilePicture).href);
+    if (pass === 0) await page.reload({ waitUntil: 'domcontentloaded' });
+  }
+});
+
+test('Saiyara specifications reflect the live language field after reload', async ({ page }) => {
+  const book = backendData(await backendGet('/books/saiyara'));
+  await page.goto('/books/saiyara', { waitUntil: 'domcontentloaded' });
+  for (let pass = 0; pass < 2; pass++) {
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(book.title);
+    const language = page.getByText('Language', { exact: true }).first();
+    await expect(language.locator('..')).toContainText(book.language?.trim() || 'Not provided');
+    if (pass === 0) await page.reload({ waitUntil: 'domcontentloaded' });
+  }
+});
+
 test('the FAQ page shows only the backend-published FAQ list', async ({ page }) => {
   const content = backendData(await backendGet('/content'));
   const faqs = Array.isArray(content.faq) ? content.faq : typeof content.faqsJson === 'string' ? JSON.parse(content.faqsJson) : [];

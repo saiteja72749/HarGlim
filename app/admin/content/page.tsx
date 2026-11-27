@@ -33,6 +33,7 @@ import {
 import toast from "react-hot-toast";
 import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
+import { uploadImage } from "@/lib/image-upload";
 import { fetchOwnProfile, updateOwnProfile } from "@/lib/user-profile";
 
 type SaveStatus = "saved" | "pending" | "saving" | "invalid" | "error";
@@ -189,18 +190,10 @@ export default function AdminContentPage() {
 
     setIsUploadingPhoto(true);
 
+    let photoWriteStarted = false;
     try {
-      // 1. Try uploading to backend image upload endpoint
-      const formDataUpload = new FormData();
-      formDataUpload.append("image", file);
-
-      // A failed upload stops here: a base64 image must never be saved into site content.
-      const res = await api.post("/uploads/image", formDataUpload, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      const uploadedUrl = res?.data?.data?.url || res?.data?.url || "";
-      if (!uploadedUrl) throw new Error("The upload finished but no image URL was returned.");
-
+      const uploadedUrl = await uploadImage(file);
+      photoWriteStarted = true;
       const confirmed = await updateOwnProfile({ profilePicture: uploadedUrl });
       const photo = confirmed.profilePicture ?? '';
       setFormData((prev) => ({ ...prev, adminProfileImage: photo }));
@@ -211,7 +204,9 @@ export default function AdminContentPage() {
     } catch (caughtError) {
       const err = describeApiError(caughtError);
       console.error("Failed to upload profile photo:", describeApiError(err));
-      toast.error(err?.response?.data?.message || err?.message || "Failed to upload photo. Please try again.");
+      toast.error(photoWriteStarted
+        ? "The image uploaded, but the profile save could not be verified."
+        : err.message);
     } finally {
       setIsUploadingPhoto(false);
     }

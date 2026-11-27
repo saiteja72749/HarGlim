@@ -217,8 +217,8 @@ export function GoogleLoginButton({
           width: "100%",
         });
       }
-    } catch (err) {
-      console.warn("GSI initialization info:", describeApiError(err));
+    } catch {
+      console.warn("Google Identity Services initialization failed.");
     }
   }, [isSdkLoaded, clientId]);
 

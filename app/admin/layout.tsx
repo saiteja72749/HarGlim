@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
+  Activity,
   Users,
   ShoppingBag,
   FileText,
@@ -44,6 +45,7 @@ const sidebarSections = [
       { href: "/admin/payments", label: "Payment Operations", icon: CreditCard },
       { href: "/admin/shipments", label: "Shipments & Courier", icon: Truck },
       { href: "/admin/inventory", label: "Inventory & Ledger", icon: PackageCheck },
+      { href: "/admin/system", label: "System Monitoring", icon: Activity },
     ],
   },
   {

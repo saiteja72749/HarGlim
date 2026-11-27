@@ -1,11 +1,12 @@
 "use client";
 
 import { scheduleRequest } from "@/lib/schedule-request";
-import { describeApiError, record } from "@/lib/api-error";
+import { describeApiError, mutationErrorMessage, UnconfirmedWriteError, writeOutcomeUncertain } from "@/lib/api-error";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import api from "@/lib/api";
+import { uploadImage } from "@/lib/image-upload";
 import { ArrowLeft, Save, Upload, User, Plus, Search, Check, Loader2, X, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,9 @@ import { categoryIsActive, resolveCategoryId } from "@/lib/category-data";
 import { useBookCategories } from "@/hooks/use-book-categories";
 import { isValidEmailAddress, normalizeEmailForStorage } from "@/lib/email";
 import { hasCosts, readCosts, royaltyPercentFromCosts } from "@/lib/royalty";
+import { bookLanguageApiError, bookLanguageError, normalizeBookLanguage } from "@/lib/book-language";
+import { BookLanguageField } from "@/components/books/book-language-field";
+import { adminBookRecord, verifyBookWrite } from "@/lib/admin-book-readback";
 import { RoyaltyCostFields } from "@/components/books/royalty-cost-fields";
 
 type AuthorType = "existing" | "new" | "external";
@@ -90,12 +94,6 @@ const normalizeBookStatus = (status: string) => {
   return "draft";
 };
 
-const getCreatedBookFromResponse = (input: unknown) => {
-  const response = record(input);
-  const data = record(response.data);
-  return record(data.book ?? response.book ?? response.data ?? input);
-};
-
 export default function AddBookPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -103,6 +101,9 @@ export default function AddBookPage() {
   const initialAuthor = searchParams.get("author") || "";
 
   const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
+  const [languageError, setLanguageError] = useState<string>();
+  const [unconfirmed, setUnconfirmed] = useState<string | null>(null);
   const [fetchingAuthors, setFetchingAuthors] = useState(false);
   const { categories: categoryOptions, loading: fetchingCategories, error: categoryError, reload: reloadCategories } = useBookCategories();
 
@@ -169,7 +170,7 @@ export default function AddBookPage() {
     status: "published",
     format: "paperback",
     pages: "250",
-    language: "English",
+    language: "",
     isFeatured: false,
     isBestseller: false,
     isNewRelease: false,
@@ -366,7 +367,7 @@ export default function AddBookPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (loading) return;
+    if (submitting.current || unconfirmed) return;
 
     if (!formData.title.trim()) {
       toast.error("Please enter a book title.");
@@ -393,16 +394,15 @@ export default function AddBookPage() {
       return;
     }
 
-    if (!formData.language || !formData.language.trim()) {
-      toast.error("Language is required.");
-      return;
-    }
-
     if (!formData.format) {
-      toast.error("Please select a format (Paperback or Hardcover).");
+      toast.error("Please select a book format.");
       return;
     }
 
+    const invalidLanguage = bookLanguageError(formData.language);
+    if (invalidLanguage) { toast.error(invalidLanguage); return; }
+    setLanguageError(undefined);
+    submitting.current = true;
     setLoading(true);
 
     try {
@@ -520,19 +520,13 @@ export default function AddBookPage() {
       }
 
       // 2. IMAGE UPLOAD HANDLING (IF COVER IMAGE FILE ATTACHED)
-      let coverImageUrl: string | undefined = undefined;
+      let coverImageUrl: string | undefined;
       if (imageFile) {
         try {
-          const uploadFormData = new FormData();
-          uploadFormData.append("image", imageFile);
-
-          const uploadRes = await api.post("/uploads/image", uploadFormData, {
-            headers: { "Content-Type": "multipart/form-data" },
-          });
-
-          coverImageUrl = uploadRes?.data?.data?.url || uploadRes?.data?.url;
-        } catch (uploadErr) {
-          console.warn("Image upload warning:", uploadErr);
+          coverImageUrl = await uploadImage(imageFile);
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "The cover could not upload.");
+          return;
         }
       }
 
@@ -551,7 +545,7 @@ export default function AddBookPage() {
 
       if (!resolvedCategoryObjectId) throw new Error("The selected category is unavailable. Refresh categories and select again.");
 
-      const jsonPayload: Record<string, unknown> = {
+      const jsonPayload: Record<string, unknown> & { title: string; status: string; language?: string } = {
         title: formData.title.trim(),
         authorName: targetAuthorDisplayName || undefined,
         description: formData.description.trim(),
@@ -563,7 +557,7 @@ export default function AddBookPage() {
         status: normalizeBookStatus(formData.status),
         format: formData.format || "paperback",
         pages: formData.pages ? Number(formData.pages) : 250,
-        language: formData.language || "English",
+        language: normalizeBookLanguage(formData.language),
         isFeatured: Boolean(formData.isFeatured),
         isBestseller: Boolean(formData.isBestseller),
         isNewRelease: Boolean(formData.isNewRelease),
@@ -583,29 +577,28 @@ export default function AddBookPage() {
         jsonPayload.coverImage = coverImageUrl;
       }
 
-      // Submit JSON payload to POST /api/admin/books
-      const res = await api.post("/admin/books", jsonPayload);
-      
-      if (res.data?.success || res.status === 201 || res.status === 200) {
-        const createdBook = getCreatedBookFromResponse(res.data);
-        const createdBookId = createdBook?._id || createdBook?.id;
-        const createdStatus = String(createdBook?.status || "").toLowerCase();
-
-        if (jsonPayload.status === "published" && createdBookId && createdStatus !== "published") {
-          await api.put(`/admin/books/${createdBookId}`, { status: "published" });
+      const { data } = await api.post("/admin/books", jsonPayload);
+      const createdBook = adminBookRecord(data);
+      const id = createdBook._id ?? createdBook.id;
+      if (typeof id !== "string" || !id) throw new UnconfirmedWriteError("The API acknowledged the create request without returning a book ID. Check saved books before creating another.");
+      if (jsonPayload.status === "published" && createdBook.status === "draft") {
+        try {
+          await api.put(`/admin/books/${encodeURIComponent(id)}`, { status: "published" });
+        } catch (cause) {
+          throw new UnconfirmedWriteError("The book was created, but publication could not be confirmed. Check its status in Admin.", { cause });
         }
-
-        toast.success("Book created and published successfully to catalog.");
-        router.push("/admin/books");
-      } else {
-        throw new Error(res.data?.message || "Backend catalog creation failed.");
       }
-    } catch (caughtError) {
-      const err = describeApiError(caughtError);
-      console.error("Failed to create book:", describeApiError(err));
-      const errMsg = err?.response?.data?.message || err?.message || "An error occurred while publishing the book to the backend catalog.";
-      toast.error(errMsg);
+      await verifyBookWrite(id, jsonPayload);
+      toast.success(jsonPayload.status === "published" ? "Book created and published." : "Book created.");
+      router.push("/admin/books");
+    } catch (error) {
+      const invalidLanguage = bookLanguageApiError(error);
+      if (invalidLanguage) { setLanguageError(invalidLanguage); toast.error(invalidLanguage); return; }
+      const message = mutationErrorMessage(error, "Could not create the book. Check the form and try again.");
+      if (writeOutcomeUncertain(error)) setUnconfirmed(message);
+      else toast.error(message);
     } finally {
+      submitting.current = false;
       setLoading(false);
     }
   };
@@ -630,6 +623,10 @@ export default function AddBookPage() {
         </div>
       </div>
 
+      {unconfirmed && <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+        <p>{unconfirmed}</p>
+        <Link href="/admin/books" className="mt-2 inline-block font-semibold underline">Check saved books</Link>
+      </div>}
       <form onSubmit={handleSubmit} className="space-y-6">
         
         {/* ------------------------------------------------------------------ */}
@@ -1117,6 +1114,8 @@ export default function AddBookPage() {
                   <SelectContent className="bg-white border-[#E2E6DF]">
                     <SelectItem value="paperback">Paperback</SelectItem>
                     <SelectItem value="hardcover">Hardcover</SelectItem>
+                    <SelectItem value="ebook">E-book</SelectItem>
+                    <SelectItem value="audiobook">Audiobook</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1146,20 +1145,7 @@ export default function AddBookPage() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="language" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                  Language *
-                </Label>
-                <Input
-                  id="language"
-                  name="language"
-                  required
-                  placeholder="e.g. English, Hindi, Telugu"
-                  value={formData.language}
-                  onChange={handleInputChange}
-                  className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-xs font-bold"
-                />
-              </div>
+              <BookLanguageField value={formData.language} serverError={languageError} onChange={(event) => { setLanguageError(undefined); handleInputChange(event); }} />
             </div>
 
             <div className="space-y-4 border border-[#E2E6DF] rounded-2xl p-5 bg-[#F8F9F7]">
@@ -1233,7 +1219,7 @@ export default function AddBookPage() {
             <div className="flex justify-end pt-4">
               <Button
                 type="submit"
-                disabled={loading}
+                disabled={loading || Boolean(unconfirmed)}
                 className="w-full sm:w-auto bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] border border-[#D4AF37]/50 font-serif font-bold h-12 px-8 rounded-xl shadow-xs gap-2 text-xs"
               >
                 {loading ? (

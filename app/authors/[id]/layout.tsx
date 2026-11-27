@@ -1,3 +1,4 @@
+import { authorPhoto } from "@/lib/author-presentation";
 import type { Author } from "@/types";
 import { siteConfig } from "@/config/site";
 import { Metadata } from 'next';
@@ -35,7 +36,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     openGraph: {
       title,
       description: description.substring(0, 160),
-      images: author.profileImage ? [author.profileImage] : [],
+      images: authorPhoto(author) ? [authorPhoto(author)] : [],
       url: `${APP_URL}/authors/${id}`,
     },
   };
@@ -53,7 +54,7 @@ export default async function AuthorLayout({ children, params }: Props) {
     '@context': 'https://schema.org',
     '@type': 'Person',
     name: author.name,
-    image: author.profileImage,
+    image: authorPhoto(author),
     description: author.bio,
     url: `${APP_URL}/authors/${resolvedParams.id}`,
   };

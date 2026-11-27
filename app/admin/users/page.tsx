@@ -253,7 +253,6 @@ export default function AdminUsersPage() {
       setNewPasswordInput("");
     } catch (caughtError) {
       const err = describeApiError(caughtError);
-      console.error("Password reset error:", describeApiError(err));
       toast.error(err.response?.data?.message || err.message);
     } finally {
       pendingAccounts.current.delete(targetUserId);

@@ -51,7 +51,8 @@ export interface AuthorAnalytics extends AuthorMetrics {
   period?: string;
   startDate?: string;
   endDate?: string;
-  summary?: AuthorMetrics;
+  bounds?: { from: string; to: string; timezone: string; inclusion: string };
+  summary?: AuthorMetrics & { orderCount?: number; saleLineCount?: number; currency?: string; dataStatus?: string };
   totals?: AuthorMetrics;
   series?: AnalyticsPoint[];
   daily?: AnalyticsPoint[];

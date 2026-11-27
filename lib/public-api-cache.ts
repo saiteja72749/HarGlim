@@ -7,6 +7,7 @@ const policies: Array<[RegExp, number]> = [
   [/^\/content$/, 60_000],
   [/^\/categories$/, 60_000],
   [/^\/publish-packages$/, 30_000],
+  [/^\/publishing-terms$/, 0],
   [/^\/authors(?:\/[^/]+(?:\/books)?)?$/, 60_000],
   [/^\/books(?:\/[^/]+\/related)?$/, 20_000],
   [/^\/books\/[^/]+$/, 0],

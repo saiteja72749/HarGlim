@@ -2,14 +2,15 @@
 
 import { scheduleRequest } from "@/lib/schedule-request";
 import type { AuthorBook } from "@/types/author-api";
-import { describeApiError } from "@/lib/api-error";
-import { adminResponse } from "@/lib/admin-account-api";
+import { describeApiError, mutationErrorMessage, writeOutcomeUncertain } from "@/lib/api-error";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import api from "@/lib/api";
+import { uploadImage } from "@/lib/image-upload";
 import { getBookAuthorInfo } from "@/lib/utils";
 import { createAuthorUser } from "@/lib/admin-authors";
+import { accountId, adminUserRecord } from "@/lib/admin-account-api";
 import { ArrowLeft, Save, Upload, Plus } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,9 @@ import { categoryIsActive, resolveCategoryId } from "@/lib/category-data";
 import { useBookCategories } from "@/hooks/use-book-categories";
 import { isValidEmailAddress, normalizeEmailForStorage } from "@/lib/email";
 import { hasCosts, readCosts } from "@/lib/royalty";
+import { bookLanguageApiError, bookLanguageError, normalizeBookLanguage } from "@/lib/book-language";
+import { BookLanguageField } from "@/components/books/book-language-field";
+import { adminBookRecord, verifyBookWrite } from "@/lib/admin-book-readback";
 import { RoyaltyCostFields } from "@/components/books/royalty-cost-fields";
 
 type AuthorType = "existing" | "new" | "external";
@@ -54,6 +58,10 @@ export default function EditBookPage() {
   const bookId = (routeParams?.id as string) || "";
 
   const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
+  const [languageError, setLanguageError] = useState<string>();
+  const savedLanguage = useRef("");
+  const [unconfirmed, setUnconfirmed] = useState<string | null>(null);
   const [fetching, setFetching] = useState(true);
   const [fetchingAuthors, setFetchingAuthors] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -77,11 +85,13 @@ export default function EditBookPage() {
     category: "",
     price: "",
     stock: "0",
+    reservedStock: "",
+    discountPrice: "",
     isbn: "",
     status: "published",
     format: "paperback",
     pages: "250",
-    language: "English",
+    language: "",
     coverImage: "",
     isFeatured: false,
     isBestseller: false,
@@ -91,6 +101,8 @@ export default function EditBookPage() {
     platformCharges: "",
     deliveryCharges: "",
   });
+  const savedInventoryFields = useRef({ reservedStock: "", discountPrice: "" });
+  const [savedRoyaltyPerCopy, setSavedRoyaltyPerCopy] = useState<number | null>(null);
 
   const [originalCategoryName, setOriginalCategoryName] = useState("");
 
@@ -176,10 +188,10 @@ export default function EditBookPage() {
       setFetching(true);
       try {
         // GET /admin/books/{id} returns any status (draft, archived, published).
-        const res = await api.get(`/admin/books/${bookId}`, { cache: "no-store" }).catch(() => null);
-        const bookData: AdminBook | null = res?.data?.data?.book || res?.data?.data || null;
+        const { data } = await api.get(`/admin/books/${bookId}`, { cache: "no-store" });
+        const bookData = adminBookRecord(data) as AdminBook;
 
-        if (bookData) {
+        if ((bookData._id ?? bookData.id) === bookId) {
           const authorInfo = getBookAuthorInfo(bookData);
           const resolvedAuthorName = authorInfo.name;
 
@@ -195,7 +207,7 @@ export default function EditBookPage() {
           }
 
           // Determine initial author mode
-          if (!authorInfo.hasProfile || resolvedAuthorName.includes("Biswas") || !extractedAuthorId) {
+          if (!authorInfo.hasProfile || !extractedAuthorId) {
             setAuthorType("external");
             setExternalAuthorName(resolvedAuthorName);
           } else {
@@ -219,18 +231,25 @@ export default function EditBookPage() {
           }
           setOriginalCategoryName(initialCatName);
 
+          savedLanguage.current = bookData.language ?? "";
+          savedInventoryFields.current = {
+            reservedStock: bookData.reservedStock?.toString() ?? "",
+            discountPrice: bookData.discountPrice?.toString() ?? "",
+          };
+          setSavedRoyaltyPerCopy(bookData.royaltyPerCopy ?? null);
           setFormData({
             title: bookData.title || "",
             authorName: resolvedAuthorName,
             description: bookData.description || "",
             category: initialCatId || initialCatName,
-            price: (bookData.mrp || bookData.price)?.toString() || "",
+            price: (bookData.mrp ?? bookData.price)?.toString() ?? "",
             stock: bookData.stock?.toString() || "0",
+            ...savedInventoryFields.current,
             isbn: bookData.isbn || "",
             status: bookData.status === "Active" ? "published" : (bookData.status || "published"),
             format: bookData.format || "paperback",
-            pages: bookData.pages?.toString() || "250",
-            language: bookData.language || "English",
+            pages: bookData.pages?.toString() ?? "",
+            language: bookData.language ?? "",
             coverImage: bookData.coverImage || "",
             isFeatured: Boolean(bookData.isFeatured),
             isBestseller: Boolean(bookData.isBestseller),
@@ -270,7 +289,7 @@ export default function EditBookPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (loading) return;
+    if (submitting.current || unconfirmed) return;
 
     if (!formData.title.trim()) {
       toast.error("Please enter a book title.");
@@ -282,26 +301,26 @@ export default function EditBookPage() {
       return;
     }
 
-    if (!formData.price || Number(formData.price) <= 0) {
+    if (!formData.price || !Number.isFinite(Number(formData.price)) || Number(formData.price) < 0) {
       toast.error("Please enter a valid price.");
       return;
     }
 
-    if (!formData.pages || Number(formData.pages) <= 0) {
-      toast.error("Number of Pages is required.");
-      return;
-    }
-
-    if (!formData.language || !formData.language.trim()) {
-      toast.error("Language is required.");
+    if (formData.pages && (!Number.isSafeInteger(Number(formData.pages)) || Number(formData.pages) <= 0)) {
+      toast.error("Enter a positive whole number of pages.");
       return;
     }
 
     if (!formData.format) {
-      toast.error("Please select a format (Paperback or Hardcover).");
+      toast.error("Please select a book format.");
       return;
     }
 
+    const changedLanguage = formData.language !== savedLanguage.current ? normalizeBookLanguage(formData.language) : undefined;
+    const invalidLanguage = changedLanguage && bookLanguageError(changedLanguage);
+    if (invalidLanguage) { toast.error(invalidLanguage); return; }
+    setLanguageError(undefined);
+    submitting.current = true;
     setLoading(true);
 
     try {
@@ -348,23 +367,8 @@ export default function EditBookPage() {
         }
 
         if (!finalAuthorId) {
-          const emailToUse = normalizedAuthorEmail;
-
-          try {
-            const adminUserRes = await createAuthorUser({
-              name: targetAuthorDisplayName,
-              email: emailToUse,
-            });
-            const uData = adminUserRes?.data?.data?.user || adminUserRes?.data?.user || adminUserRes?.data?.data || adminUserRes?.data;
-            finalAuthorId = uData?._id || uData?.id || null;
-            if (finalAuthorId) {
-              toast.success(`Author account created for "${targetAuthorDisplayName}"`);
-            }
-          } catch (caughtError) {
-            const adminErr = describeApiError(caughtError);
-            console.warn("Admin user creation error:", adminErr?.message);
-            finalAuthorId = selectedAuthorId || null;
-          }
+          const { data } = await createAuthorUser({ name: targetAuthorDisplayName, email: normalizedAuthorEmail });
+          finalAuthorId = accountId(adminUserRecord(data));
         }
       } else {
         // External or Guest author - never call registration to prevent session disruption
@@ -379,25 +383,23 @@ export default function EditBookPage() {
         );
         if (existingByName && /^[0-9a-fA-F]{24}$/.test(existingByName._id)) {
           finalAuthorId = existingByName._id;
-        } else if (selectedAuthorId && /^[0-9a-fA-F]{24}$/.test(selectedAuthorId)) {
+        } else if (selectedAuthorId && selectedAuthorName.trim().toLowerCase() === targetAuthorDisplayName.toLowerCase()) {
           finalAuthorId = selectedAuthorId;
         }
       }
+      if (!finalAuthorId || !/^[0-9a-fA-F]{24}$/i.test(finalAuthorId)) {
+        toast.error("Select or create a matching author account to save the author on this book.");
+        return;
+      }
 
       // 2. COVER IMAGE UPLOAD (IF NEW IMAGE ATTACHED)
-      let coverImageUrl = undefined;
+      let coverImageUrl: string | undefined;
       if (imageFile) {
         try {
-          const uploadFormData = new FormData();
-          uploadFormData.append("image", imageFile);
-
-          const uploadRes = await api.post("/uploads/image", uploadFormData, {
-            headers: { "Content-Type": undefined },
-          });
-
-          coverImageUrl = uploadRes?.data?.data?.url || uploadRes?.data?.url;
-        } catch (uploadErr) {
-          console.warn("Image upload warning:", uploadErr);
+          coverImageUrl = await uploadImage(imageFile);
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "The cover could not upload.");
+          return;
         }
       }
 
@@ -410,24 +412,30 @@ export default function EditBookPage() {
 
       if (!resolvedCategoryObjectId) throw new Error("The selected category is unavailable. Refresh categories and select again.");
 
-      const jsonPayload: Record<string, unknown> = {
+      const jsonPayload = {
         title: formData.title.trim(),
-        authorName: targetAuthorDisplayName || undefined,
         description: formData.description.trim(),
         mrp: numericPrice,
         price: numericPrice,
         stock: Number(formData.stock) || 0,
+        reservedStock: formData.reservedStock && formData.reservedStock !== savedInventoryFields.current.reservedStock
+          ? Number(formData.reservedStock) : undefined,
+        discountPrice: formData.discountPrice && formData.discountPrice !== savedInventoryFields.current.discountPrice
+          ? Number(formData.discountPrice) : undefined,
         isbn: formData.isbn.trim() || undefined,
         status: statusValue,
         format: formData.format || "paperback",
-        pages: formData.pages ? Number(formData.pages) : 250,
-        language: formData.language || "English",
+        pages: formData.pages ? Number(formData.pages) : undefined,
+        language: changedLanguage,
         isFeatured: Boolean(formData.isFeatured),
         isBestseller: Boolean(formData.isBestseller),
         isNewRelease: Boolean(formData.isNewRelease),
         royaltyPercentage: formData.royaltyPercentage
           ? Number(formData.royaltyPercentage)
           : undefined,
+        category: resolvedCategoryObjectId,
+        author: finalAuthorId,
+        coverImage: coverImageUrl || formData.coverImage.trim() || undefined,
       };
 
       // Royalty = MRP − printing − platform − delivery, calculated by the backend (royaltyPerCopy).
@@ -437,28 +445,18 @@ export default function EditBookPage() {
         Object.assign(jsonPayload, costs);
       }
 
-      if (resolvedCategoryObjectId) {
-        jsonPayload.category = resolvedCategoryObjectId;
-      }
-
-      if (finalAuthorId && /^[0-9a-fA-F]{24}$/.test(finalAuthorId)) {
-        jsonPayload.author = finalAuthorId;
-      }
-
-      const manualCoverImageUrl = formData.coverImage.trim();
-      if (coverImageUrl || manualCoverImageUrl) {
-        jsonPayload.coverImage = coverImageUrl || manualCoverImageUrl;
-      }
-
-      const { data } = await api.put(`/admin/books/${bookId}`, jsonPayload);
-      adminResponse(data);
+      await api.put(`/admin/books/${bookId}`, jsonPayload);
+      await verifyBookWrite(bookId, jsonPayload);
       toast.success("Book updated successfully.");
       router.push("/admin/books");
-    } catch (err) {
-      console.error("Failed to update book:", describeApiError(err));
-      const errMsg = describeApiError(err).response?.data.message || (err instanceof Error ? err.message : undefined) || "Failed to update book";
-      toast.error(errMsg);
+    } catch (error) {
+      const invalidLanguage = bookLanguageApiError(error);
+      if (invalidLanguage) { setLanguageError(invalidLanguage); toast.error(invalidLanguage); return; }
+      const message = mutationErrorMessage(error, "Could not update the book. Check the form and try again.");
+      if (writeOutcomeUncertain(error)) setUnconfirmed(message);
+      else toast.error(message);
     } finally {
+      submitting.current = false;
       setLoading(false);
     }
   };
@@ -487,6 +485,10 @@ export default function EditBookPage() {
         </div>
       </div>
 
+      {unconfirmed && <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+        <p>{unconfirmed}</p>
+        <Link href="/admin/books" className="mt-2 inline-block font-semibold underline">Check saved books</Link>
+      </div>}
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* AUTHOR ATTRIBUTION CARD */}
         <Card className="bg-white border border-[#E2E6DF] shadow-xs rounded-2xl overflow-hidden">
@@ -853,6 +855,7 @@ export default function EditBookPage() {
                   name="price"
                   type="number"
                   min="0"
+                  step="0.01"
                   required
                   value={formData.price}
                   onChange={handleInputChange}
@@ -890,33 +893,48 @@ export default function EditBookPage() {
                   <SelectContent className="bg-white border-[#E2E6DF]">
                     <SelectItem value="paperback">Paperback</SelectItem>
                     <SelectItem value="hardcover">Hardcover</SelectItem>
+                    <SelectItem value="ebook">E-book</SelectItem>
+                    <SelectItem value="audiobook">Audiobook</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="discountPrice">Discount price (₹)</Label>
+                <Input id="discountPrice" name="discountPrice" type="number" min="0" step="0.01"
+                  value={formData.discountPrice} onChange={handleInputChange} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reservedStock">Reserved stock</Label>
+                <Input id="reservedStock" name="reservedStock" type="number" min="0" step="1"
+                  value={formData.reservedStock} onChange={handleInputChange} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="royaltyPercentage">Legacy royalty percentage</Label>
+                <Input id="royaltyPercentage" name="royaltyPercentage" type="number" min="0" max="100" step="0.01"
+                  value={formData.royaltyPercentage} onChange={handleInputChange} />
               </div>
             </div>
 
             <RoyaltyCostFields
               mrp={formData.price}
               values={formData}
-              currentPerCopy={
-                formData.royaltyPercentage
-                  ? Math.round(((Number(formData.price) || 0) * Number(formData.royaltyPercentage))) / 100
-                  : null
-              }
+              currentPerCopy={savedRoyaltyPerCopy}
               onChange={(key, value) => setFormData((prev) => ({ ...prev, [key]: value }))}
             />
 
             <div className="grid gap-6 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="pages" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                  Number of Pages *
+                  Number of Pages
                 </Label>
                 <Input
                   id="pages"
                   name="pages"
                   type="number"
                   min="1"
-                  required
                   value={formData.pages}
                   onChange={handleInputChange}
                   placeholder="e.g. 250"
@@ -924,20 +942,7 @@ export default function EditBookPage() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="language" className="text-xs font-bold uppercase tracking-wider text-[#0F3D3E]">
-                  Language *
-                </Label>
-                <Input
-                  id="language"
-                  name="language"
-                  required
-                  value={formData.language}
-                  onChange={handleInputChange}
-                  placeholder="e.g. English, Hindi, Telugu"
-                  className="bg-[#F8F9F7] border-[#E2E6DF] rounded-xl text-sm font-bold"
-                />
-              </div>
+              <BookLanguageField value={formData.language} serverError={languageError} onChange={(event) => { setLanguageError(undefined); handleInputChange(event); }} />
             </div>
 
             <div className="space-y-4 border border-[#E2E6DF] rounded-2xl p-5 bg-[#F8F9F7]">
@@ -1034,7 +1039,7 @@ export default function EditBookPage() {
             <div className="flex justify-end pt-4">
               <Button
                 type="submit"
-                disabled={loading}
+                disabled={loading || Boolean(unconfirmed)}
                 className="w-full sm:w-auto bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] border border-[#D4AF37]/50 font-serif font-bold h-12 px-8 rounded-xl shadow-xs"
               >
                 {loading ? (

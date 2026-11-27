@@ -6,7 +6,7 @@ import { describeApiError } from "@/lib/api-error";
 import { useState, useEffect , useCallback} from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import Image from '@/components/ui/backend-image';
+import { AuthorAvatar } from '@/components/authors/author-avatar';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   BookOpen,
@@ -18,13 +18,11 @@ import {
   Globe,
   Award,
   Share2,
-  Sparkles,
   Search,
   Book as BookIcon,
   ArrowRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { CompactBookCard } from '@/components/books/book-card';
 import { ErrorState } from '@/components/ui/error-state';
@@ -48,10 +46,10 @@ export default function AuthorDetailPage() {
   const params = useParams();
   const [author, setAuthor] = useState<Author | null>(null);
   const [books, setBooks] = useState<Book[]>([]);
+  const [publishedTotal, setPublishedTotal] = useState<number | null>(null);
   const [booksUnavailable, setBooksUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [imgError, setImgError] = useState(false);
   const [activeTab, setActiveTab] = useState<'books' | 'bio'>('books');
   const [bookSearchQuery, setBookSearchQuery] = useState('');
 
@@ -60,22 +58,26 @@ export default function AuthorDetailPage() {
     setError(false);
     try {
       // Public profile (_id, name, profilePicture, bio) and the author's own book list.
-      const [authorRes, booksRes] = await Promise.all([
-        getPublic(`/authors/${encodeURIComponent(String(params.id))}`).catch(() => null),
-        getPublic(`/authors/${encodeURIComponent(String(params.id))}/books`, { params: { limit: 100 } }).catch(() => null),
+      const [authorRes, booksRes] = await Promise.allSettled([
+        getPublic(`/authors/${encodeURIComponent(String(params.id))}`),
+        getPublic(`/authors/${encodeURIComponent(String(params.id))}/books`, { params: { limit: 100 } }),
       ]);
-      const extracted = authorRes?.data?.data || authorRes?.data;
+      if (authorRes.status === "rejected") throw authorRes.reason;
+      const extracted = authorRes.value.data?.data ?? authorRes.value.data;
       const authorData: Author | null =
         extracted && (extracted._id || extracted.id) ? (extracted as Author) : null;
       if (authorData) {
         setAuthor(authorData);
         try {
-          const { items } = parseCollectionPage<Book>(booksRes?.data, 'books');
+          if (booksRes.status === 'rejected') throw booksRes.reason;
+          const { items, total, pages } = parseCollectionPage<Book>(booksRes.value.data, 'books');
+          setPublishedTotal(total ?? (pages === 1 ? items.length : null));
           setBooks(items);
           setBooksUnavailable(false);
         } catch {
           setBooks([]);
           setBooksUnavailable(true);
+          setPublishedTotal(null);
         }
       } else {
         setError(true);
@@ -92,20 +94,22 @@ export default function AuthorDetailPage() {
   }, [params.id]);
 
   useEffect(() => scheduleRequest(fetchAuthorData), [fetchAuthorData]);
-  useEffect(() => onLiveChange('author-data', (reason) => {
+  useEffect(() => onLiveChange(['author-data', 'books'], (reason) => {
     if (reason === 'change') invalidateApiCache('/authors');
     void fetchAuthorData();
   }, 60_000), [fetchAuthorData]);
 
-  const handleShare = () => {
-    if (typeof window !== 'undefined') {
-      navigator.clipboard.writeText(window.location.href);
-      toast.success('Author profile link copied to clipboard!');
+  const handleShare = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      toast.success('Author profile link copied to clipboard.');
+    } catch {
+      toast.error('Could not copy the profile link.');
     }
   };
 
   // Helper calculation for author stats
-  const totalBooksCount = publishedNumber(author?.bookCount ?? author?.booksCount) ?? (booksUnavailable ? 'Unavailable' : books.length);
+  const totalBooksCount = publishedNumber(author?.bookCount ?? author?.booksCount) ?? publishedTotal ?? 'Unavailable';
   const categoriesList = Array.from(
     new Set(
       books
@@ -120,7 +124,6 @@ export default function AuthorDetailPage() {
     (b.title || '').toLowerCase().includes(bookSearchQuery.toLowerCase())
   );
 
-  const avatarSrc = author?.profilePicture ?? author?.profileImage;
   const biography = author?.bio?.trim();
 
   if (loading) {
@@ -185,7 +188,7 @@ export default function AuthorDetailPage() {
               Authors
             </Link>
             <ChevronRight className="h-3.5 w-3.5" />
-            <span className="text-[#D4AF37] font-medium truncate max-w-[200px]">
+            <span className="text-[#D4AF37] font-medium [overflow-wrap:anywhere]">
               {author.name}
             </span>
           </nav>
@@ -194,34 +197,10 @@ export default function AuthorDetailPage() {
         {/* Main Author Header Card */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
           <div className="flex flex-col md:flex-row items-center md:items-start gap-8">
-            {/* Avatar with Monogram Initial Fallback */}
-            <div className="relative flex-shrink-0">
-              <div className="relative w-36 h-36 sm:w-44 sm:h-44 rounded-full overflow-hidden border-4 border-[#D4AF37] shadow-2xl bg-[#0F3D3E] flex items-center justify-center text-[#D4AF37] font-serif font-bold text-5xl sm:text-6xl select-none">
-                {avatarSrc && !imgError ? (
-                  <Image
-                    src={avatarSrc}
-                    alt={author.name}
-                    fill
-                    className="object-cover"
-                    onError={() => setImgError(true)}
-                  />
-                ) : (
-                  <span>{author.name.charAt(0).toUpperCase()}</span>
-                )}
-              </div>
-              <Badge className="absolute -bottom-2 right-2 bg-[#D4AF37] text-[#0F3D3E] font-serif font-bold text-xs px-3 py-1 shadow-md border border-white/20">
-                ⭐ Featured
-              </Badge>
-            </div>
+            <AuthorAvatar author={author} className="size-36 border-4 border-[#D4AF37] text-5xl sm:size-44" sizes="(min-width: 640px) 176px, 144px" />
 
-            {/* Author Primary Info */}
-            <div className="flex-1 text-center md:text-left space-y-4">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#D4AF37]/20 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-serif font-bold">
-                <Sparkles className="h-3.5 w-3.5" />
-                <span>Verified Harglim Author</span>
-              </div>
-
-              <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif font-bold text-white tracking-tight">
+            <div className="min-w-0 flex-1 space-y-4 text-center md:text-left">
+              <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif font-bold text-white tracking-tight [overflow-wrap:anywhere]">
                 {author.name}
               </h1>
 
@@ -305,7 +284,7 @@ export default function AuthorDetailPage() {
                 : 'text-[#5C6E6E] hover:text-[#0F3D3E]'
             }`}
           >
-            <span>Published Books{booksUnavailable ? '' : ` (${books.length})`}</span>
+            <span>Published Books{typeof totalBooksCount === 'number' ? ` (${totalBooksCount})` : ''}</span>
             {activeTab === 'books' && (
               <motion.div
                 layoutId="activeTabUnderline"

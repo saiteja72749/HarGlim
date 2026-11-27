@@ -92,6 +92,7 @@ test.describe('Public navigation', () => {
 test.describe('Cart (client-side only, no checkout submission)', () => {
   test('cart page renders an empty-cart state for a fresh session', async ({ page }) => {
     await page.goto('/checkout/cart', { waitUntil: 'domcontentloaded' });
+    await expect(page).toHaveURL(/\/cart$/);
     await expect(page.getByRole('heading', { name: 'Your cart is empty' })).toBeVisible();
   });
 });

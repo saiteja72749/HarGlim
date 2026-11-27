@@ -1,13 +1,15 @@
 "use client";
 
 import { scheduleRequest } from "@/lib/schedule-request";
-import { describeApiError, record } from "@/lib/api-error";
+import { describeApiError, mutationErrorMessage, record, writeOutcomeUncertain } from "@/lib/api-error";
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useAuthStore } from "@/store/auth-store";
 import api from "@/lib/api";
-import { notifyLiveChange } from "@/lib/live-sync";
+import { AuthorAvatar } from "@/components/authors/author-avatar";
+import { authorPhoto } from "@/lib/author-presentation";
+import { authorPhotoTypes, fetchPublicAuthorProfile, savePublicAuthorProfile, uploadAuthorPhoto, validateAuthorPhoto } from "@/lib/author-profile";
 import toast from "react-hot-toast";
 import {
   User,
@@ -35,6 +37,8 @@ export default function AuthorSettingsPage() {
   const { user, setUser } = useAuthStore();
   const [loading, setLoading] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(true);
+  const [profileSaveError, setProfileSaveError] = useState("");
+  const [profileUncertain, setProfileUncertain] = useState(false);
   const [profileReadError, setProfileReadError] = useState(false);
   const [payoutReadError, setPayoutReadError] = useState(false);
   const [authorReadError, setAuthorReadError] = useState(false);
@@ -109,11 +113,11 @@ export default function AuthorSettingsPage() {
     const [meResult, payoutResult, authorResult] = await Promise.allSettled([
       api.get('/users/me', { cache: 'no-store' }),
       api.get('/authors/me/payment-details', { cache: 'no-store' }),
-      api.get(`/authors/${userId}`, { cache: 'no-store' }),
+      fetchPublicAuthorProfile(userId),
     ]);
     setProfileReadError(meResult.status === 'rejected');
     setPayoutReadError(payoutResult.status === 'rejected');
-    const author = authorResult.status === "fulfilled" ? record(authorResult.value.data?.data ?? authorResult.value.data) : {};
+    const author = authorResult.status === "fulfilled" ? authorResult.value : {};
     const authorMatches = (author._id ?? author.id) === userId;
     setAuthorReadError(!authorMatches);
     setPublicAuthorId(authorMatches ? userId : null);
@@ -132,6 +136,7 @@ export default function AuthorSettingsPage() {
       if (!details || typeof details !== 'object' || Array.isArray(details)) setPayoutReadError(true);
       else applyPayoutDetails(details);
     }
+    setProfileUncertain(false);
     setSettingsLoading(false);
   }, [userId, applyPayoutDetails]);
 
@@ -141,6 +146,14 @@ export default function AuthorSettingsPage() {
   const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      try {
+        validateAuthorPhoto(file);
+        setProfileSaveError("");
+      } catch (error) {
+        setProfileSaveError(error instanceof Error ? error.message : "Choose a valid photo.");
+        e.target.value = "";
+        return;
+      }
       setImageFile(file);
       setImgError(false);
 
@@ -149,13 +162,14 @@ export default function AuthorSettingsPage() {
       reader.onloadend = () => {
         const resultStr = reader.result as string;
         setImagePreview(resultStr);
-        setProfileForm((prev) => ({ ...prev, profileImage: resultStr }));
       };
       reader.readAsDataURL(file);
     }
   };
 
   const handleCancelProfile = () => {
+    if (saving.current) return;
+    setProfileSaveError("");
     setProfileForm(savedProfile);
     setImagePreview(savedProfile.profileImage);
     setImageFile(null);
@@ -165,62 +179,56 @@ export default function AuthorSettingsPage() {
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving.current || profileUncertain || !userId || publicAuthorId !== userId || !profileForm.name.trim()) return;
+    const enteredUrl = profileForm.profileImage.trim();
+    const normalized = authorPhoto({ profilePicture: enteredUrl });
+    if (!imageFile && enteredUrl && !normalized) {
+      setProfileSaveError("Enter a valid HTTP or HTTPS image URL.");
+      return;
+    }
+    saving.current = true;
     setLoading(true);
+    setProfileSaveError("");
+    let profileWriteStarted = false;
     try {
-      const authorId = user?._id || user?.id;
-      let finalImage = profileForm.profileImage || imagePreview;
-
-      // 1. Upload image file if selected
-      if (imageFile) {
-        try {
-          const uploadFormData = new FormData();
-          uploadFormData.append("image", imageFile);
-
-          const uploadRes = await api.post("/authors/me/uploads/image", uploadFormData);
-          const uploadedUrl = uploadRes?.data?.data?.url || uploadRes?.data?.url;
-          if (!uploadedUrl) throw new Error("no url");
-          finalImage = uploadedUrl;
-        } catch (caughtError) {
-          const imgErr = describeApiError(caughtError);
-          // Don't save a base64 preview as the profile photo; tell the author instead.
-          toast.error(imgErr?.response?.data?.message || "Photo upload failed. Other changes were not saved.");
-          return;
-        }
+      const uploaded = imageFile ? await uploadAuthorPhoto(imageFile, "author") : undefined;
+      if (uploaded) {
+        setProfileForm({ ...profileForm, profileImage: uploaded });
+        setImagePreview(uploaded);
+        setImageFile(null);
       }
-
-      // PUT /authors/{id}: name, bio, profilePicture.
-      const payload: Record<string, string> = {
+      profileWriteStarted = true;
+      const stored = await savePublicAuthorProfile(userId, {
         name: profileForm.name.trim(),
-        bio: profileForm.bio,
-      };
-      if (finalImage && /^https?:\/\//.test(finalImage)) {
-        payload.profilePicture = finalImage;
-      }
-
-      await api.put(`/authors/${authorId}`, payload);
-      const [meResult, authorResult] = await Promise.all([
-        api.get('/users/me', { cache: 'no-store' }),
-        api.get(`/authors/${authorId}`, { cache: 'no-store' }),
-      ]);
-      const body = record(meResult.data?.data ?? meResult.data);
-      const me = record(body.user ?? body);
-      if ((me._id || me.id) !== authorId) throw new Error('Profile identity changed. Please sign in again.');
-      const snapshot = authorSnapshot(me, record(authorResult.data?.data ?? authorResult.data));
-      for (const field of ['name', 'bio', 'profilePicture']) {
-        const value = field === 'profilePicture' ? snapshot.profileImage : field === 'bio' ? snapshot.bio : snapshot.name;
-        if (payload[field] !== undefined && payload[field] !== value) throw new Error('The server did not retain the profile changes. Your edits remain here; please retry.');
-      }
-      if (user) setUser({ ...user, name: typeof me.name === 'string' ? me.name : user.name, profileImage: typeof me.profilePicture === 'string' ? me.profilePicture : undefined, profilePicture: typeof me.profilePicture === 'string' ? me.profilePicture : undefined });
-      setProfileForm(snapshot); setSavedProfile(snapshot); setImagePreview(snapshot.profileImage);
-      setImageFile(null);
+        bio: profileForm.bio.trim(),
+        ...(uploaded || enteredUrl !== savedProfile.profileImage.trim() ? { profilePicture: uploaded ?? (normalized || null) } : {}),
+      });
+      const snapshot = authorSnapshot({ email: savedProfile.email }, stored);
+      setProfileForm(snapshot);
+      setSavedProfile(snapshot);
+      setImagePreview(snapshot.profileImage);
+      setImgError(false);
       setIsEditingProfile(false);
+      toast.success("Author profile saved.");
 
-      notifyLiveChange("author-data");
-      toast.success("Author profile updated successfully.");
-    } catch (caughtError) {
-      const err = describeApiError(caughtError);
-      toast.error(err.response?.data?.message || err.message || "Failed to update profile.");
+      try {
+        const { data } = await api.get("/users/me", { cache: "no-store" });
+        const body = record(record(data).data ?? data);
+        const me = record(body.user ?? body);
+        const current = useAuthStore.getState().user;
+        if (!current || (current._id ?? current.id) !== userId || (me._id ?? me.id) !== userId) return;
+        const photo = typeof me.profilePicture === "string" ? me.profilePicture : undefined;
+        setUser({ ...current, name: typeof me.name === "string" ? me.name : current.name, profilePicture: photo, profileImage: photo });
+      } catch {
+        toast.error("The public profile was saved. Reload to refresh your account details.");
+      }
+    } catch (error) {
+      setProfileUncertain(profileWriteStarted && writeOutcomeUncertain(error));
+      setProfileSaveError(profileWriteStarted
+        ? mutationErrorMessage(error, "Could not save the author profile. Check the form and try again.")
+        : error instanceof Error ? error.message : "The photo could not upload.");
     } finally {
+      saving.current = false;
       setLoading(false);
     }
   };
@@ -341,31 +349,8 @@ export default function AuthorSettingsPage() {
               <div className="space-y-6">
                 {/* Author Info Showcase */}
                 <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 p-5 rounded-2xl bg-[#F8F9F7] border border-[#E2E6DF]">
-                  {/* Avatar Circle */}
-                  <div className="relative h-24 w-24 shrink-0 rounded-full overflow-hidden border-2 border-[#D4AF37] shadow-sm bg-white flex items-center justify-center">
-                    {(profileForm.profileImage || imagePreview) && !imgError ? (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img
-                        src={profileForm.profileImage || imagePreview}
-                        alt={profileForm.name || "Author"}
-                        width={96}
-                        height={96}
-                        loading="lazy"
-                        className="h-full w-full object-cover"
-                        onError={() => setImgError(true)}
-                      />
-                    ) : (
-                      <div className="h-full w-full flex items-center justify-center bg-gradient-to-br from-[#0F3D3E]/10 to-[#D4AF37]/15 text-[#0F3D3E]">
-                        {profileForm.name ? (
-                          <span className="text-2xl font-serif font-bold">
-                            {profileForm.name.slice(0, 2).toUpperCase()}
-                          </span>
-                        ) : (
-                          <User className="h-10 w-10 text-[#0F3D3E]/40" />
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  <AuthorAvatar author={{ name: profileForm.name, profilePicture: profileForm.profileImage }}
+                    className="size-24 border-2 border-[#D4AF37] text-2xl" sizes="96px" />
 
                   {/* Text Details */}
                   <div className="space-y-1.5 text-center sm:text-left flex-1">
@@ -443,7 +428,7 @@ export default function AuthorSettingsPage() {
                       Author Profile Image Upload
                     </Label>
                     <p className="text-xs text-[#5C6E6E]">
-                      Upload a portrait (JPG, PNG, WebP) to display on your public author page.
+                      Upload a portrait (JPEG, PNG, WebP or GIF) to display on your public author page.
                     </p>
 
                     <div className="flex flex-wrap items-center gap-3 pt-1 justify-center sm:justify-start">
@@ -452,7 +437,7 @@ export default function AuthorSettingsPage() {
                         <span>{imageFile ? "Change Image" : "Upload New Photo"}</span>
                         <input
                           type="file"
-                          accept="image/*"
+                          accept={authorPhotoTypes}
                           onChange={handleImageFileChange}
                           className="hidden"
                         />
@@ -511,6 +496,7 @@ export default function AuthorSettingsPage() {
                   </Label>
                   <Textarea
                     id="bio"
+                    maxLength={2000}
                     rows={4}
                     placeholder="Share a brief introduction about yourself and your published works..."
                     value={profileForm.bio}
@@ -534,6 +520,7 @@ export default function AuthorSettingsPage() {
                     value={profileForm.profileImage}
                     onChange={(e) => {
                       setProfileForm({ ...profileForm, profileImage: e.target.value });
+                      setImageFile(null);
                       setImagePreview(e.target.value);
                       setImgError(false);
                     }}
@@ -541,11 +528,13 @@ export default function AuthorSettingsPage() {
                   />
                 </div>
 
+                {profileSaveError && <p role="alert" className="text-sm text-destructive">{profileSaveError}</p>}
+                {profileUncertain && <Button type="button" variant="outline" onClick={() => void fetchSettings()}>Reload saved profile</Button>}
                 {/* Save & Cancel Buttons (Only rendered in Edit Mode) */}
                 <div className="flex items-center gap-3 pt-2">
                   <Button
                     type="submit"
-                    disabled={loading}
+                    disabled={loading || settingsLoading || profileUncertain}
                     className="bg-[#0F3D3E] hover:bg-[#174C4D] text-[#D4AF37] border border-[#D4AF37]/50 font-serif font-bold text-xs h-11 px-6 rounded-xl gap-2 shadow-xs"
                   >
                     <Save className="h-4 w-4 text-[#D4AF37]" />
@@ -808,6 +797,8 @@ export default function AuthorSettingsPage() {
                   />
                 </div>
 
+                {profileSaveError && <p role="alert" className="text-sm text-destructive">{profileSaveError}</p>}
+                {profileUncertain && <Button type="button" variant="outline" onClick={() => void fetchSettings()}>Reload saved profile</Button>}
                 {/* Save & Cancel Buttons (Only rendered in Edit Mode) */}
                 <div className="flex items-center gap-3 pt-2">
                   <Button

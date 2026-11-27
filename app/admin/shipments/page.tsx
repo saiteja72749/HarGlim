@@ -3,9 +3,9 @@
 import { adminResponse, adminRows } from "@/lib/admin-account-api";
 import type { ShipmentRecord } from "@/types/commerce-api";
 import { scheduleRequest } from "@/lib/schedule-request";
-import { describeApiError } from "@/lib/api-error";
+import { writeOutcomeUncertain, describeApiError } from "@/lib/api-error";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import api from "@/lib/api";
 import {
@@ -14,7 +14,6 @@ import {
   ExternalLink,
   Loader2,
   X,
-  Layers,
   Package,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -49,23 +48,25 @@ import {
   nextTrackingUrl,
   normalizeShipmentStatus,
 } from "@/lib/tracking";
+import { CourierPicker, useCourierCapabilities } from "@/components/admin/courier-picker";
+import { canEnterTracking } from "@/lib/courier-capabilities";
 import { assignCourier, fetchSavedShipment } from "@/lib/shipment-actions";
 import { getSafeExternalUrl } from "@/lib/utils";
 
 export default function AdminShipmentsPage() {
-  const [activeTab, setActiveTab] = useState<"shipments" | "plans">("shipments");
   const [shipments, setShipments] = useState<ShipmentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Delivery Plans tab state
-
   // Assign Courier Modal State
   const [selectedShipmentForCourier, setSelectedShipmentForCourier] = useState<ShipmentRecord | null>(null);
+  const couriers = useCourierCapabilities(Boolean(selectedShipmentForCourier));
+  const courierPending = useRef(false);
+  const [courierUnconfirmed, setCourierUnconfirmed] = useState(false);
   const [courierForm, setCourierForm] = useState({
-    provider: "manual",
+    provider: "",
     serviceName: "",
     trackingNumber: "",
     trackingUrl: "",
@@ -107,6 +108,7 @@ export default function AdminShipmentsPage() {
 
   // Open Assign Courier
   const openAssignModal = (shipment: ShipmentRecord, defaultCourier?: string) => {
+    setCourierUnconfirmed(false);
     setSelectedShipmentForCourier(shipment);
     const existing = extractTrackingInfo(shipment);
     const existingCourier = defaultCourier || existing.courierName || "";
@@ -114,7 +116,7 @@ export default function AdminShipmentsPage() {
     const existingUrl = existing.trackingUrl || resolveCourierTrackingUrl(existingCourier, existingTracking);
 
     setCourierForm({
-      provider: "manual",
+      provider: shipment.courier?.provider || shipment.provider || "",
       serviceName: existingCourier,
       trackingNumber: existingTracking,
       trackingUrl: existingUrl,
@@ -144,32 +146,25 @@ export default function AdminShipmentsPage() {
   // Submit Assign Courier
   const handleAssignCourierSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedShipmentForCourier) return;
-    
-    // Digital Delivery doesn't require physical AWB tracking number
-    const isDigital = courierForm.serviceName.toLowerCase().includes("digital");
-    if (!isDigital && !courierForm.trackingNumber.trim() && !courierForm.trackingUrl.trim()) {
-      toast.error("Tracking Number / AWB or tracking URL is required.");
+    if (!selectedShipmentForCourier || courierPending.current || courierUnconfirmed || couriers.error ||
+      !couriers.data?.some((item) => item.provider === courierForm.provider && canEnterTracking(item))) return;
+    if (!courierForm.serviceName.trim() || (!courierForm.trackingNumber.trim() && !courierForm.trackingUrl.trim())) {
+      toast.error("Enter the courier service and a tracking number or URL.");
       return;
     }
-
-    const shipmentId = selectedShipmentForCourier._id || selectedShipmentForCourier.id;
     const enteredTrackingUrl = courierForm.trackingUrl.trim();
     if (enteredTrackingUrl && !getSafeExternalUrl(enteredTrackingUrl)) {
       toast.error("Tracking URL must be a valid http or https link.");
       return;
     }
 
+    courierPending.current = true;
     setSubmittingCourier(true);
 
     try {
-      // Tracking numbers must be unique, so digital deliveries get a per-order reference.
-      const orderRef =
-        selectedShipmentForCourier.order?.orderNumber || selectedShipmentForCourier.orderNumber || String(shipmentId).slice(-8);
-      const finalTrackingNumber = courierForm.trackingNumber.trim() || (isDigital ? `DIGITAL-${orderRef}` : "");
+      const finalTrackingNumber = courierForm.trackingNumber.trim();
       const payload = {
-        // Courier adapters are placeholders on the backend: "manual" is required for every courier.
-        provider: "manual",
+        provider: courierForm.provider,
         courierName: courierForm.serviceName,
         serviceName: courierForm.serviceName,
         trackingNumber: finalTrackingNumber,
@@ -178,11 +173,12 @@ export default function AdminShipmentsPage() {
       };
 
       // Admin shipment actions take shipment._id only (never orderNumber / shipmentId UUID / AWB).
-      await assignCourier(selectedShipmentForCourier, payload, "admin-shipments");
-      toast.success(`Assigned ${courierForm.serviceName} (${finalTrackingNumber.toUpperCase()}).`);
+      await assignCourier(selectedShipmentForCourier, payload);
+      toast.success("Courier tracking saved.");
       setSelectedShipmentForCourier(null);
       fetchShipments();
     } catch (caughtError) {
+      if (writeOutcomeUncertain(caughtError)) { setCourierUnconfirmed(true); void fetchShipments(); }
       const err = describeApiError(caughtError);
       const status = err.response?.status;
       toast.error(
@@ -192,6 +188,7 @@ export default function AdminShipmentsPage() {
       );
       if (status === 400 || status === 409) fetchShipments();
     } finally {
+      courierPending.current = false;
       setSubmittingCourier(false);
     }
   };
@@ -258,7 +255,6 @@ export default function AdminShipmentsPage() {
     return <Badge className={`${tone} text-[11px]`}>{getShipmentLabel(s)}</Badge>;
   };
 
-  // Filter Delivery Plans
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -267,53 +263,16 @@ export default function AdminShipmentsPage() {
         <div>
           <h1 className="text-2xl sm:text-3xl font-serif font-bold text-[#0F3D3E] flex items-center gap-3">
             <Truck className="h-7 w-7 text-[#8A6D1E]" />
-            <span>Shipments & Delivery Plans</span>
+            <span>Shipments & Courier</span>
           </h1>
           <p className="text-xs sm:text-sm text-[#5C6E6E] mt-1">
             Dispatch orders and assign courier tracking from actual shipment bookings.
           </p>
         </div>
 
-        {/* View Toggle Tabs */}
-        <div className="flex flex-wrap items-center gap-2 bg-[#F8F9F7] p-1 rounded-xl border border-[#E2E6DF]">
-          <Button
-            size="sm"
-            variant={activeTab === "shipments" ? "default" : "ghost"}
-            onClick={() => setActiveTab("shipments")}
-            className={
-              activeTab === "shipments"
-                ? "bg-[#0F3D3E] text-white hover:bg-[#174C4D] text-xs font-semibold gap-1.5"
-                : "text-[#5C6E6E] hover:text-[#0F3D3E] text-xs gap-1.5"
-            }
-          >
-            <Truck className="h-3.5 w-3.5" />
-            <span>Active Shipments</span>
-            <span className="text-[10px] ml-1 px-1.5 py-0.2 rounded-full bg-white/20">
-              {shipments.length}
-            </span>
-          </Button>
-
-          <Button
-            size="sm"
-            variant={activeTab === "plans" ? "default" : "ghost"}
-            onClick={() => setActiveTab("plans")}
-            className={
-              activeTab === "plans"
-                ? "bg-[#0F3D3E] text-white hover:bg-[#174C4D] text-xs font-semibold gap-1.5"
-                : "text-[#5C6E6E] hover:text-[#0F3D3E] text-xs gap-1.5"
-            }
-          >
-            <Layers className="h-3.5 w-3.5" />
-            <span>Delivery Plans & Categories</span>
-            <span className="text-[10px] ml-1 px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-900">
-              Unavailable
-            </span>
-          </Button>
-        </div>
       </div>
 
-      {activeTab === "shipments" ? (
-        <>
+
           {/* Filter Bar */}
           <Card className="border border-[#E2E6DF] bg-white rounded-2xl shadow-2xs">
             <CardContent className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
@@ -486,11 +445,6 @@ export default function AdminShipmentsPage() {
               </Table>
             </div>
           </Card>
-        </>
-      ) : (
-        <ErrorState title="Courier catalogue unavailable" message="Enter courier details from your shipment booking when assigning a shipment." />
-      )}
-
       {/* Assign Courier / Delivery Plan Modal */}
       {selectedShipmentForCourier && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
@@ -523,6 +477,9 @@ export default function AdminShipmentsPage() {
             </div>
 
             <form onSubmit={handleAssignCourierSubmit} className="p-6 space-y-4 text-xs">
+              {courierUnconfirmed && <p role="alert">Check the saved shipment before retrying this change.</p>}
+              <CourierPicker resource={couriers} value={courierForm.provider} disabled={submittingCourier}
+                select={(courier) => setCourierForm((prev) => ({ ...prev, provider: courier.provider, serviceName: prev.serviceName || (courier.provider === "manual" ? "" : courier.label) }))} />
               <div className="space-y-1.5">
                 <label className="font-bold uppercase tracking-wider text-[#5C6E6E] block">
                   Delivery Plan / Courier Service *
@@ -533,20 +490,12 @@ export default function AdminShipmentsPage() {
               <div className="space-y-1.5">
                 <label className="font-bold uppercase tracking-wider text-[#5C6E6E] flex items-center justify-between">
                   <span>Tracking Number / AWB Consignment Code</span>
-                  {courierForm.serviceName.toLowerCase().includes("digital") && (
-                    <span className="text-[10px] text-teal-700 font-normal">Optional for Digital Delivery</span>
-                  )}
                 </label>
-                <Input
-                  placeholder={
-                    courierForm.serviceName.toLowerCase().includes("digital")
-                      ? "DIGITAL-FULFILLMENT (Optional)"
-                      : "e.g. ED123456789IN or 128940348"
-                  }
+                <Input placeholder="Tracking number"
                   value={courierForm.trackingNumber}
                   onChange={(e) => handleTrackingNumberChange(e.target.value)}
                   className="bg-[#F8F9F7] font-mono text-sm"
-                  required={!courierForm.serviceName.toLowerCase().includes("digital")}
+
                 />
               </div>
 
@@ -588,10 +537,10 @@ export default function AdminShipmentsPage() {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={submittingCourier}
+                  disabled={submittingCourier || courierUnconfirmed || couriers.loading || Boolean(couriers.error) || !couriers.data?.some((item) => item.provider === courierForm.provider && canEnterTracking(item))}
                   className="bg-[#0F3D3E] hover:bg-[#174C4D] text-white font-bold gap-2"
                 >
-                  {submittingCourier ? <Loader2 className="h-4 w-4 animate-spin" /> : <span>Save Plan & Dispatch</span>}
+                  {submittingCourier ? <Loader2 className="h-4 w-4 animate-spin" /> : <span>Save Tracking</span>}
                 </Button>
               </div>
             </form>

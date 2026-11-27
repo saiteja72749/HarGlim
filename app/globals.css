@@ -155,9 +155,9 @@
 @media (hover: hover) and (pointer: fine) {
   .book-card:hover { border-color: var(--primary); box-shadow: 0 5px 16px rgb(15 61 62 / .07); }
 }
-.skip-link { position: fixed; top: .5rem; left: 1rem; z-index: 100; transform: translateY(-200%); background: var(--primary); color: white; padding: .75rem 1rem; border-radius: .5rem; }
-.skip-link:focus { transform: translateY(0); }
-html { scroll-padding-top: calc(var(--site-header-height, 0px) + 1rem); }
+.skip-link { position: fixed; top: .5rem; left: 1rem; z-index: 100; opacity: 0; pointer-events: none; transform: translateY(-200%); background: var(--primary); color: white; padding: .75rem 1rem; border-radius: .5rem; }
+.skip-link:focus-visible { opacity: 1; pointer-events: auto; transform: translateY(0); }
+html { scroll-padding-top: 1rem; }
 [data-slot="sheet-close"] { display: grid; min-width: 44px; min-height: 44px; place-items: center; }
 [data-slot="dialog-content"] { max-height: calc(100dvh - 2rem); overflow-y: auto; overscroll-behavior: contain; }
 [data-slot="table-container"] { min-width: 0; overscroll-behavior-inline: contain; }

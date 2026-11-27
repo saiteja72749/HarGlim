@@ -1,6 +1,6 @@
 
-import { describeApiError } from "@/lib/api-error";
-import axios, { type AxiosRequestConfig } from 'axios';
+import { describeApiError, isRejectedEnvelope, retryAfterTime } from "@/lib/api-error";
+import axios, { AxiosError, type AxiosRequestConfig } from 'axios';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/auth-store';
 import { UserContextData } from '@/types';
@@ -8,14 +8,18 @@ import { isTrustedApiTarget } from '@/lib/api-origin';
 import { record } from '@/lib/api-error';
 import { createPublicApiCache } from '@/lib/public-api-cache';
 import { notifyLiveChange, onLiveChange } from '@/lib/live-sync';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://harglimpublish-backend.onrender.com/api';
+import { API_URL } from '@/config/backend.mjs';
 
 const api = axios.create({
   baseURL: API_URL,
   timeout: 45000,
   validateStatus: (status) => status >= 200 && status < 300,
 });
+const privateCooldowns = new Map<string, number>();
+
+function requestFamily(config: AxiosRequestConfig) {
+  return `${config.method ?? 'get'} ${diagnosticPath(config.url ?? '')}`;
+}
 
 const rawGet = api.get.bind(api);
 const publicCache = createPublicApiCache(rawGet, (url, config) => {
@@ -28,7 +32,7 @@ export const getPublic = publicCache.get;
 export const invalidateApiCache = publicCache.invalidate;
 
 if (typeof window !== 'undefined') {
-  onLiveChange('books', (reason) => {
+  onLiveChange(['books', 'author-data'], (reason) => {
     if (reason === 'change') {
       invalidateApiCache('/books');
       invalidateApiCache('/search');
@@ -42,7 +46,7 @@ api.get = ((url: string, config: AxiosRequestConfig = {}) => {
   const cacheControl = headers instanceof axios.AxiosHeaders
     ? headers.get('Cache-Control')
     : headers?.['Cache-Control'] ?? headers?.['cache-control'];
-  const noStore = config.cache === 'no-store' || cacheControl === 'no-store';
+  const noStore = !config.publicRead || config.cache === 'no-store' || cacheControl === 'no-store';
   return rawGet(url, noStore ? {
     ...config,
     adapter: config.adapter ?? 'fetch',
@@ -70,11 +74,23 @@ api.interceptors.request.use(
   (config) => {
     if ((config.baseURL || API_URL).replace(/\/$/, '') !== API_URL.replace(/\/$/, '')) throw new Error('The request base URL cannot override the configured backend API.');
     if (!isTrustedApiTarget(config.url || '', API_URL)) throw new Error('The request target is outside the configured backend API.');
+    config.startedAt = Date.now();
     if (typeof window !== 'undefined' && !config.publicRead) {
       const state = useAuthStore.getState();
       if (state.token && !config.headers.Authorization) {
         config.headers.Authorization = `Bearer ${state.token}`;
       }
+    }
+    if (!config.publicRead && typeof window !== 'undefined') {
+      const key = requestFamily(config);
+      const until = privateCooldowns.get(key);
+      if (until && until > Date.now()) {
+        const error = new AxiosError('Wait before retrying this request.', 'ERR_RATE_LIMITED', config, undefined, {
+          status: 429, statusText: 'Too Many Requests', headers: {}, data: null, config,
+        });
+        throw Object.assign(error, { retryAt: until });
+      }
+      if (until) privateCooldowns.delete(key);
     }
     // The browser must set the multipart boundary for uploads.
     if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
@@ -86,6 +102,53 @@ api.interceptors.request.use(
     return Promise.reject(error);
   }
 );
+
+const diagnosticSegments = new Set([
+  'api', 'accept', 'admin', 'author', 'authors', 'auth', 'books', 'categories', 'checkout', 'content', 'couriers',
+  'dashboard', 'invoices', 'library', 'login', 'manual-royalties', 'manuscripts', 'me',
+  'operations', 'orders', 'payments', 'profile', 'publish-packages', 'publishing-terms', 'refresh', 'register',
+  'reset-password', 'reviews', 'royalties', 'royalty-settlements', 'runtime-metrics', 'search', 'settings',
+  'shipments', 'spotlights', 'uploads', 'users', 'wishlist',
+]);
+
+function diagnosticPath(url: string) {
+  const path = url.replace(/^https?:\/\/[^/]+/i, "").split(/[?#]/)[0];
+  return path.split("/").map((segment) => !segment || diagnosticSegments.has(segment) ? segment : ":value").join("/");
+}
+
+api.interceptors.response.use(
+  (response) => {
+    if (!isRejectedEnvelope(response.data)) return response;
+    throw new AxiosError('The backend rejected the operation.', 'ERR_API_REJECTED', response.config, undefined, response);
+  },
+);
+
+api.interceptors.response.use(undefined, (error: unknown) => {
+  if (typeof window !== 'undefined' && axios.isAxiosError(error) && !axios.isCancel(error)) {
+    if (error.response?.status === 429 && error.config && typeof record(error).retryAt !== 'number') {
+      const until = retryAfterTime(error.response.headers['retry-after']);
+      Object.assign(error, { retryAt: until });
+      if (!error.config.publicRead) {
+        const key = requestFamily(error.config);
+        privateCooldowns.set(key, until);
+        if (privateCooldowns.size > 64) privateCooldowns.delete(privateCooldowns.keys().next().value!);
+      }
+    }
+    const failure = describeApiError(error);
+    const status = failure.response?.status;
+    console.warn('[api] Request failed', {
+      method: error.config?.method?.toUpperCase(),
+      endpoint: diagnosticPath(error.config?.url || ''),
+      route: diagnosticPath(window.location.pathname),
+      status,
+      requestId: failure.response?.headers['x-request-id'],
+      durationMs: error.config?.startedAt === undefined ? undefined : Date.now() - error.config.startedAt,
+      category: error.code ?? (status ? 'http' : 'network'),
+      timestamp: new Date().toISOString(),
+    });
+  }
+  return Promise.reject(error);
+});
 
 // Response interceptor to handle 401 token refresh
 api.interceptors.response.use(
@@ -99,6 +162,9 @@ api.interceptors.response.use(
       if (resource === 'books' && /^\/(?:admin\/)?books(?:\/[^/?]+)?(?:\?|$)/.test(url)) {
         invalidateApiCache('/search');
         notifyLiveChange('books');
+      }
+      if (/^\/(?:admin\/operations\/payments\/[^/?]+\/|orders(?:\/[^/?]+(?:\/verify-payment)?)?(?:\?|$))/.test(url)) {
+        notifyLiveChange('reader-payments', false);
       }
     }
 
@@ -152,7 +218,7 @@ api.interceptors.response.use(
           throw new Error('Session changed during token refresh');
         }
 
-        if (newAccessToken && user) {
+        if (!isRejectedEnvelope(data) && typeof newAccessToken === 'string' && newAccessToken && user) {
           login(user, newAccessToken, newRefreshToken, expiresAt);
           originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
           processQueue(null, newAccessToken);
@@ -173,7 +239,6 @@ api.interceptors.response.use(
     }
 
     const status = error.response?.status;
-    const method = originalRequest?.method?.toUpperCase?.() || 'REQUEST';
     const url = originalRequest?.url || 'unknown URL';
     if (status === 401 && originalRequest?._retry) {
       const current = useAuthStore.getState();
@@ -182,37 +247,17 @@ api.interceptors.response.use(
       }
     }
 
-    if (typeof window !== 'undefined') {
-      if (error.name === 'CanceledError' || error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
-        console.info(`[api] AbortError: frontend cancelled ${method} ${url}`);
-      } else if (status === 401) {
-        console.warn(`[api] 401 expired/missing token for ${method} ${url}`);
-      } else if (status === 403) {
+    if (typeof window !== 'undefined' && !originalRequest?.publicRead) {
+      if (status === 403) {
         const errorCode = error.response?.data?.error;
-        console.warn(`[api] 403 ${errorCode || 'insufficient permission'} for ${method} ${url}`);
-        if (errorCode === 'AUTHOR_DASHBOARD_ACCESS_REQUIRED') {
-          // Should not happen for an approved author while paid access is disabled:
-          // the cached context is stale, so refresh it instead of showing a paywall.
-          if (!url.includes('/users/me/context')) bootstrapUserContext();
-        } else if (errorCode === 'AUTHOR_ROLE_REQUIRED') {
+        if (errorCode === 'AUTHOR_DASHBOARD_ACCESS_REQUIRED' || errorCode === 'AUTHOR_ROLE_REQUIRED') {
           if (!url.includes('/users/me/context')) void bootstrapUserContext();
-          toast.error('This area is for approved authors only.', { id: 'author-role-required' });
-        } else {
-          toast.error(
-            url.startsWith('/admin') ? 'Admin access required.' : 'You do not have permission to do that.',
-            { id: 'permission-denied' }
-          );
+          if (errorCode === 'AUTHOR_ROLE_REQUIRED') {
+            toast.error('This area is for approved authors only.', { id: 'author-role-required' });
+          }
         }
-      } else if (status === 409 && error.response?.data?.error === 'AUTHOR_DASHBOARD_PAID_ACCESS_DISABLED') {
-        // Expected configuration response, not a failure: the dashboard is free.
-        console.info(`[api] 409 paid author dashboard access disabled for ${method} ${url}`);
       } else if (status === 429) {
-        console.warn('[api] Rate-limited request', { method, requestId: describeApiError(error).response?.headers['x-request-id'] });
-        if (!originalRequest?.publicRead) {
-          toast.error('Too many requests. Please wait before trying again.', { id: 'rate-limit-toast' });
-        }
-      } else if (status >= 500) {
-        console.error(`[api] ${status} backend/server failure for ${method} ${url}`);
+        toast.error('Too many requests. Please wait before trying again.', { id: 'rate-limit-toast' });
       }
     }
 
@@ -269,7 +314,6 @@ export async function bootstrapUserContext(overrideToken?: string): Promise<User
           toast.error('Your account is inactive. Contact support for assistance.', { id: 'inactive-account' });
           return null;
         }
-        console.error('Failed to fetch user context:', failure);
         setContextStatus('error');
       }
       return null;
